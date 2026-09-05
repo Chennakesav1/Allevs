@@ -1,0 +1,327 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Inter, system-ui, sans-serif; background: #f5f6fa; color: #1a1f2e; }
+button, input { font: inherit; }
+
+/* ══════════════════════════════════════
+   LOGIN PAGE
+══════════════════════════════════════ */
+.login-wrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f5f6fa;
+}
+.login-box {
+  width: min(440px, 92vw);
+  background: #ffffff;
+  border: 1px solid #e4e7ef;
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 4px 24px rgba(0,0,0,.08);
+}
+.login-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+.logo-icon {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  background: #1d4ed8;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.logo-icon.sm { width: 30px; height: 30px; border-radius: 8px; }
+.logo-text { font-weight: 800; font-size: 15px; letter-spacing: .08em; color: #1a1f2e; }
+.login-sub  { font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #6b7280; margin-bottom: 6px; }
+.login-title { font-size: 26px; font-weight: 800; color: #1a1f2e; margin-bottom: 24px; }
+.login-form { display: grid; gap: 0; }
+.login-form label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+}
+.login-form input {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  background: #f9fafb;
+  border: 1.5px solid #e4e7ef;
+  color: #1a1f2e;
+  border-radius: 10px;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color .15s;
+}
+.login-form input:focus { border-color: #1d4ed8; background: #fff; }
+.login-form button {
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  padding: 13px;
+  background: #1d4ed8;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .15s;
+  margin-top: 4px;
+}
+.login-form button:hover:not(:disabled) { background: #1e40af; }
+.login-form button:disabled { opacity: .6; cursor: not-allowed; }
+.login-hint { font-size: 12px; color: #9ca3af; margin-top: 16px; text-align: center; }
+
+/* ══════════════════════════════════════
+   APP SHELL
+══════════════════════════════════════ */
+.shell {
+  display: grid;
+  grid-template-columns: 230px 1fr;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ── */
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid #e4e7ef;
+  padding: 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 8px;
+}
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+/* ── Nav buttons — the key fix ── */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: #6b7280;
+  font-size: 13.5px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background .12s, color .12s;
+  user-select: none;
+}
+.nav-item:hover { background: #f3f4f6; color: #1a1f2e; }
+.nav-item.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+.nav-item.active svg { color: #1d4ed8; }
+
+.logout-btn {
+  margin-top: auto;
+  color: #ef4444 !important;
+}
+.logout-btn:hover { background: #fef2f2 !important; color: #dc2626 !important; }
+
+/* ══════════════════════════════════════
+   MAIN CONTENT
+══════════════════════════════════════ */
+.main-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ── Topbar ── */
+.topbar {
+  background: #ffffff;
+  border-bottom: 1px solid #e4e7ef;
+  padding: 14px 28px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar-sub   { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #9ca3af; }
+.topbar-title { font-size: 17px; font-weight: 700; color: #1a1f2e; margin-top: 2px; }
+.topbar-user  { display: flex; align-items: center; gap: 12px; }
+.avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: #1d4ed8;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 14px;
+}
+.user-name { font-size: 13px; font-weight: 600; color: #1a1f2e; }
+.user-role { font-size: 11px; color: #9ca3af; }
+
+/* ── Page body ── */
+.page-body { padding: 28px; flex: 1; }
+
+/* ── Page header ── */
+.page-header { margin-bottom: 22px; }
+.page-title  { font-size: 22px; font-weight: 800; color: #1a1f2e; }
+.page-sub    { font-size: 14px; color: #6b7280; margin-top: 4px; }
+
+/* ── Metric grid ── */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.metric-card {
+  background: #fff;
+  border: 1px solid #e4e7ef;
+  border-radius: 14px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+.metric-icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.metric-label { font-size: 12px; color: #6b7280; font-weight: 500; }
+.metric-value { font-size: 22px; font-weight: 800; color: #1a1f2e; margin-top: 2px; }
+
+/* ── Cards ── */
+.card {
+  background: #fff;
+  border: 1px solid #e4e7ef;
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.04);
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.card-title { font-size: 14px; font-weight: 700; color: #1a1f2e; }
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+/* ── Two column layout ── */
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* ── Table ── */
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  padding: 9px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  white-space: nowrap;
+  background: #fafafa;
+}
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid #f5f6fa;
+  color: #374151;
+  font-size: 13px;
+  white-space: nowrap;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafbff; }
+
+/* ── Status pills ── */
+.status-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+/* ── KV list ── */
+.kv-list { display: grid; gap: 0; }
+.kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 4px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+}
+.kv-row:last-child { border-bottom: none; }
+.kv-row span { color: #6b7280; text-transform: capitalize; }
+.kv-row strong { color: #1a1f2e; font-weight: 600; }
+
+/* ── Loader ── */
+.loader-wrap { padding: 8px; }
+.skeleton {
+  height: 18px;
+  background: #f0f0f0;
+  border-radius: 6px;
+  margin: 12px 0;
+  animation: pulse 1.3s infinite;
+}
+@keyframes pulse { 50% { opacity: .4; } }
+
+/* ── Empty ── */
+.empty { padding: 40px; text-align: center; color: #9ca3af; font-size: 13px; }
+
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .two-col { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .page-body { padding: 16px; }
+  .metric-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .metric-grid { grid-template-columns: 1fr; }
+  .topbar-user .user-name, .topbar-user .user-role { display: none; }
+}

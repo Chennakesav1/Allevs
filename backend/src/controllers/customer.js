@@ -1,0 +1,10 @@
+const {Vehicle,Job,Payment,Review,Telemetry}=require('../models'); const audit=require('../services/audit');
+exports.profile=async(req,res)=>res.json(req.user);
+exports.vehicles=async(req,res)=>res.json(await Vehicle.find({customerId:req.user._id}).sort('-createdAt'));
+exports.addVehicle=async(req,res)=>{const v=await Vehicle.create({...req.body,customerId:req.user._id});await audit(req.user._id,'CREATE','Vehicle',v._id);res.status(201).json(v)};
+exports.book=async(req,res)=>{const j=await Job.create({...req.body,customerId:req.user._id,status:'PENDING',trackingStatus:'Technician Assigned'});await audit(req.user._id,'CREATE','Job',j._id);res.status(201).json(j)};
+exports.bookings=async(req,res)=>res.json(await Job.find({customerId:req.user._id}).populate('vehicleId hubId technicianId').sort('-createdAt'));
+exports.tracking=async(req,res)=>{const j=await Job.findOne({_id:req.params.id,customerId:req.user._id}).populate('technicianId vehicleId hubId');if(!j)return res.status(404).json({message:'Job not found'});res.json(j)};
+exports.pay=async(req,res)=>{const p=await Payment.create({...req.body,customerId:req.user._id,status:'PAID',providerRef:`DEV-${Date.now()}`});if(req.body.jobId)await Job.findByIdAndUpdate(req.body.jobId,{totalAmount:req.body.amount,status:'COMPLETED',trackingStatus:'Completed'});res.status(201).json(p)};
+exports.review=async(req,res)=>res.status(201).json(await Review.create({...req.body,customerId:req.user._id}));
+exports.telemetry=async(req,res)=>res.json(await Telemetry.findOne({vehicleId:req.params.vehicleId}).sort('-recordedAt'));

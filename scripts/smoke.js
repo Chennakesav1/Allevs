@@ -1,0 +1,1 @@
+const http=require('http');const req=http.get('http://localhost:5000/health',r=>{let d='';r.on('data',x=>d+=x);r.on('end',()=>{console.log(d);process.exit(r.statusCode===200?0:1)})});req.on('error',e=>{console.error('API not reachable:',e.message);process.exit(1)});

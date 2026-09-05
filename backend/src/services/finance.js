@@ -1,0 +1,4 @@
+function emi(principal,annualRate,months){const r=annualRate/12/100; if(!r)return principal/months; return principal*r*Math.pow(1+r,months)/(Math.pow(1+r,months)-1)}
+function roi(investment,monthlyRevenue,monthlyExpense){const profit=monthlyRevenue-monthlyExpense; return {monthlyProfit:profit,annualProfit:profit*12,roiPercent:investment?profit*12/investment*100:0,paybackMonths:profit>0?investment/profit:null}}
+function expansion({demandScore,competitionScore,evDensityScore,expectedRevenue,expectedCost}){const roiPercent=expectedCost?((expectedRevenue*12-expectedCost)/expectedCost)*100:0; const payback=expectedRevenue>0?expectedCost/expectedRevenue:null; const score=Math.round(demandScore*.4+(100-competitionScore)*.15+evDensityScore*.25+Math.min(roiPercent,100)*.2); return {roiPercent,paybackMonths:payback,recommendation:score>=75?'HIGH POTENTIAL':score>=55?'REVIEW':'LOW POTENTIAL',score}}
+module.exports={emi,roi,expansion};

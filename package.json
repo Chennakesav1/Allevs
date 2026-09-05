@@ -1,0 +1,17 @@
+{
+  "name": "ev-core-single-host",
+  "private": true,
+  "version": "2.0.0",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w backend",
+    "build": "npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "seed": "npm run seed -w backend",
+    "smoke": "node scripts/smoke.js"
+  },
+  "devDependencies": {}
+}
