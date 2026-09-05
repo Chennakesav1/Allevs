@@ -7,6 +7,7 @@ const St  = require('../controllers/staff');
 const Fr  = require('../controllers/franchise');
 const Ad  = require('../controllers/admin');
 const Ap  = require('../controllers/approvals');   // ← NEW
+const Rn  = require('../controllers/rental');      // ← RENTAL
 const upload = require('../middleware/upload');
 const { localSave } = require('../services/storage');
 const { Expansion } = require('../models');
@@ -63,6 +64,12 @@ cr.get( '/notifications',         P.customer.notifications);
 cr.get( '/available-vehicles',    Ap.availableVehicles);
 // Public hub list for the customer charging-stations map (avoids 403 on /admin/hubs)
 cr.get( '/hubs',                  Ad.hubs);
+// Vehicle Rental
+cr.post('/rentals/create-order',           Rn.createOrder);
+cr.post('/rentals/verify-payment',         Rn.verifyPayment);
+cr.get( '/rentals',                        Rn.myRentals);
+cr.get( '/rentals/invoices',               Rn.myRentalInvoices);
+cr.get( '/rentals/invoices/:id/download',  Rn.downloadInvoice);
 r.use('/customer', cr);
 
 // ── Staff ─────────────────────────────────────────────────────────
@@ -221,6 +228,10 @@ dr.post('/franchisees', async (req, res) => {
 // Customer management
 dr.get('/customers',         Ad.customers);
 dr.get('/customers/:id',     Ad.customerDetail);
+
+// Vehicle Rentals (Command Center)
+dr.get('/rentals',              Rn.allRentals);
+dr.put('/rentals/:id/handover', Rn.handover);
 
 r.use('/admin', dr);
 

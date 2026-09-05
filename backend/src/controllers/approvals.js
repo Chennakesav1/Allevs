@@ -197,7 +197,7 @@ exports.allVehicles = async (req, res) => {
 /** GET /api/customer/available-vehicles */
 exports.availableVehicles = async (req, res) => {
   try {
-    const docs = await PendingVehicle.find({ status: 'APPROVED' }).populate('franchiseeId','name email phone').sort('-reviewedAt');
+    const docs = await PendingVehicle.find({ status: 'APPROVED' }).sort('-reviewedAt');
     res.json(docs);
   } catch (e) {
     res.status(500).json({ message: e.message });

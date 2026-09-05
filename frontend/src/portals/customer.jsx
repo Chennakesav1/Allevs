@@ -122,6 +122,7 @@ export default function App() {
   // | 'forgot-password' | 'reset-password' | 'set-password'
   const [authScreen, setAuthScreen] = useState('login');
   const [pendingEmail, setPendingEmail] = useState('');
+  const [pendingPassword, setPendingPassword] = useState('');
   const call = api();
 
   useEffect(() => {
@@ -164,6 +165,8 @@ export default function App() {
         setScreen={setAuthScreen}
         pendingEmail={pendingEmail}
         setPendingEmail={setPendingEmail}
+        pendingPassword={pendingPassword}
+        setPendingPassword={setPendingPassword}
         onAuth={handleAuth}
       />
     );
@@ -174,8 +177,8 @@ export default function App() {
 // ══════════════════════════════════════════════════════════════════
 // AUTH ROUTER — selects which auth screen to show
 // ══════════════════════════════════════════════════════════════════
-function AuthRouter({ screen, setScreen, pendingEmail, setPendingEmail, onAuth }) {
-  const common = { setScreen, pendingEmail, setPendingEmail, onAuth };
+function AuthRouter({ screen, setScreen, pendingEmail, setPendingEmail, pendingPassword, setPendingPassword, onAuth }) {
+  const common = { setScreen, pendingEmail, setPendingEmail, pendingPassword, setPendingPassword, onAuth };
   if (screen === 'register')           return <RegisterPage {...common} />;
   if (screen === 'verify-register')    return <VerifyRegisterOtpPage {...common} />;
   if (screen === 'verify-login-otp')   return <VerifyLoginOtpPage {...common} />;
@@ -300,17 +303,20 @@ function LoginPage({ setScreen, setPendingEmail, onAuth }) {
 // ══════════════════════════════════════════════════════════════════
 // SCREEN 2 — REGISTER
 // ══════════════════════════════════════════════════════════════════
-function RegisterPage({ setScreen, setPendingEmail }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '' });
+function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
+  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', password2: '' });
   const [busy, setBusy] = useState(false);
   const [msg,  setMsg]  = useState({ type: '', text: '' });
 
   const submit = async () => {
     if (!form.name || !form.email) { setMsg({ type: 'error', text: 'Name and email are required.' }); return; }
+    if (!form.password || form.password.length < 8) { setMsg({ type: 'error', text: 'Password must be at least 8 characters.' }); return; }
+    if (form.password !== form.password2) { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
     setBusy(true); setMsg({ type: '', text: '' });
     try {
-      await axios.post(`${API}/auth/customer/register`, form);
+      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone });
       setPendingEmail(form.email);
+      if (setPendingPassword) setPendingPassword(form.password);
       setScreen('verify-register');
     } catch (e) {
       setMsg({ type: 'error', text: e.response?.data?.message || 'Registration failed.' });
@@ -321,14 +327,21 @@ function RegisterPage({ setScreen, setPendingEmail }) {
     <AuthBox title="Create Account" sub="EV Customer Portal">
       <Msg type={msg.type} text={msg.text} />
       <div className="login-form">
-        <label>Full Name
+        <label>Full Name *
           <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
         </label>
-        <label>Email
+        <label>Email *
           <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
         </label>
         <label>Phone (optional)
           <input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+        </label>
+        <label>Password * <span style={{fontSize:11,color:'#94a3b8'}}>(min 8 characters)</span>
+          <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+        </label>
+        <label>Confirm Password *
+          <input type="password" value={form.password2} onChange={e => setForm({ ...form, password2: e.target.value })}
+            onKeyDown={e => e.key === 'Enter' && submit()} />
         </label>
         <button className="btn-auth" disabled={busy} onClick={submit}>
           {busy ? 'Creating account…' : 'Create Account & Send OTP'}
@@ -344,7 +357,7 @@ function RegisterPage({ setScreen, setPendingEmail }) {
 // ══════════════════════════════════════════════════════════════════
 // SCREEN 3 — VERIFY OTP (after register)
 // ══════════════════════════════════════════════════════════════════
-function VerifyRegisterOtpPage({ setScreen, pendingEmail, onAuth }) {
+function VerifyRegisterOtpPage({ setScreen, pendingEmail, pendingPassword, onAuth }) {
   const [otp,    setOtp]    = useState('');
   const [busy,   setBusy]   = useState(false);
   const [resend, setResend] = useState(false);
@@ -362,6 +375,15 @@ function VerifyRegisterOtpPage({ setScreen, pendingEmail, onAuth }) {
     setBusy(true); setMsg({ type: '', text: '' });
     try {
       const res = await axios.post(`${API}/auth/customer/verify-otp`, { email: pendingEmail, otp });
+      // Immediately set password after OTP verification (using the token from verify response)
+      if (pendingPassword && res.data.accessToken) {
+        try {
+          await axios.post(`${API}/auth/customer/set-password`,
+            { password: pendingPassword },
+            { headers: { Authorization: `Bearer ${res.data.accessToken}` } }
+          );
+        } catch (_) { /* password set can be retried later */ }
+      }
       onAuth(res.data.accessToken, res.data.refreshToken, res.data.user);
     } catch (e) {
       setMsg({ type: 'error', text: e.response?.data?.message || 'OTP verification failed.' });
@@ -618,7 +640,7 @@ function Shell({ user, page, setPage, call, logout }) {
         </header>
 
         <div className="page-body">
-          <PageRouter page={page} call={call} />
+          <PageRouter page={page} call={call} setPage={setPage} />
         </div>
       </div>
     </div>
@@ -628,8 +650,8 @@ function Shell({ user, page, setPage, call, logout }) {
 // ══════════════════════════════════════════════════════════════════
 // PAGE ROUTER
 // ══════════════════════════════════════════════════════════════════
-function PageRouter({ page, call }) {
-  const P = { page, call };
+function PageRouter({ page, call, setPage }) {
+  const P = { page, call, setPage };
   if (kind === 'customer') {
     const pages = {
       dashboard:            <CustDashboard        {...P} />,
@@ -791,26 +813,227 @@ function CustDashboard({ call }) {
 }
 
 function CustVehicles({ call }) {
-  const { data, loading, error } = useFetch(call, '/customer/vehicles');
-  if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  const { data: owned, loading: lo, error: eo } = useFetch(call, '/customer/vehicles');
+  const [rentals, setRentals]   = useState([]);
+  const [rentLoading, setRL]    = useState(true);
+
+  useEffect(() => {
+    call('/customer/rentals')
+      .then(d => setRentals(Array.isArray(d) ? d : []))
+      .catch(() => setRentals([]))
+      .finally(() => setRL(false));
+  }, []);
+
+  if (lo || rentLoading) return <Loader />;
+
+  const activeRentals = rentals.filter(r => r.status === 'ACTIVE'); // Only truly delivered vehicles
+  const pastRentals   = rentals.filter(r => ['COMPLETED','CANCELLED'].includes(r.status));
+
   return <>
-    <PageHeader title="My Vehicles" sub="All registered electric vehicles." />
-    <Card title="Vehicle Fleet" badge={`${data?.length ?? 0} vehicles`}>
-      <DataTable rows={data} cols={['vin', 'model', 'year', 'batterySoc', 'batterySoh', 'status']} />
-    </Card>
+    <PageHeader title="My Vehicles" sub="Rented and owned EV vehicles." />
+
+    {/* Active Rentals */}
+    {activeRentals.length > 0 && (
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
+          🚗 Active Rentals ({activeRentals.length})
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {activeRentals.map(r => {
+            const vs = r.vehicleSnapshot || {};
+            const sc = r.status === 'ACTIVE' ? '#16a34a' : r.status === 'PAYMENT_DONE' ? '#2563eb' : '#d97706';
+            const statusLabel = {
+              PAYMENT_DONE: '💳 Payment Done — Awaiting Handover',
+              HANDOVER_PENDING: '⏳ Handover Pending',
+              ACTIVE: '✅ Active — Vehicle Delivered',
+            }[r.status] || r.status;
+            return (
+              <div key={r._id} style={{
+                background: '#fff', border: `1.5px solid ${sc}44`, borderRadius: 14,
+                padding: '16px 18px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 16, color: '#1a1f2e' }}>
+                      {vs.make} {vs.model} ({vs.year})
+                    </div>
+                    <div style={{ fontSize: 13, color: '#64748b' }}>{vs.category} · {vs.color}</div>
+                  </div>
+                  <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '4px 14px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    {statusLabel}
+                  </span>
+                </div>
+
+                {/* Vehicle images */}
+                {vs.images?.length > 0 && (
+                  <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
+                    {vs.images.map((img, i) => (
+                      <img key={i} src={img.url} alt={img.name}
+                        style={{ width: 100, height: 70, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: '6px 16px' }}>
+                  {[
+                    ['Reg. No.',     vs.registrationNo || '—'],
+                    ['Battery',      vs.batteryCapacityKwh ? `${vs.batteryCapacityKwh} kWh` : '—'],
+                    ['Range',        vs.rangeKm ? `${vs.rangeKm} km` : '—'],
+                    ['Rate',         `₹${r.pricePerDay}/day`],
+                    ['Duration',     `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
+                    ['Start Date',   r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
+                    ['End Date',     r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
+                    ['Total Paid',   `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`],
+                    ['Delivery',     r.fullAddress || `${r.area}, ${r.district}, ${r.state} - ${r.pincode}`],
+                    ...(r.handoverDate ? [['Handover Date', new Date(r.handoverDate).toLocaleDateString('en-IN')]] : []),
+                    ...(r.returnDate  ? [['Return Due',    new Date(r.returnDate).toLocaleDateString('en-IN')]]   : []),
+                  ].map(([k, v]) => (
+                    <div key={k} style={{ fontSize: 13 }}>
+                      <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
+                      <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    )}
+
+    {/* Owned Vehicles */}
+    {(owned?.length ?? 0) > 0 && (
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
+          🔑 My Registered Vehicles ({owned.length})
+        </div>
+        <Card>
+          <DataTable rows={owned} cols={['vin', 'model', 'year', 'batterySoc', 'batterySoh', 'status']} />
+        </Card>
+      </div>
+    )}
+
+    {/* Past Rentals */}
+    {pastRentals.length > 0 && (
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
+          📋 Past Rentals ({pastRentals.length})
+        </div>
+        <Card>
+          <DataTable
+            rows={pastRentals.map(r => ({
+              ...r,
+              vehicle: `${r.vehicleSnapshot?.make || ''} ${r.vehicleSnapshot?.model || ''}`.trim() || '—',
+              amount:  `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`,
+              start:   r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—',
+              end:     r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—',
+            }))}
+            cols={['vehicle', 'status', 'amount', 'start', 'end']}
+          />
+        </Card>
+      </div>
+    )}
+
+    {(owned?.length ?? 0) === 0 && rentals.length === 0 && (
+      <div className="card">
+        <div className="empty-state">
+          <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
+          <p>No vehicles yet.<br />Browse Available Vehicles to make your first booking!</p>
+        </div>
+      </div>
+    )}
   </>;
 }
 
-function CustBookings({ call }) {
-  const { data, loading, error } = useFetch(call, '/customer/bookings');
+function CustBookings({ call, setPage }) {
+  const [rentals, setRentals] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    call('/customer/rentals')
+      .then(d => setRentals(Array.isArray(d) ? d : []))
+      .catch(() => setRentals([]))
+      .finally(() => setLoading(false));
+  }, []);
+
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+
+  const bookings = rentals.filter(r => ['BOOKED', 'PAYMENT_DONE', 'HANDOVER_PENDING'].includes(r.status));
+  const statusColor = { BOOKED: '#d97706', PAYMENT_DONE: '#2563eb', HANDOVER_PENDING: '#7c3aed' };
+  const statusLabel = {
+    BOOKED:           '🕐 Booked — Awaiting Payment',
+    PAYMENT_DONE:     '💳 Paid — Awaiting Handover',
+    HANDOVER_PENDING: '⏳ Handover Pending',
+  };
+
   return <>
-    <PageHeader title="My Bookings" sub="Service history and active jobs." />
-    <Card title="All Bookings" badge={`${data?.length ?? 0}`}>
-      <DataTable rows={data} cols={['serviceType', 'status', 'priority', 'trackingStatus', 'totalAmount']} />
-    </Card>
+    <PageHeader title="My Bookings" sub="Paid rentals awaiting vehicle handover by Command Center." />
+    <MetricGrid metrics={[
+      { label: 'Total Bookings',    value: bookings.length, Icon: ClipboardList, color: '#2563eb' },
+      { label: 'Awaiting Handover', value: bookings.filter(r => r.status === 'PAYMENT_DONE').length, Icon: Car, color: '#7c3aed' },
+    ]} />
+    {bookings.length === 0 ? (
+      <div className="card">
+        <div className="empty-state">
+          <ClipboardList size={40} style={{ opacity: .25, marginBottom: 12 }} />
+          <p>No active bookings.<br />Once you pay for a rental it appears here until the vehicle is handed over.</p>
+          <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setPage('available-vehicles')}>
+            Browse Vehicles
+          </button>
+        </div>
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {bookings.map(r => {
+          const vs = r.vehicleSnapshot || {};
+          const sc = statusColor[r.status] || '#64748b';
+          return (
+            <div key={r._id} style={{
+              background: '#fff', border: `1.5px solid ${sc}33`, borderRadius: 14,
+              padding: '18px 20px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 16, color: '#1a1f2e' }}>{vs.make} {vs.model} ({vs.year})</div>
+                  <div style={{ fontSize: 13, color: '#64748b' }}>{vs.category} · {vs.color} · {vs.registrationNo}</div>
+                </div>
+                <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '4px 14px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', height: 'fit-content' }}>
+                  {statusLabel[r.status] || r.status}
+                </span>
+              </div>
+              {vs.images?.length > 0 && (
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
+                  {vs.images.slice(0,3).map((img, i) => (
+                    <img key={i} src={img.url} alt={img.name}
+                      style={{ width: 90, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
+                  ))}
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(155px,1fr))', gap: '6px 16px' }}>
+                {[
+                  ['Duration',   `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
+                  ['Start Date', r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
+                  ['End Date',   r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
+                  ['Rate',       `\u20b9${r.pricePerDay}/day`],
+                  ['Total Paid', `\u20b9${(r.totalAmount || 0).toLocaleString('en-IN')}`],
+                  ['Delivery',   r.fullAddress || [r.area, r.district, r.state, r.pincode].filter(Boolean).join(', ')],
+                  ['Payment ID', r.razorpayPaymentId || '—'],
+                  ['Booked On',  new Date(r.createdAt).toLocaleDateString('en-IN')],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ fontSize: 13 }}>
+                    <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
+                    <strong style={{ color: '#1a1f2e', wordBreak: 'break-all' }}>{v}</strong>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 14, padding: '10px 14px', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8, fontSize: 13, color: '#92400e' }}>
+                ⏳ The Command Center will handover your vehicle shortly. Once done it moves to <strong>My Vehicles</strong>.
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    )}
   </>;
 }
 
@@ -831,14 +1054,112 @@ function CustWallet({ call }) {
 }
 
 function CustInvoices({ call }) {
-  const { data, loading, error } = useFetch(call, '/customer/invoices');
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [downloading, setDL]    = useState(null);
+
+  useEffect(() => {
+    call('/customer/rentals/invoices')
+      .then(d => setInvoices(Array.isArray(d) ? d : []))
+      .catch(() => setInvoices([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleDownload = async (inv) => {
+    setDL(inv._id);
+    try {
+      const token = localStorage.getItem('ev_customer_token');
+      const res = await fetch(`/api/customer/rentals/invoices/${inv._id}/download`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${inv.invoiceNo || 'invoice'}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Could not download invoice: ' + e.message);
+    } finally {
+      setDL(null);
+    }
+  };
+
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+
+  const fmt = (n) => `\u20b9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+  const date = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
   return <>
-    <PageHeader title="Invoices" sub="Payment records and receipts." />
-    <Card title="All Invoices" badge={`${data?.length ?? 0}`}>
-      <DataTable rows={data} cols={['invoiceNumber', 'amount', 'status', 'createdAt']} />
-    </Card>
+    <PageHeader title="Invoices" sub="Rental payment invoices. Download as HTML and print/save as PDF from your browser." />
+    <MetricGrid metrics={[
+      { label: 'Total Invoices', value: invoices.length,                                               Icon: FileText, color: '#2563eb' },
+      { label: 'Total Paid',     value: fmt(invoices.reduce((s, i) => s + (i.total || 0), 0)),         Icon: DollarSign, color: '#16a34a' },
+    ]} />
+
+    {invoices.length === 0 ? (
+      <div className="card">
+        <div className="empty-state">
+          <FileText size={40} style={{ opacity: .25, marginBottom: 12 }} />
+          <p>No invoices yet.<br />Invoices are generated automatically after a successful payment.</p>
+        </div>
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {invoices.map(inv => (
+          <div key={inv._id} style={{
+            background: '#fff', border: '1.5px solid #e4e9f7', borderRadius: 14,
+            padding: '16px 20px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
+          }}>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: 15, color: '#1a1f2e', marginBottom: 4 }}>
+                {inv.invoiceNo}
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b' }}>
+                {date(inv.createdAt)} &nbsp;·&nbsp;
+                {inv.items?.[0]?.description || 'Vehicle Rental'}
+              </div>
+              <div style={{ marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {[
+                  ['Subtotal', fmt(inv.subtotal)],
+                  ['GST (18%)', fmt(inv.tax)],
+                  ['Total', fmt(inv.total)],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ fontSize: 13 }}>
+                    <span style={{ color: '#94a3b8', fontSize: 11, display: 'block' }}>{k}</span>
+                    <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ background: '#d1fae5', color: '#059669', borderRadius: 99, padding: '3px 12px', fontSize: 12, fontWeight: 700 }}>
+                PAID
+              </span>
+              <button
+                onClick={() => handleDownload(inv)}
+                disabled={downloading === inv._id}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: '#2563eb', color: '#fff', border: 'none',
+                  borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600,
+                  cursor: downloading === inv._id ? 'not-allowed' : 'pointer',
+                  opacity: downloading === inv._id ? .6 : 1,
+                }}
+              >
+                {downloading === inv._id ? '⏳ Downloading…' : '⬇ Download Invoice'}
+              </button>
+            </div>
+          </div>
+        ))}
+        <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>
+          💡 Tip: After downloading, open the HTML file in your browser and press Ctrl+P → Save as PDF for a PDF copy.
+        </div>
+      </div>
+    )}
   </>;
 }
 
@@ -857,11 +1178,12 @@ function CustComplaints({ call }) {
 // ══════════════════════════════════════════════════════════════════
 // CUSTOMER — AVAILABLE VEHICLES (approved by Command Center)
 // ══════════════════════════════════════════════════════════════════
-function CustAvailableVehicles({ call }) {
+function CustAvailableVehicles({ call, setPage }) {
   const [vehicles, setVehicles]   = useState([]);
   const [selected, setSelected]   = useState(null);
   const [filterCat, setFilterCat] = useState('all');
   const [loading, setLoading]     = useState(true);
+  const [bookingVehicle, setBookingVehicle] = useState(null);
 
   // FIX: Fetch approved vehicles from the API (MongoDB) instead of
   // localStorage. The Command Center writes approvals to MongoDB via
@@ -887,7 +1209,7 @@ function CustAvailableVehicles({ call }) {
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
 
   return <>
-    <PageHeader title="Available Vehicles" sub="Browse EV vehicles available for rent — approved by the Command Center." />
+    <PageHeader title="Available Vehicles" />
 
     {/* Category filter tabs */}
     <div className="filter-tabs">
@@ -897,25 +1219,6 @@ function CustAvailableVehicles({ call }) {
           {c === 'all' ? 'All Vehicles' : `${catEmoji[c]} ${c}`}
         </button>
       ))}
-    </div>
-
-    <div className="metric-grid">
-      <div className="metric-card">
-        <div className="metric-icon" style={{ background: '#2563eb18', color: '#2563eb' }}><Car size={20} /></div>
-        <div className="metric-body"><div className="metric-label">Total Available</div><div className="metric-value">{vehicles.length}</div></div>
-      </div>
-      <div className="metric-card">
-        <div className="metric-icon" style={{ background: '#d97706'+'18', color: '#d97706' }}><span style={{fontSize:18}}>🛵</span></div>
-        <div className="metric-body"><div className="metric-label">2-Wheelers</div><div className="metric-value">{vehicles.filter(v=>v.category==='2-wheeler').length}</div></div>
-      </div>
-      <div className="metric-card">
-        <div className="metric-icon" style={{ background: '#7c3aed18', color: '#7c3aed' }}><span style={{fontSize:18}}>🛺</span></div>
-        <div className="metric-body"><div className="metric-label">3-Wheelers</div><div className="metric-value">{vehicles.filter(v=>v.category==='3-wheeler').length}</div></div>
-      </div>
-      <div className="metric-card">
-        <div className="metric-icon" style={{ background: '#16a34a18', color: '#16a34a' }}><span style={{fontSize:18}}>🚗</span></div>
-        <div className="metric-body"><div className="metric-label">4-Wheelers</div><div className="metric-value">{vehicles.filter(v=>v.category==='4-wheeler').length}</div></div>
-      </div>
     </div>
 
     {filtered.length === 0 ? (
@@ -990,12 +1293,355 @@ function CustAvailableVehicles({ call }) {
           </div>
           <div className="modal-footer">
             <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
-            <button className="btn-primary" onClick={() => { alert('Booking flow coming soon!'); }}>Book Now</button>
+            <button className="btn-primary" onClick={() => setBookingVehicle(selected)}>Book Now</button>
           </div>
         </div>
       </div>
     )}
+
+    {/* Booking Flow Modal */}
+    {bookingVehicle && (
+      <BookingFlow
+        vehicle={bookingVehicle}
+        call={call}
+        onClose={() => setBookingVehicle(null)}
+        onSuccess={() => { setBookingVehicle(null); setSelected(null); setPage('bookings'); }}
+      />
+    )}
   </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// BOOKING FLOW: Pincode → State/District/Area → Razorpay → Success
+// ══════════════════════════════════════════════════════════════════
+function BookingFlow({ vehicle, call, onClose, onSuccess }) {
+  const [step, setStep] = useState('address'); // 'address' | 'dates' | 'payment' | 'success'
+  const [pincode, setPincode]     = useState('');
+  const [addrData, setAddrData]   = useState(null); // { state, district, area }
+  const [pincodeLoading, setPincodeLoading] = useState(false);
+  const [pincodeError, setPincodeError]     = useState('');
+  const [area, setArea]           = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate]     = useState('');
+  const [busy, setBusy]           = useState(false);
+  const [msg, setMsg]             = useState({ type: '', text: '' });
+  const [successData, setSuccessData] = useState(null);
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // Calculate days
+  const durationDays = React.useMemo(() => {
+    if (!startDate || !endDate) return 0;
+    const diff = (new Date(endDate) - new Date(startDate)) / 86400000;
+    return diff > 0 ? Math.ceil(diff) : 0;
+  }, [startDate, endDate]);
+
+  // Lookup pincode via India Post API
+  const lookupPincode = async (pin) => {
+    if (pin.length !== 6) return;
+    setPincodeLoading(true); setPincodeError(''); setAddrData(null);
+    try {
+      const resp = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+      const json = await resp.json();
+      if (json[0]?.Status === 'Success' && json[0]?.PostOffice?.length > 0) {
+        const po = json[0].PostOffice[0];
+        setAddrData({ state: po.State, district: po.District, area: po.Region || po.Block || '' });
+        setArea(po.Name || '');
+      } else {
+        setPincodeError('Invalid pincode or no data found.');
+      }
+    } catch {
+      setPincodeError('Could not lookup pincode. Please try again.');
+    } finally { setPincodeLoading(false); }
+  };
+
+  const handlePincodeChange = (val) => {
+    const cleaned = val.replace(/\D/g, '').slice(0, 6);
+    setPincode(cleaned);
+    if (cleaned.length === 6) lookupPincode(cleaned);
+    else { setAddrData(null); setPincodeError(''); }
+  };
+
+  const handleAddressNext = () => {
+    if (!pincode || pincode.length !== 6) { setMsg({ type: 'error', text: 'Enter a valid 6-digit pincode.' }); return; }
+    if (!addrData) { setMsg({ type: 'error', text: 'Wait for pincode lookup to complete.' }); return; }
+    setMsg({ type: '', text: '' });
+    setStep('dates');
+  };
+
+  const handleDatesNext = () => {
+    if (!startDate) { setMsg({ type: 'error', text: 'Please select a start date.' }); return; }
+    if (!endDate) { setMsg({ type: 'error', text: 'Please select an end date.' }); return; }
+    if (durationDays <= 0) { setMsg({ type: 'error', text: 'End date must be after start date.' }); return; }
+    setMsg({ type: '', text: '' });
+    setStep('payment');
+  };
+
+  const initiatePayment = async () => {
+    setBusy(true); setMsg({ type: '', text: '' });
+    try {
+      // Create Razorpay order via backend
+      const orderRes = await call('/customer/rentals/create-order', {
+        method: 'POST',
+        data: {
+          vehicleId:   vehicle._id,
+          pincode,
+          state:       addrData?.state,
+          district:    addrData?.district,
+          area:        area || addrData?.area,
+          fullAddress: `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`,
+          startDate,
+          endDate,
+          durationDays,
+        },
+      });
+
+      const { rentalId, orderId, amount, currency, keyId } = orderRes;
+
+      // Open Razorpay checkout
+      const options = {
+        key:         keyId,
+        amount,
+        currency,
+        name:        'EV Core',
+        description: `${vehicle.make} ${vehicle.model} rental for ${durationDays} day(s)`,
+        order_id:    orderId,
+        handler: async (response) => {
+          // Verify payment on backend
+          try {
+            await call('/customer/rentals/verify-payment', {
+              method: 'POST',
+              data: {
+                rentalId,
+                razorpay_order_id:    response.razorpay_order_id,
+                razorpay_payment_id:  response.razorpay_payment_id,
+                razorpay_signature:   response.razorpay_signature,
+              },
+            });
+            setSuccessData({
+              rentalId,
+              vehicleName: `${vehicle.make} ${vehicle.model}`,
+              amount: (amount / 100).toLocaleString('en-IN'),
+              days: durationDays,
+              startDate, endDate,
+              address: `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`,
+              paymentId: response.razorpay_payment_id,
+            });
+            setStep('success');
+          } catch (e) {
+            setMsg({ type: 'error', text: 'Payment verification failed. Contact support with payment ID: ' + response.razorpay_payment_id });
+          }
+        },
+        prefill: {},
+        theme: { color: '#2563eb' },
+        redirect: false,
+        modal: {
+          ondismiss:  () => { setBusy(false); },
+          escape:     false,
+          backdropclose: false,
+        },
+      };
+
+      if (!window.Razorpay) {
+        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
+        setBusy(false);
+        return;
+      }
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', (resp) => {
+        setMsg({ type: 'error', text: 'Payment failed: ' + resp.error.description });
+        setBusy(false);
+      });
+      rzp.open();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not create booking. Please try again.' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(560px,100%)' }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">
+              {step === 'success' ? '🎉 Booking Confirmed!' : `Book — ${vehicle.make} ${vehicle.model}`}
+            </div>
+            <div className="modal-subtitle">
+              {step === 'address' && 'Step 1 of 3 — Delivery Address'}
+              {step === 'dates'   && 'Step 2 of 3 — Rental Duration'}
+              {step === 'payment' && 'Step 3 of 3 — Payment'}
+              {step === 'success' && 'Your booking is live!'}
+            </div>
+          </div>
+          {step !== 'success' && <button className="icon-btn" onClick={onClose}>✕</button>}
+        </div>
+
+        <div className="modal-body">
+          <Msg type={msg.type} text={msg.text} />
+
+          {/* ── STEP 1: Address ── */}
+          {step === 'address' && (
+            <div className="login-form">
+              <label>Pincode *
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text" inputMode="numeric" maxLength={6}
+                    value={pincode} onChange={e => handlePincodeChange(e.target.value)}
+                    placeholder="6-digit pincode"
+                    style={{ paddingRight: 36 }}
+                  />
+                  {pincodeLoading && (
+                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>⏳</span>
+                  )}
+                  {addrData && !pincodeLoading && (
+                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>✅</span>
+                  )}
+                </div>
+                {pincodeError && <span style={{ color: '#dc2626', fontSize: 12 }}>{pincodeError}</span>}
+              </label>
+              {addrData && (
+                <>
+                  <label>State
+                    <input type="text" value={addrData.state} readOnly
+                      style={{ background: '#f8fafc', cursor: 'not-allowed' }} />
+                  </label>
+                  <label>District
+                    <input type="text" value={addrData.district} readOnly
+                      style={{ background: '#f8fafc', cursor: 'not-allowed' }} />
+                  </label>
+                  <label>Area / Locality
+                    <input type="text" value={area} onChange={e => setArea(e.target.value)}
+                      placeholder="Enter your area or locality" />
+                  </label>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP 2: Dates ── */}
+          {step === 'dates' && (
+            <div className="login-form">
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
+                  ✅ Delivery to: {area || addrData?.area}, {addrData?.district}, {addrData?.state} - {pincode}
+                </div>
+              </div>
+              <label>Start Date *
+                <input type="date" value={startDate} min={today}
+                  onChange={e => { setStartDate(e.target.value); if (endDate && e.target.value >= endDate) setEndDate(''); }} />
+              </label>
+              <label>End Date *
+                <input type="date" value={endDate} min={startDate || today}
+                  onChange={e => setEndDate(e.target.value)} />
+              </label>
+              {durationDays > 0 && (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px' }}>
+                  <div style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 600 }}>
+                    📅 {durationDays} day{durationDays !== 1 ? 's' : ''} rental
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a1f2e', marginTop: 4 }}>
+                    ₹{(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>₹{vehicle.pricePerDay}/day × {durationDays} days</div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── STEP 3: Payment summary ── */}
+          {step === 'payment' && (
+            <div>
+              <div style={{ background: '#f8fafc', border: '1px solid #e4e7ef', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e', marginBottom: 12 }}>Booking Summary</div>
+                {[
+                  ['Vehicle',  `${vehicle.make} ${vehicle.model} (${vehicle.year})`],
+                  ['Category', vehicle.category],
+                  ['Duration', `${durationDays} day${durationDays !== 1 ? 's' : ''} (${startDate} → ${endDate})`],
+                  ['Delivery', `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`],
+                  ['Rate',     `₹${vehicle.pricePerDay}/day`],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f1f5f9' }}>
+                    <span style={{ color: '#64748b' }}>{k}</span>
+                    <strong style={{ color: '#1a1f2e', textAlign: 'right', maxWidth: '60%' }}>{v}</strong>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontSize: 16, fontWeight: 800, color: '#1a1f2e', marginTop: 4 }}>
+                  <span>Total</span>
+                  <span style={{ color: '#2563eb' }}>₹{(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}</span>
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                🔒 Secure payment powered by Razorpay
+              </div>
+            </div>
+          )}
+
+          {/* ── SUCCESS ── */}
+          {step === 'success' && successData && (
+            <div style={{ textAlign: 'center', padding: '16px 0' }}>
+              <div style={{ fontSize: 56, marginBottom: 12 }}>🎉</div>
+              <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e', marginBottom: 6 }}>
+                Booking Confirmed!
+              </div>
+              <div style={{ color: '#16a34a', fontWeight: 700, fontSize: 15, marginBottom: 16 }}>
+                ✅ Payment of ₹{successData.amount} received
+              </div>
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '14px 18px', textAlign: 'left', marginBottom: 16 }}>
+                {[
+                  ['Vehicle',    successData.vehicleName],
+                  ['Duration',   `${successData.days} day${successData.days !== 1 ? 's' : ''}`],
+                  ['Dates',      `${successData.startDate} → ${successData.endDate}`],
+                  ['Delivery',   successData.address],
+                  ['Payment ID', successData.paymentId],
+                ].map(([k, v]) => (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, borderBottom: '1px solid #d1fae5' }}>
+                    <span style={{ color: '#64748b' }}>{k}</span>
+                    <strong style={{ color: '#1a1f2e', textAlign: 'right', maxWidth: '65%', wordBreak: 'break-all' }}>{v}</strong>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
+                The vehicle will be delivered to your address once the Command Center completes the handover.<br />
+                You can track it in <strong>My Vehicles</strong>.
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          {step === 'address' && (
+            <>
+              <button className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button className="btn-primary" onClick={handleAddressNext} disabled={!addrData || pincodeLoading}>
+                Continue →
+              </button>
+            </>
+          )}
+          {step === 'dates' && (
+            <>
+              <button className="btn-ghost" onClick={() => setStep('address')}>← Back</button>
+              <button className="btn-primary" onClick={handleDatesNext} disabled={durationDays <= 0}>
+                Review Booking →
+              </button>
+            </>
+          )}
+          {step === 'payment' && (
+            <>
+              <button className="btn-ghost" onClick={() => setStep('dates')}>← Back</button>
+              <button className="btn-primary" onClick={initiatePayment} disabled={busy}>
+                {busy ? 'Processing…' : `Pay ₹${(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}`}
+              </button>
+            </>
+          )}
+          {step === 'success' && (
+            <button className="btn-primary" style={{ width: '100%' }} onClick={onSuccess}>
+              View My Bookings →
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════

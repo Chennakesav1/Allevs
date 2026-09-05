@@ -10,7 +10,7 @@ const inventorySchema=new Schema({hubId:id,sku:{type:String,unique:true},name:St
 const supplierSchema=new Schema({name:String,phone:String,email:String,address:String,active:{type:Boolean,default:true}},{timestamps:true});
 const purchaseOrderSchema=new Schema({hubId:id,supplierId:id,items:[{sku:String,quantity:Number,unitPrice:Number}],status:{type:String,default:'DRAFT'},total:{type:Number,default:0}},{timestamps:true});
 const paymentSchema=new Schema({customerId:id,jobId:id,invoiceId:id,amount:Number,method:String,status:{type:String,default:'PENDING'},provider:String,providerRef:String,orderId:String,signature:String},{timestamps:true});
-const invoiceSchema=new Schema({invoiceNo:{type:String,unique:true},customerId:id,jobId:id,items:[{description:String,qty:Number,rate:Number,amount:Number}],subtotal:Number,tax:Number,total:Number,status:{type:String,default:'UNPAID'},paidAt:Date,pdfUrl:String},{timestamps:true});
+const invoiceSchema=new Schema({invoiceNo:{type:String,unique:true},customerId:id,jobId:id,rentalId:id,items:[{description:String,qty:Number,rate:Number,amount:Number}],subtotal:Number,tax:Number,total:Number,status:{type:String,default:'UNPAID'},paidAt:Date,pdfUrl:String},{timestamps:true});
 const walletSchema=new Schema({customerId:{type:id,unique:true},balance:{type:Number,default:0},currency:{type:String,default:'INR'}},{timestamps:true});
 const walletTxSchema=new Schema({customerId:id,type:{type:String,enum:['CREDIT','DEBIT']},amount:Number,referenceType:String,referenceId:id,description:String,balanceAfter:Number},{timestamps:true});
 const chargingSchema=new Schema({chargerId:id,customerId:id,vehicleId:id,energyKwh:{type:Number,default:0},amount:{type:Number,default:0},ratePerKwh:Number,status:{type:String,default:'PENDING'},startAt:Date,endAt:Date,meterStart:Number,meterEnd:Number,providerRef:String},{timestamps:true});
@@ -90,6 +90,39 @@ const pendingStaffSchema = new Schema({
   userId:           { type: id, ref: 'User' }, // set when User record is created on approval
 }, { timestamps: true });
 
+// ── Vehicle Rental (customer books an approved vehicle) ──────────────
+const vehicleRentalSchema = new Schema({
+  customerId:       { type: id, ref: 'User', required: true },
+  vehicleId:        { type: id, ref: 'PendingVehicle', required: true },
+  // Customer address / delivery info
+  pincode:          String,
+  state:            String,
+  district:         String,
+  area:             String,
+  fullAddress:      String,
+  // Booking dates
+  startDate:        Date,
+  endDate:          Date,
+  durationDays:     Number,
+  pricePerDay:      Number,
+  totalAmount:      Number,
+  // Razorpay payment fields
+  razorpayOrderId:  String,
+  razorpayPaymentId:String,
+  razorpaySignature:String,
+  paymentStatus:    { type: String, enum: ['PENDING','PAID','FAILED'], default: 'PENDING' },
+  // Rental lifecycle
+  status: {
+    type: String,
+    enum: ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING','ACTIVE','COMPLETED','CANCELLED'],
+    default: 'BOOKED',
+  },
+  handoverDate:     Date,
+  returnDate:       Date,
+  // Vehicle snapshot (so details remain even if vehicle doc changes)
+  vehicleSnapshot:  Schema.Types.Mixed,
+}, { timestamps: true });
+
 const models={
   User:mongoose.model('User',userSchema),
   Vehicle:mongoose.model('Vehicle',vehicleSchema),
@@ -119,5 +152,6 @@ const models={
   AuditLog:mongoose.model('AuditLog',auditSchema),
   PendingVehicle:mongoose.model('PendingVehicle',pendingVehicleSchema),
   PendingStaff:mongoose.model('PendingStaff',pendingStaffSchema),
+  VehicleRental:mongoose.model('VehicleRental',vehicleRentalSchema),
 };
 module.exports=models;

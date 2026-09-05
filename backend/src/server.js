@@ -36,7 +36,11 @@ const iot = require('./services/iot');
     fs.mkdirSync(uploadDir, { recursive: true });
     process.env.UPLOAD_DIR = uploadDir;
 
-    app.use(helmet({ contentSecurityPolicy: false }));
+    app.use(helmet({
+      contentSecurityPolicy:     false,  // handled by Vite / no inline scripts to protect
+      crossOriginOpenerPolicy:   false,  // MUST be false — "same-origin" breaks Razorpay 3DS popup
+      crossOriginEmbedderPolicy: false,  // MUST be false — blocks Razorpay iframe loading
+    }));
     app.use(cors({ origin: true, credentials: true }));
     app.use(express.json({ limit: '5mb' }));
     app.use(morgan('dev'));

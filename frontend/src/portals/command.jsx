@@ -57,6 +57,7 @@ const NAV_ITEMS = {
     { id: 'vehicle-approvals',   label: 'Vehicle Approvals', Icon: Car },
     { id: 'staff-directory',     label: 'Staff Directory',   Icon: Users },
     { id: 'customers',           label: 'Customers',         Icon: Users },
+    { id: 'customer-payments',   label: 'Customer Payments', Icon: DollarSign },
     { id: 'demand',              label: 'Demand',            Icon: TrendingUp },
     { id: 'expansion',           label: 'Expansion',         Icon: MapPin },
   ],
@@ -312,6 +313,7 @@ function PageRouter({ page, call }) {
     'vehicle-approvals': <AdminVehicleApprovals call={call} />,
     'staff-directory':   <AdminStaffDirectory   call={call} />,
     customers:           <AdminCustomers         call={call} />,
+    'customer-payments': <AdminCustomerPayments  call={call} />,
     demand:              <AdminDemand       {...P} />,
     expansion:           <AdminExpansion    {...P} />,
   };
@@ -2545,6 +2547,311 @@ function AdminCustomers({ call }) {
                   }
                 </div>
               </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// COMMAND CENTER — CUSTOMER PAYMENTS (Vehicle Rentals)
+// ══════════════════════════════════════════════════════════════════
+function AdminCustomerPayments({ call }) {
+  const [rentals, setRentals]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [selected, setSelected]   = useState(null);
+  const [handBusy, setHandBusy]   = useState(false);
+  const [handMsg, setHandMsg]     = useState({ type: '', text: '' });
+  const [filter, setFilter]       = useState('ALL');
+
+  const load = () => {
+    setLoading(true); setError(null);
+    call('/admin/rentals')
+      .then(d => setRentals(Array.isArray(d) ? d : []))
+      .catch(e => setError(e.message || 'Failed to load rentals'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const statusColor = {
+    BOOKED:           '#d97706',
+    PAYMENT_DONE:     '#2563eb',
+    HANDOVER_PENDING: '#7c3aed',
+    ACTIVE:           '#16a34a',
+    COMPLETED:        '#64748b',
+    CANCELLED:        '#dc2626',
+  };
+
+  const filtered = filter === 'ALL' ? rentals : rentals.filter(r => r.status === filter);
+  const paid     = rentals.filter(r => r.paymentStatus === 'PAID');
+  const total    = paid.reduce((s, r) => s + (r.totalAmount || 0), 0);
+
+  const handleHandover = async (rentalId) => {
+    setHandBusy(true); setHandMsg({ type: '', text: '' });
+    try {
+      await call(`/admin/rentals/${rentalId}/handover`, { method: 'PUT' });
+      setHandMsg({ type: 'success', text: '✅ Handover marked! Vehicle is now Active.' });
+      // Refresh
+      load();
+      setSelected(prev => prev ? { ...prev, status: 'ACTIVE', handoverDate: new Date().toISOString() } : null);
+    } catch (e) {
+      setHandMsg({ type: 'error', text: e.response?.data?.message || 'Handover failed.' });
+    } finally { setHandBusy(false); }
+  };
+
+  const fmt = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading customer payments…</div>;
+  if (error)   return <div style={{ padding: 24, color: '#dc2626' }}>Error: {error}</div>;
+
+  return (
+    <>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1f2e', margin: 0 }}>Customer Payments</h1>
+        <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
+          All vehicle rental bookings and payments from customers
+        </p>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
+        {[
+          { label: 'Total Bookings',  value: rentals.length,                                       color: '#2563eb' },
+          { label: 'Paid',            value: paid.length,                                           color: '#16a34a' },
+          { label: 'Pending Handover',value: rentals.filter(r=>r.status==='PAYMENT_DONE').length,   color: '#7c3aed' },
+          { label: 'Active Rentals',  value: rentals.filter(r=>r.status==='ACTIVE').length,         color: '#16a34a' },
+          { label: 'Revenue Collected',value: `₹${total.toLocaleString('en-IN')}`,                 color: '#16a34a' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            background: '#fff', border: '1px solid #e4e7ef', borderRadius: 12,
+            padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,.04)',
+          }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5 }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color, marginTop: 4 }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        {['ALL','BOOKED','PAYMENT_DONE','ACTIVE','COMPLETED','CANCELLED'].map(s => (
+          <button key={s} onClick={() => setFilter(s)} style={{
+            padding: '6px 14px', borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: filter === s ? `1.5px solid ${statusColor[s] || '#2563eb'}` : '1.5px solid #e4e7ef',
+            background: filter === s ? (statusColor[s] || '#2563eb') + '18' : '#fff',
+            color: filter === s ? (statusColor[s] || '#2563eb') : '#6b7280',
+          }}>
+            {s === 'ALL' ? `All (${rentals.length})` : s.replace('_', ' ')}
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div style={{ background: '#fff', border: '1px solid #e4e7ef', borderRadius: 14, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#f8fafc' }}>
+              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Booking Status', 'Dates', 'Action'].map(h => (
+                <th key={h} style={{ padding: '12px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 12, borderBottom: '1px solid #e4e7ef' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No records found.</td></tr>
+            )}
+            {filtered.map(r => {
+              const sc   = statusColor[r.status] || '#6b7280';
+              const cust = r.customerId || {};
+              const vs   = r.vehicleSnapshot || {};
+              return (
+                <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                  onClick={() => { setSelected(r); setHandMsg({ type: '', text: '' }); }}>
+                  <td style={{ padding: '12px 14px' }}>
+                    <div style={{ fontWeight: 700 }}>{cust.name || '—'}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.email || '—'}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.phone || '—'}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <div style={{ fontWeight: 600 }}>{vs.make} {vs.model}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{vs.category} · {vs.year}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px', fontWeight: 700, color: '#1a1f2e' }}>
+                    ₹{(r.totalAmount || 0).toLocaleString('en-IN')}
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.durationDays} day{r.durationDays !== 1 ? 's' : ''}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{
+                      background: r.paymentStatus === 'PAID' ? '#f0fdf4' : '#fef3c7',
+                      color: r.paymentStatus === 'PAID' ? '#16a34a' : '#d97706',
+                      borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700,
+                    }}>
+                      {r.paymentStatus === 'PAID' ? '✅ PAID' : r.paymentStatus}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 14px', fontSize: 12, color: '#374151' }}>
+                    <div>{fmt(r.startDate)} →</div>
+                    <div>{fmt(r.endDate)}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    {r.status === 'PAYMENT_DONE' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); handleHandover(r._id); }}
+                        disabled={handBusy}
+                        style={{
+                          background: '#2563eb', color: '#fff', border: 'none',
+                          borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700,
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        🚗 Handover
+                      </button>
+                    )}
+                    {r.status === 'ACTIVE' && (
+                      <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 600 }}>✅ Active</span>
+                    )}
+                    {r.status === 'BOOKED' && (
+                      <span style={{ color: '#d97706', fontSize: 12, fontWeight: 600 }}>⏳ Awaiting Payment</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detail drawer */}
+      {selected && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        }} onClick={() => setSelected(null)}>
+          <div style={{
+            background: '#fff', width: 'min(520px,100%)', height: '100%',
+            overflowY: 'auto', padding: 28, boxShadow: '-4px 0 32px rgba(0,0,0,.12)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e' }}>Rental Details</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>ID: {selected._id}</div>
+              </div>
+              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            {handMsg.text && (
+              <div style={{
+                background: handMsg.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${handMsg.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+                borderRadius: 10, padding: '10px 14px', marginBottom: 16,
+                color: handMsg.type === 'success' ? '#15803d' : '#dc2626', fontSize: 13, fontWeight: 600,
+              }}>
+                {handMsg.text}
+              </div>
+            )}
+
+            {/* Vehicle images */}
+            {selected.vehicleSnapshot?.images?.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16 }}>
+                {selected.vehicleSnapshot.images.map((img, i) => (
+                  <img key={i} src={img.url} alt={img.name}
+                    style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
+                ))}
+              </div>
+            )}
+
+            {/* Customer info */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Customer</div>
+              {[
+                ['Name',  (selected.customerId?.name  || '—')],
+                ['Email', (selected.customerId?.email || '—')],
+                ['Phone', (selected.customerId?.phone || '—')],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ color: '#64748b' }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Vehicle info */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Vehicle</div>
+              {[
+                ['Make & Model', `${selected.vehicleSnapshot?.make || ''} ${selected.vehicleSnapshot?.model || ''}`],
+                ['Year/Color',   `${selected.vehicleSnapshot?.year || ''} · ${selected.vehicleSnapshot?.color || ''}`],
+                ['Category',     selected.vehicleSnapshot?.category || '—'],
+                ['Reg. No.',     selected.vehicleSnapshot?.registrationNo || '—'],
+                ['Battery',      selected.vehicleSnapshot?.batteryCapacityKwh ? `${selected.vehicleSnapshot.batteryCapacityKwh} kWh` : '—'],
+                ['Range',        selected.vehicleSnapshot?.rangeKm ? `${selected.vehicleSnapshot.rangeKm} km` : '—'],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ color: '#64748b' }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Booking & Payment */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Booking & Payment</div>
+              {[
+                ['Status',       selected.status],
+                ['Payment',      selected.paymentStatus],
+                ['Total Amount', `₹${(selected.totalAmount || 0).toLocaleString('en-IN')}`],
+                ['Rate',         `₹${selected.pricePerDay}/day`],
+                ['Duration',     `${selected.durationDays} day${selected.durationDays !== 1 ? 's' : ''}`],
+                ['Start Date',   fmt(selected.startDate)],
+                ['End Date',     fmt(selected.endDate)],
+                ['Booked On',    fmt(selected.createdAt)],
+                ...(selected.handoverDate ? [['Handover Date', fmt(selected.handoverDate)]] : []),
+                ['Razorpay Order', selected.razorpayOrderId || '—'],
+                ['Payment ID',    selected.razorpayPaymentId || '—'],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc', gap: 8 }}>
+                  <span style={{ color: '#64748b', flexShrink: 0 }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e', textAlign: 'right', wordBreak: 'break-all' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Delivery Address */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Delivery Address</div>
+              <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
+                {selected.fullAddress || `${selected.area || ''}${selected.district ? ', ' + selected.district : ''}${selected.state ? ', ' + selected.state : ''}${selected.pincode ? ' - ' + selected.pincode : ''}`}
+              </div>
+            </div>
+
+            {/* Handover action */}
+            {selected.status === 'PAYMENT_DONE' && (
+              <button
+                onClick={() => handleHandover(selected._id)}
+                disabled={handBusy}
+                style={{
+                  width: '100%', background: '#2563eb', color: '#fff', border: 'none',
+                  borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700,
+                  cursor: handBusy ? 'not-allowed' : 'pointer', opacity: handBusy ? .7 : 1,
+                }}
+              >
+                {handBusy ? 'Processing…' : '🚗 Mark as Handed Over — Activate Rental'}
+              </button>
+            )}
+            {selected.status === 'ACTIVE' && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#16a34a', fontWeight: 700, fontSize: 14 }}>
+                ✅ Vehicle is with the customer — Rental Active
+                {selected.handoverDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Handed over: {fmt(selected.handoverDate)}</div>}
+              </div>
             )}
           </div>
         </div>
