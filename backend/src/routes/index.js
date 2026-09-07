@@ -57,7 +57,9 @@ cr.post('/payment',               P.customer.pay);
 cr.get( '/invoices',              P.customer.invoices);
 cr.post('/review',                P.customer.review);
 cr.get( '/complaints',            P.customer.complaints);
+cr.get( '/complaint-options',     P.customer.complaintOptions);
 cr.post('/complaints',            P.customer.complaint);
+cr.post('/complaints/:id/feedback', P.customer.feedback);
 cr.get( '/telemetry/:vehicleId',  P.customer.telemetry);
 cr.get( '/notifications',         P.customer.notifications);
 // FIX: serve approved vehicles from MongoDB (replaces broken localStorage approach)
@@ -70,6 +72,8 @@ cr.post('/rentals/verify-payment',         Rn.verifyPayment);
 cr.get( '/rentals',                        Rn.myRentals);
 cr.get( '/rentals/invoices',               Rn.myRentalInvoices);
 cr.get( '/rentals/invoices/:id/download',  Rn.downloadInvoice);
+cr.post('/rentals/:id/extend/create-order', Rn.createExtensionOrder);
+cr.post('/rentals/:id/extend/verify-payment', Rn.verifyExtensionPayment);
 r.use('/customer', cr);
 
 // ── Staff ─────────────────────────────────────────────────────────
@@ -101,8 +105,15 @@ fr.get( '/roi',                Fr.roi);
 fr.get( '/capex',              Fr.capex);
 fr.get( '/emi',                Fr.emi);
 fr.get( '/inventory',          Fr.inventory);
+fr.post('/inventory',          Fr.addInventoryPart);
 fr.get( '/staff',              Fr.staff);
 fr.get( '/jobs',               Fr.jobs);
+fr.get( '/rentals',             Rn.franchiseRentals);
+fr.put( '/rentals/:id/handover', Rn.franchiseHandover);
+fr.put( '/rentals/:id/return',   Rn.franchiseReturn);
+fr.get( '/complaints',          P.franchise.complaints);
+fr.get( '/fault-vehicles',       P.franchise.faultVehicles);
+fr.put( '/complaints/:id/solve', P.franchise.solveComplaint);
 // ── NEW: vehicle & staff approval submissions ─────────────────────
 fr.post('/pending-vehicles',   Ap.submitVehicle);
 fr.get( '/pending-vehicles',   Ap.myVehicles);
@@ -152,6 +163,54 @@ dr.post('/expansion', async (req, res) => {
 });
 
 dr.get('/franchise-health', Ad.health);
+dr.get('/franchise-ratings', Ad.franchiseRatings);
+
+// Per-franchisee vehicle + part inventory summary for Command Center
+dr.get('/franchisee-stats', async (req, res) => {
+  try {
+    const { User, Inventory } = require('../models');
+    const { PendingVehicle } = require('../models');
+    const franchisees = await User.find({ role: 'FRANCHISEE' }).select('_id name email').lean();
+    const ids = franchisees.map(f => f._id);
+
+    // Vehicles per franchisee
+    const vehicleAgg = await PendingVehicle.aggregate([
+      { $match: { franchiseeId: { $in: ids } } },
+      { $group: {
+          _id: '$franchiseeId',
+          totalVehicles: { $sum: 1 },
+          approvedVehicles: { $sum: { $cond: [{ $eq: ['$status', 'APPROVED'] }, 1, 0] } },
+          pendingVehicles:  { $sum: { $cond: [{ $eq: ['$status', 'PENDING_APPROVAL'] }, 1, 0] } },
+      }},
+    ]);
+    const vehicleMap = new Map(vehicleAgg.map(v => [String(v._id), v]));
+
+    // Parts inventory (shared Inventory collection — group by category for totals)
+    const partTotals = await Inventory.aggregate([
+      { $group: { _id: null, totalSkus: { $sum: 1 }, totalQty: { $sum: '$quantity' }, totalValue: { $sum: { $multiply: ['$quantity', '$unitPrice'] } } } }
+    ]);
+
+    // Build per-franchisee response
+    const stats = franchisees.map(f => {
+      const vs = vehicleMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+      return {
+        franchiseeId:     String(f._id),
+        name:             f.name,
+        email:            f.email,
+        totalVehicles:    vs.totalVehicles,
+        approvedVehicles: vs.approvedVehicles,
+        pendingVehicles:  vs.pendingVehicles,
+      };
+    });
+
+    // Attach global inventory summary
+    const inv = partTotals[0] || { totalSkus: 0, totalQty: 0, totalValue: 0 };
+    res.json({ franchisees: stats, inventory: inv });
+  } catch (e) {
+    console.error('franchisee-stats error:', e);
+    res.status(500).json({ message: e.message });
+  }
+});
 
 // ── NEW: Vehicle & Staff approvals for Command Center ─────────────
 dr.get('/pending-vehicles',            Ap.allVehicles);
@@ -160,6 +219,18 @@ dr.put('/pending-vehicles/:id/reject', Ap.rejectVehicle);
 dr.get('/pending-staff',               Ap.allStaff);
 dr.put('/pending-staff/:id/approve',   Ap.approveStaff);
 dr.put('/pending-staff/:id/reject',    Ap.rejectStaff);
+
+// All parts inventory for Command Center
+dr.get('/all-parts', async (req, res) => {
+  try {
+    const { Inventory } = require('../models');
+    const parts = await Inventory.find().sort('name').lean();
+    res.json(parts);
+  } catch (e) {
+    console.error('all-parts error:', e);
+    res.status(500).json({ message: e.message });
+  }
+});
 
 // Franchisee creation
 dr.post('/franchisees', async (req, res) => {
@@ -170,6 +241,7 @@ dr.post('/franchisees', async (req, res) => {
       name, email, phone, password,
       managerName, managerPhone, managerEmail,
       addressLine1, addressLine2, city, district, state, pincode,
+      latitude, longitude,
       businessName, gstNumber, panNumber,
       notes,
     } = req.body;
@@ -204,6 +276,14 @@ dr.post('/franchisees', async (req, res) => {
       phone:        phone || undefined,
       passwordHash: await bcrypt.hash(password, 12),
       role:         'FRANCHISEE',
+      address: {
+        line1: addressLine1 || '', line2: addressLine2 || '', city: city || '',
+        district: district || '', state: state || '', pincode: pincode || '',
+        latitude: latitude !== undefined && latitude !== '' ? Number(latitude) : undefined,
+        longitude: longitude !== undefined && longitude !== '' ? Number(longitude) : undefined,
+        businessName: businessName || '', managerName: managerName || '',
+        managerPhone: managerPhone || '', managerEmail: managerEmail || ''
+      },
       // Store extra details in refreshTokenHash field temporarily — or just drop it.
       // We persist it as a plain object on a virtual key via a workaround:
     });
@@ -219,6 +299,9 @@ dr.post('/franchisees', async (req, res) => {
       city,
       state,
       pincode,
+      latitude: u.address?.latitude,
+      longitude: u.address?.longitude,
+      address: u.address,
     });
   } catch (e) {
     res.status(400).json({ message: e.message });
@@ -231,7 +314,6 @@ dr.get('/customers/:id',     Ad.customerDetail);
 
 // Vehicle Rentals (Command Center)
 dr.get('/rentals',              Rn.allRentals);
-dr.put('/rentals/:id/handover', Rn.handover);
 
 r.use('/admin', dr);
 

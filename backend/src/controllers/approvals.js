@@ -174,6 +174,7 @@ exports.submitVehicle = async (req, res) => {
       franchiseeName:  req.user.name,
       franchiseeEmail: req.user.email,
       ...req.body,
+      quantity: Math.max(0, Number(req.body.quantity ?? 1)),
       status: 'PENDING_APPROVAL',
     });
     await audit(req.user._id, 'SUBMIT', 'PendingVehicle', record._id);
@@ -186,19 +187,29 @@ exports.submitVehicle = async (req, res) => {
 /** GET /api/franchise/pending-vehicles */
 exports.myVehicles = async (req, res) => {
   const filter = req.user.role === 'FRANCHISEE' ? { franchiseeId: req.user._id } : {};
-  res.json(await PendingVehicle.find(filter).sort('-createdAt'));
+  const rows = await PendingVehicle.find(filter).sort('-createdAt').lean();
+  res.json(rows.map(v => ({ ...v, quantity: v.quantity == null ? 1 : v.quantity })));
 };
 
 /** GET /api/admin/pending-vehicles */
 exports.allVehicles = async (req, res) => {
-  res.json(await PendingVehicle.find().sort('-createdAt'));
+  const rows = await PendingVehicle.find().sort('-createdAt').lean();
+  res.json(rows.map(v => ({ ...v, quantity: v.quantity == null ? 1 : v.quantity })));
 };
 
 /** GET /api/customer/available-vehicles */
 exports.availableVehicles = async (req, res) => {
   try {
-    const docs = await PendingVehicle.find({ status: 'APPROVED' }).sort('-reviewedAt');
-    res.json(docs);
+    const pin = req.query.pincode || '';
+    const customer = req.user ? await User.findById(req.user._id).select('address').lean() : null;
+    const address = customer?.address || {};
+    const docs = await PendingVehicle.find({ status: 'APPROVED', $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }] }).sort('-reviewedAt').lean();
+    const franchiseeIds = [...new Set(docs.map(v => String(v.franchiseeId)).filter(Boolean))];
+    const franchisees = await User.find({ _id: { $in: franchiseeIds }, role:'FRANCHISEE' }).select('name address').lean();
+    const fm = new Map(franchisees.map(f => [String(f._id), f]));
+    const score = v => { const a=fm.get(String(v.franchiseeId))?.address||{}; if(pin && a.pincode===pin)return 0; if(a.pincode===address.pincode && a.pincode)return 0; if(a.district && address.district && a.district.toLowerCase()===address.district.toLowerCase())return 1; if(a.state && address.state && a.state.toLowerCase()===address.state.toLowerCase())return 2; return 3; };
+    res.json(docs.sort((a,b)=>score(a)-score(b)).map(v=>({...v, quantity: v.quantity == null ? 1 : v.quantity, franchiseeName: fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE franchise', franchiseeAddress: fm.get(String(v.franchiseeId))?.address || null})));
+  
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
@@ -240,6 +251,7 @@ exports.submitStaff = async (req, res) => {
       franchiseeName:  req.user.name,
       franchiseeEmail: req.user.email,
       ...req.body,
+      quantity: Math.max(0, Number(req.body.quantity ?? 1)),
       status: 'PENDING_APPROVAL',
     });
     await audit(req.user._id, 'SUBMIT', 'PendingStaff', record._id);

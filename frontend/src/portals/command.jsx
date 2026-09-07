@@ -5,7 +5,7 @@ import {
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
   Plus, X, Save, Eye, EyeOff, UserPlus, BarChart2, RefreshCw,
-  Clock, Key, UserCheck, UserX, UserMinus, Image
+  Clock, Key, UserCheck, UserX, UserMinus, Image, Layers, Hash
 } from 'lucide-react';
 import './command.css';
 
@@ -47,19 +47,16 @@ const NAV_ITEMS = {
     { id: 'jobs',       label: 'Jobs',       Icon: ClipboardList },
   ],
   command: [
-    { id: 'dashboard',           label: 'Dashboard',         Icon: LayoutDashboard },
-    { id: 'hubs',                label: 'Hubs',              Icon: Factory },
-    { id: 'chargers',            label: 'Chargers',          Icon: Zap },
-    { id: 'operations',          label: 'Live Ops',          Icon: Activity },
-    { id: 'revenue',             label: 'Revenue',           Icon: DollarSign },
-    { id: 'anomalies',           label: 'Anomalies',         Icon: AlertTriangle },
-    { id: 'franchisees',         label: 'Franchisees',       Icon: Users },
-    { id: 'vehicle-approvals',   label: 'Vehicle Approvals', Icon: Car },
-    { id: 'staff-directory',     label: 'Staff Directory',   Icon: Users },
-    { id: 'customers',           label: 'Customers',         Icon: Users },
-    { id: 'customer-payments',   label: 'Customer Payments', Icon: DollarSign },
-    { id: 'demand',              label: 'Demand',            Icon: TrendingUp },
-    { id: 'expansion',           label: 'Expansion',         Icon: MapPin },
+    { id: 'dashboard',           label: 'Dashboard',              Icon: LayoutDashboard },
+    { id: 'hubs',                label: 'Hubs',                   Icon: Factory },
+    { id: 'franchisees',         label: 'Franchisees',            Icon: Users },
+    { id: 'vehicle-inventory',   label: 'Vehicle & Inventory',    Icon: Layers },
+    { id: 'vehicle-approvals',   label: 'Vehicle Approvals',      Icon: Car },
+    { id: 'staff-directory',     label: 'Staff Directory',        Icon: Users },
+    { id: 'customers',           label: 'Customers',              Icon: Users },
+    { id: 'franchise-ratings',   label: 'Franchisee Ratings',     Icon: BarChart2 },
+    { id: 'customer-payments',   label: 'Customer Payments',      Icon: DollarSign },
+    { id: 'demand',              label: 'Demand',                 Icon: TrendingUp },
   ],
 };
 
@@ -303,19 +300,16 @@ function PageRouter({ page, call }) {
   }
   // command
   const pages = {
-    dashboard:           <AdminDashboard    {...P} />,
-    hubs:                <AdminHubs         {...P} />,
-    chargers:            <AdminChargers     {...P} />,
-    operations:          <AdminOps          {...P} />,
-    revenue:             <AdminRevenue      {...P} />,
-    anomalies:           <AdminAnomalies    {...P} />,
-    franchisees:         <AdminFranchisees  {...P} />,
-    'vehicle-approvals': <AdminVehicleApprovals call={call} />,
-    'staff-directory':   <AdminStaffDirectory   call={call} />,
-    customers:           <AdminCustomers         call={call} />,
-    'customer-payments': <AdminCustomerPayments  call={call} />,
-    demand:              <AdminDemand       {...P} />,
-    expansion:           <AdminExpansion    {...P} />,
+    dashboard:            <AdminDashboard          {...P} />,
+    hubs:                 <AdminHubs               {...P} />,
+    franchisees:          <AdminFranchisees         {...P} />,
+    'vehicle-inventory':  <AdminVehicleInventory    call={call} />,
+    'vehicle-approvals':  <AdminVehicleApprovals    call={call} />,
+    'staff-directory':    <AdminStaffDirectory      call={call} />,
+    customers:            <AdminCustomers           call={call} />,
+    'franchise-ratings':  <AdminFranchiseRatings    call={call} />,
+    'customer-payments':  <AdminCustomerPayments    call={call} />,
+    demand:               <AdminDemand              {...P} />,
   };
   return pages[page] || pages.dashboard;
 }
@@ -1121,7 +1115,7 @@ function AdminHubs({ call }) {
     {open && (
       <Modal title="Add New Hub" subtitle="Create a new charging hub location" onClose={() => setOpen(false)}
         footer={<><button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving ? 'Creating…' : <><Save size={14} /> Create Hub</>}</button></>}>
-        <HubFields />
+        {HubFields()}
       </Modal>
     )}
 
@@ -1129,7 +1123,7 @@ function AdminHubs({ call }) {
     {editHub && (
       <Modal title="Edit Hub" subtitle={`Editing: ${editHub.name}`} onClose={() => setEditHub(null)}
         footer={<><button className="btn-ghost" onClick={() => setEditHub(null)}>Cancel</button><button className="btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Saving…' : <><Save size={14} /> Save Changes</>}</button></>}>
-        <HubFields />
+        {HubFields()}
       </Modal>
     )}
 
@@ -1360,12 +1354,75 @@ const EMPTY_FR = {
   addressLine1: '', addressLine2: '', city: '', district: '', state: '', pincode: '',
   // Business
   businessName: '', gstNumber: '', panNumber: '',
+  // Location
+  latitude: '', longitude: '',
   // Extra
   notes: '',
 };
 
+
+function FranchiseeMap({ franchisees = [] }) {
+  const mapRef = React.useRef(null);
+  const leafRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+
+  React.useEffect(() => {
+    if (!mapRef.current || !window.L || leafRef.current) return;
+    const L = window.L;
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+      .setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors', maxZoom: 18,
+    }).addTo(map);
+    leafRef.current = map;
+    return () => { markersRef.current.forEach(m => map.removeLayer(m)); map.remove(); leafRef.current = null; };
+  }, []);
+
+  React.useEffect(() => {
+    const map = leafRef.current;
+    if (!map || !window.L) return;
+    const L = window.L;
+    markersRef.current.forEach(m => map.removeLayer(m));
+    markersRef.current = [];
+    const mapped = franchisees.filter(f => {
+      const lat = Number(f.address?.latitude ?? f.address?.lat);
+      const lng = Number(f.address?.longitude ?? f.address?.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    });
+    mapped.forEach(f => {
+      const lat = Number(f.address.latitude ?? f.address.lat);
+      const lng = Number(f.address.longitude ?? f.address.lng);
+      const a = f.address || {};
+      const basic = `<strong>${f.name || 'Franchisee'}</strong><br/>${a.city || a.district || a.state || 'India'}<br/>📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      const complete = `<div style="min-width:220px"><strong>${f.name || 'Franchisee'}</strong><hr style="border:0;border-top:1px solid #eee;margin:6px 0"/>` +
+        `<div><b>Business:</b> ${a.businessName || '—'}</div><div><b>Manager:</b> ${a.managerName || '—'}</div>` +
+        `<div><b>Phone:</b> ${f.phone || a.managerPhone || '—'}</div><div><b>Email:</b> ${f.email || a.managerEmail || '—'}</div>` +
+        `<div><b>Address:</b> ${[a.line1,a.line2,a.city,a.district,a.state,a.pincode].filter(Boolean).join(', ') || '—'}</div>` +
+        `<div><b>GST:</b> ${a.gstNumber || '—'}</div><div><b>PAN:</b> ${a.panNumber || '—'}</div>` +
+        `<div><b>Latitude:</b> ${lat}</div><div><b>Longitude:</b> ${lng}</div></div>`;
+      const marker = L.circleMarker([lat,lng], { radius: 9, weight: 3, fillOpacity: .9 });
+      marker.addTo(map);
+      marker.bindTooltip(basic, { direction:'top', offset:[0,-8], sticky:true });
+      marker.bindPopup(complete, { maxWidth: 340 });
+      markersRef.current.push(marker);
+    });
+    if (mapped.length > 1) {
+      map.fitBounds(L.latLngBounds(mapped.map(f => [Number(f.address.latitude ?? f.address.lat), Number(f.address.longitude ?? f.address.lng)])), { padding:[30,30], maxZoom: 10 });
+    } else if (mapped.length === 1) {
+      map.setView([Number(mapped[0].address.latitude ?? mapped[0].address.lat), Number(mapped[0].address.longitude ?? mapped[0].address.lng)], 10);
+    }
+  }, [franchisees]);
+
+  return <div className="hub-map-container" style={{position:'relative'}}>
+    <div ref={mapRef} id="india-franchise-map" />
+    {!franchisees.some(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))) &&
+      <div style={{padding:14,color:'#64748b',fontSize:12}}>No franchisee locations mapped yet. Add latitude and longitude when creating a franchisee.</div>}
+  </div>;
+}
+
 function AdminFranchisees({ call }) {
   const { data: initial, loading, error } = useFetch(call, '/admin/franchisees');
+  const { data: statsData } = useFetch(call, '/admin/franchisee-stats');
   const [list,    setList]    = useState([]);
   const [open,    setOpen]    = useState(false);
   const [saving,  setSaving]  = useState(false);
@@ -1384,6 +1441,9 @@ function AdminFranchisees({ call }) {
     if (form.password !== form.confirm)               { show('Passwords do not match', 'error'); return; }
     if (form.password.length < 8)                     { show('Password must be at least 8 characters', 'error'); return; }
     if (form.pincode && !/^\d{6}$/.test(form.pincode)){ show('Pincode must be exactly 6 digits', 'error'); return; }
+    if (form.latitude === '' || form.longitude === '') { show('Latitude and Longitude are required', 'error'); return; }
+    if (Number.isNaN(Number(form.latitude)) || Number(form.latitude) < -90 || Number(form.latitude) > 90) { show('Latitude must be between -90 and 90', 'error'); return; }
+    if (Number.isNaN(Number(form.longitude)) || Number(form.longitude) < -180 || Number(form.longitude) > 180) { show('Longitude must be between -180 and 180', 'error'); return; }
 
     setSaving(true);
     try {
@@ -1404,6 +1464,8 @@ function AdminFranchisees({ call }) {
           district:     form.district     || undefined,
           state:        form.state        || undefined,
           pincode:      form.pincode      || undefined,
+          latitude:     form.latitude     || undefined,
+          longitude:    form.longitude    || undefined,
           businessName: form.businessName || undefined,
           gstNumber:    form.gstNumber    || undefined,
           panNumber:    form.panNumber    || undefined,
@@ -1411,7 +1473,7 @@ function AdminFranchisees({ call }) {
         },
       });
       setList(l => [...l, newFr]);
-      setCreated({ name: form.name, email: form.email, password: form.password, businessName: form.businessName, managerName: form.managerName });
+      setCreated({ name: form.name, email: form.email, password: form.password, businessName: form.businessName, managerName: form.managerName, latitude: form.latitude, longitude: form.longitude });
       show('✓ Franchisee account created!');
     } catch (e) {
       show(e.response?.data?.message || e.message || 'Failed to create franchisee', 'error');
@@ -1421,6 +1483,13 @@ function AdminFranchisees({ call }) {
   if (loading) return <Loader />;
   if (error)   return <Err msg={error} />;
 
+  // Build a quick lookup: franchiseeId → vehicle stats
+  const statsMap = new Map((statsData?.franchisees || []).map(s => [s.franchiseeId, s]));
+  const inv = statsData?.inventory || { totalSkus: 0, totalQty: 0, totalValue: 0 };
+  const totalVehiclesAll = (statsData?.franchisees || []).reduce((s, f) => s + f.totalVehicles, 0);
+  const totalApprovedAll = (statsData?.franchisees || []).reduce((s, f) => s + f.approvedVehicles, 0);
+  const totalPendingAll  = (statsData?.franchisees || []).reduce((s, f) => s + f.pendingVehicles, 0);
+
   return <>
     <Toast toast={toast} />
     <PageHeader
@@ -1429,9 +1498,87 @@ function AdminFranchisees({ call }) {
       actions={<button className="btn-primary" onClick={openForm}><UserPlus size={15} /> Add Franchisee</button>}
     />
     <MetricGrid metrics={[
-      { label: 'Total Partners', value: list.length, Icon: Users,    color: '#2563eb' },
-      { label: 'Active Portals', value: list.length, Icon: Activity, color: '#16a34a' },
+      { label: 'Total Partners',      value: list.length,      Icon: Users,         color: '#2563eb' },
+      { label: 'Total Vehicles',      value: totalVehiclesAll, Icon: Car,           color: '#7c3aed' },
+      { label: 'Approved & Live',     value: totalApprovedAll, Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Pending Approval',    value: totalPendingAll,  Icon: Clock,         color: '#d97706' },
+      { label: 'Parts SKUs (Total)',  value: inv.totalSkus,    Icon: Package,       color: '#0891b2' },
+      { label: 'Parts Stock (Units)', value: inv.totalQty,     Icon: Layers,        color: '#4f46e5' },
     ]} />
+
+    {/* ── Per-Franchisee Vehicle & Inventory Breakdown ── */}
+    <Card title="Vehicle & Inventory by Franchisee" badge={`${list.length} partners`}>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Franchisee</th>
+              <th>Email</th>
+              <th style={{ textAlign:'center' }}>Total Vehicles</th>
+              <th style={{ textAlign:'center' }}>Approved</th>
+              <th style={{ textAlign:'center' }}>Pending</th>
+              <th style={{ textAlign:'center' }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(f => {
+              const s = statsMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+              return (
+                <tr key={String(f._id)}>
+                  <td style={{ fontWeight: 600 }}>{f.name || '—'}</td>
+                  <td style={{ color: '#6b7280', fontSize: 12 }}>{f.email}</td>
+                  <td style={{ textAlign:'center', fontWeight: 700 }}>{s.totalVehicles}</td>
+                  <td style={{ textAlign:'center' }}>
+                    <span style={{ background:'#dcfce7', color:'#166534', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>
+                      {s.approvedVehicles}
+                    </span>
+                  </td>
+                  <td style={{ textAlign:'center' }}>
+                    {s.pendingVehicles > 0 ? (
+                      <span style={{ background:'#fef3c7', color:'#92400e', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>
+                        {s.pendingVehicles}
+                      </span>
+                    ) : <span style={{ color:'#9ca3af', fontSize:12 }}>—</span>}
+                  </td>
+                  <td style={{ textAlign:'center' }}>
+                    <span style={{
+                      background: f.active ? '#dcfce7' : '#fee2e2',
+                      color:      f.active ? '#166534' : '#991b1b',
+                      padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700
+                    }}>
+                      {f.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {list.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:32, color:'#9ca3af' }}>No franchisees yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+
+    {/* ── Parts Inventory Summary ── */}
+    <Card title="Parts Inventory Summary (Network-wide)">
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16 }}>
+        {[
+          { label:'Total SKUs', value: inv.totalSkus,                                           color:'#2563eb' },
+          { label:'Total Units in Stock', value: inv.totalQty,                                  color:'#16a34a' },
+          { label:'Total Inventory Value', value:`₹${Number(inv.totalValue||0).toLocaleString('en-IN')}`, color:'#7c3aed' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background:'#f9fafb', borderRadius:12, padding:'18px 20px', textAlign:'center', border:'1.5px solid #e5e7eb' }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:6 }}>{label}</div>
+            <div style={{ fontSize:26, fontWeight:900, color }}>{value ?? 0}</div>
+          </div>
+        ))}
+      </div>
+    </Card>
+
+    <Card title="Franchisee Locations" badge={`${list.filter(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))).length} mapped`}>
+      <FranchiseeMap franchisees={list} />
+    </Card>
     <Card title="Franchisee Directory" badge={`${list.length} partners`}>
       <DataTable rows={list} cols={['name', 'email', 'phone', 'active', 'createdAt']} />
     </Card>
@@ -1554,6 +1701,16 @@ function AdminFranchisees({ call }) {
             </div>
 
             {/* ── Section: Notes ── */}
+                        <div className="form-section-label">Map Location</div>
+            <div className="row-2">
+              <Fld label="Latitude" required hint="Example: 15.8281">
+                <Inp value={form.latitude} onChange={ff('latitude')} type="number" step="any" placeholder="15.8281" />
+              </Fld>
+              <Fld label="Longitude" required hint="Example: 78.0373">
+                <Inp value={form.longitude} onChange={ff('longitude')} type="number" step="any" placeholder="78.0373" />
+              </Fld>
+            </div>
+
             <div className="form-section-label">Additional Notes</div>
             <Fld label="Notes / Remarks" hint="Internal notes about this franchisee">
               <Txt value={form.notes} onChange={ff('notes')} placeholder="Any special instructions or remarks…" rows={2} />
@@ -1774,6 +1931,16 @@ function AdminExpansion({ call }) {
 }
 
 
+// ── Franchisee Ratings ────────────────────────────────────────────
+function AdminFranchiseRatings({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/admin/franchise-ratings');
+  if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
+  return <><PageHeader title="Franchisee Ratings" sub="Customer feedback captured after complaints are solved." actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15}/> Refresh</button>}/>
+    <MetricGrid metrics={[{label:'Rated Franchisees',value:data?.length||0,Icon:Users,color:'#2563eb'},{label:'Total Ratings',value:(data||[]).reduce((s,x)=>s+(x.ratingCount||0),0),Icon:BarChart2,color:'#16a34a'},{label:'Network Avg',value:data?.length?((data.reduce((s,x)=>s+(x.averageRating||0)*(x.ratingCount||0),0)/(data.reduce((s,x)=>s+(x.ratingCount||0),0)||1)).toFixed(2)):'0.00',Icon:BarChart2,color:'#d97706'}]}/>
+    <Card title="Franchisee Performance" badge={`${data?.length||0} rated`}><div style={{display:'flex',flexDirection:'column',gap:10}}>{(data||[]).map(r=><div key={String(r._id)} style={{border:'1px solid #e5e7eb',borderRadius:10,padding:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><strong>{r.franchisee?.name||'Franchisee'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:3}}>{r.franchisee?.email||''} · PIN {r.franchisee?.address?.pincode||'—'}</div></div><div style={{fontWeight:800,fontSize:18}}>⭐ {(r.averageRating||0).toFixed(2)} <span style={{fontSize:11,fontWeight:500,color:'#64748b'}}>({r.ratingCount} ratings)</span></div></div>)}</div></Card>
+  </>;
+}
+
 // ──────────────────────────────────────────────────────────────────
 // NOTE: Pending vehicle/staff data now lives in MongoDB via the API.
 // The localStorage helpers below are intentionally removed.
@@ -1803,6 +1970,470 @@ function AdminPendingBanner({ call }) {
       </span>
     </div>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VEHICLE & INVENTORY BY FRANCHISEE — full detail view
+// ══════════════════════════════════════════════════════════════════
+function AdminVehicleInventory({ call }) {
+  const { data: franchiseeList, loading: flLoading } = useFetch(call, '/admin/franchisees');
+  const { data: statsData,      loading: sdLoading } = useFetch(call, '/admin/franchisee-stats');
+  const { data: allVehicles,    loading: avLoading } = useFetch(call, '/admin/pending-vehicles');
+  const { data: allPartsData,   loading: apLoading } = useFetch(call, '/admin/all-parts');
+  const [activeTab,     setActiveTab]     = useState('vehicles');
+  const [selectedFr,    setSelectedFr]    = useState('all');
+  const [selectedVeh,   setSelectedVeh]   = useState(null);
+  const [selectedPart,  setSelectedPart]  = useState(null);
+  const { toast, show } = useToast();
+
+  if (flLoading || sdLoading || avLoading || apLoading) return <Loader />;
+
+  const franchisees  = franchiseeList || [];
+  const statsMap     = new Map((statsData?.franchisees || []).map(s => [s.franchiseeId, s]));
+  const inv          = statsData?.inventory || { totalSkus: 0, totalQty: 0, totalValue: 0 };
+  const vehicles     = allVehicles || [];
+  const allParts     = allPartsData || [];
+
+  const filteredVehicles = selectedFr === 'all'
+    ? vehicles
+    : vehicles.filter(v => v.franchiseeEmail === selectedFr || v.franchiseeId === selectedFr);
+
+  const approved  = vehicles.filter(v => v.status === 'APPROVED');
+  const pending   = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
+  const totalVeh  = (statsData?.franchisees || []).reduce((s, f) => s + f.totalVehicles, 0);
+
+  const totalPartsValue = allParts.reduce((s, p) => s + (Number(p.unitPrice || 0) * Number(p.quantity || 0)), 0);
+  const lowStockParts   = allParts.filter(p => p.quantity <= p.reorderLevel);
+
+  const TABS = [
+    { id: 'vehicles', label: 'Vehicles by Franchisee', Icon: Car,     count: vehicles.length },
+    { id: 'inventory', label: 'Parts Inventory',        Icon: Package, count: allParts.length },
+  ];
+
+  const fmt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return <>
+    <Toast toast={toast} />
+    <PageHeader
+      title="Vehicle & Inventory by Franchisee"
+      sub="Complete network view — all vehicles and parts inventory across all franchise partners."
+      actions={<button className="btn-ghost" onClick={() => window.location.reload()}><RefreshCw size={15} /> Refresh</button>}
+    />
+
+    <MetricGrid metrics={[
+      { label: 'Total Partners',      value: franchisees.length, Icon: Users,         color: '#2563eb' },
+      { label: 'Total Vehicles',      value: totalVeh,           Icon: Car,           color: '#7c3aed' },
+      { label: 'Approved & Live',     value: approved.length,    Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Pending Approval',    value: pending.length,     Icon: Clock,         color: '#d97706' },
+      { label: 'Parts SKUs (Network)',value: inv.totalSkus,      Icon: Package,       color: '#0891b2' },
+      { label: 'Parts Stock (Units)', value: inv.totalQty,       Icon: Layers,        color: '#4f46e5' },
+    ]} />
+
+    {/* ── Subtab Bar ── */}
+    <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
+      {TABS.map(t => (
+        <button key={t.id} onClick={() => setActiveTab(t.id)}
+          style={{
+            display:'flex', alignItems:'center', gap:7, padding:'10px 22px',
+            border:'none', background:'none', cursor:'pointer',
+            borderBottom: activeTab === t.id ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === t.id ? '#2563eb' : '#6b7280',
+            fontWeight: activeTab === t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
+            transition:'all 0.15s',
+          }}>
+          <t.Icon size={15} />
+          {t.label}
+          <span style={{
+            background: activeTab === t.id ? '#2563eb' : '#e5e7eb',
+            color: activeTab === t.id ? '#fff' : '#374151',
+            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
+          }}>{t.count}</span>
+        </button>
+      ))}
+    </div>
+
+    {/* ── VEHICLES TAB ── */}
+    {activeTab === 'vehicles' && <>
+      {/* Franchisee filter */}
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Filter by Franchisee:</span>
+        <select
+          className="fld-input"
+          style={{ maxWidth:280, padding:'6px 12px', fontSize:13 }}
+          value={selectedFr}
+          onChange={e => setSelectedFr(e.target.value)}
+        >
+          <option value="all">All Franchisees ({vehicles.length} vehicles)</option>
+          {franchisees.map(f => {
+            const count = vehicles.filter(v => v.franchiseeEmail === f.email || v.franchiseeId === String(f._id)).length;
+            return <option key={f._id} value={f.email}>{f.name} — {f.email} ({count} vehicles)</option>;
+          })}
+        </select>
+        {selectedFr !== 'all' && (
+          <button className="btn-ghost" style={{ fontSize:12, padding:'4px 10px' }} onClick={() => setSelectedFr('all')}>
+            Clear Filter
+          </button>
+        )}
+      </div>
+
+      <Card title="Vehicle Listings" badge={`${filteredVehicles.length} vehicles`}>
+        {filteredVehicles.length === 0
+          ? <div className="empty-state"><Car size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No vehicles found.</p></div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Franchisee</th>
+                    <th>Category</th>
+                    <th>Make</th>
+                    <th>Model</th>
+                    <th>Registration No.</th>
+                    <th>Color</th>
+                    <th>Year</th>
+                    <th>Battery</th>
+                    <th>Range</th>
+                    <th>Charging</th>
+                    <th>Price/Day</th>
+                    <th>Qty</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredVehicles.map((v, i) => {
+                    const sc = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
+                    return (
+                      <tr key={v._id || i}>
+                        <td>
+                          <div style={{ fontWeight:600, fontSize:12 }}>{v.franchiseeName || '—'}</div>
+                          <div style={{ fontSize:11, color:'#9ca3af' }}>{v.franchiseeEmail || ''}</div>
+                        </td>
+                        <td style={{ fontSize:12 }}>{v.category || '—'}</td>
+                        <td style={{ fontWeight:600, fontSize:13 }}>{v.make || '—'}</td>
+                        <td style={{ fontSize:13 }}>{v.model || '—'}</td>
+                        <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.color || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.year || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.rangeKm ? `${v.rangeKm} km` : '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
+                        <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
+                        <td>
+                          <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:11 }}>
+                            {v.status === 'APPROVED' ? '✓ Approved' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:11 }}
+                            onClick={() => setSelectedVeh(v)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+
+    </>}
+
+    {/* ── INVENTORY TAB ── */}
+    {activeTab === 'inventory' && <>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:16 }}>
+        {[
+          { label:'Total Vehicles',      value: totalVeh,                                                                           Icon: Car,           color:'#2563eb' },
+          { label:'Parts SKUs',          value: allParts.length,                                                                    Icon: Package,       color:'#7c3aed' },
+          { label:'Approved & Live',     value: approved.length,                                                                    Icon: CheckCircle,   color:'#16a34a' },
+          { label:'Low Stock Parts',     value: lowStockParts.length,                                                               Icon: AlertTriangle, color:'#dc2626' },
+        ].map(({ label, value, Icon: Ic, color }) => (
+          <div key={label} style={{ background:'#fff', borderRadius:12, padding:'18px 20px', border:'1.5px solid #e5e7eb', display:'flex', alignItems:'center', gap:14 }}>
+            <div style={{ background: color + '15', borderRadius:10, width:42, height:42, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <Ic size={20} color={color} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{label}</div>
+              <div style={{ fontSize:24, fontWeight:900, color }}>{value ?? 0}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Card
+        title="Parts Inventory"
+        badge={`${allParts.length} SKUs`}
+      >
+        {allParts.length === 0
+          ? <div className="empty-state" style={{ padding:'32px 24px' }}>
+              <Package size={38} style={{ opacity:.2, marginBottom:10 }} />
+              <p>No parts in inventory yet. Parts added by franchisees will appear here.</p>
+            </div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Part Code (SKU)</th>
+                    <th>Part Name</th>
+                    <th>Category</th>
+                    <th>Quantity</th>
+                    <th>Reorder Level</th>
+                    <th>Unit Price</th>
+                    <th>Stock Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allParts.map((p, i) => {
+                    const isLow = p.quantity <= p.reorderLevel;
+                    return (
+                      <tr key={p._id || p.sku || i}>
+                        <td>
+                          <span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8',
+                            background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>
+                            {p.sku || '—'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
+                        <td>
+                          <span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px',
+                            borderRadius:4, color:'#374151' }}>
+                            {p.category || 'General'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>
+                          {p.quantity ?? 0}
+                        </td>
+                        <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
+                        <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
+                        <td>
+                          <span className="status-pill" style={{
+                            background: isLow ? '#fee2e2' : '#dcfce7',
+                            color:      isLow ? '#991b1b' : '#166534',
+                          }}>
+                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                            onClick={() => setSelectedPart(p)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+    </>}
+
+    {/* ── Vehicle Detail Modal ── */}
+    {selectedVeh && (
+      <div className="modal-overlay" onClick={() => setSelectedVeh(null)}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(640px,100%)' }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Vehicle Details</div>
+              <div className="modal-subtitle">Complete vehicle information submitted by franchisee</div>
+            </div>
+            <button className="icon-btn" onClick={() => setSelectedVeh(null)}><X size={20} /></button>
+          </div>
+          <div className="modal-body">
+            {/* Hero */}
+            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+              padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+              <div style={{ background:'#2563eb', color:'#fff', borderRadius:10,
+                width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 }}>
+                {selectedVeh.category === '2-wheeler' ? '🛵' : selectedVeh.category === '3-wheeler' ? '🛺' : '🚗'}
+              </div>
+              <div>
+                <div style={{ fontSize:11, fontWeight:700, color:'#2563eb', letterSpacing:'.08em', textTransform:'uppercase', marginBottom:3 }}>{selectedVeh.category || 'Vehicle'}</div>
+                <div style={{ fontSize:22, fontWeight:900, color:'#1e3a8a' }}>{selectedVeh.make} {selectedVeh.model}</div>
+                <div style={{ fontSize:12, color:'#3b82f6', marginTop:2, fontFamily:'monospace' }}>{selectedVeh.registrationNo || '—'}</div>
+              </div>
+            </div>
+
+            {/* Status + badges */}
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
+              {(() => {
+                const sc = selectedVeh.status === 'APPROVED' ? '#16a34a' : selectedVeh.status === 'REJECTED' ? '#dc2626' : '#d97706';
+                const sl = selectedVeh.status === 'APPROVED' ? '✓ Approved & Live' : selectedVeh.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending Approval';
+                return <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:13, padding:'4px 14px' }}>{sl}</span>;
+              })()}
+              {selectedVeh.year && <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>Year: {selectedVeh.year}</span>}
+              {selectedVeh.color && <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>{selectedVeh.color}</span>}
+              {selectedVeh.chargingType && <span className="status-pill" style={{ background:'#ecfdf5', color:'#065f46', fontSize:13, padding:'4px 14px' }}>⚡ {selectedVeh.chargingType}</span>}
+            </div>
+
+            {/* Images */}
+            {selectedVeh.images?.length > 0 && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Vehicle Images ({selectedVeh.images.length})</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  {selectedVeh.images.map((img, i) => (
+                    <div key={i} style={{ width:80, height:64, borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb' }}>
+                      <img src={img.url} alt={`Image ${i+1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* All Fields Grid */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+              {[
+                ['Make / Brand',        selectedVeh.make              || '—'],
+                ['Model Name',          selectedVeh.model             || '—'],
+                ['Category',            selectedVeh.category          || '—'],
+                ['Year of Manufacture', selectedVeh.year              || '—'],
+                ['Color',               selectedVeh.color             || '—'],
+                ['Registration No.',    selectedVeh.registrationNo    || '—'],
+                ['Battery Capacity',    selectedVeh.batteryCapacityKwh ? `${selectedVeh.batteryCapacityKwh} kWh` : '—'],
+                ['Range',               selectedVeh.rangeKm           ? `${selectedVeh.rangeKm} km` : '—'],
+                ['Charging Type',       selectedVeh.chargingType      || '—'],
+                ['Price Per Day',       `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
+                ['Quantity in Stock',   selectedVeh.quantity ?? 1],
+                ['Approval Status',     selectedVeh.status            || '—'],
+                ['Submitted By',        selectedVeh.franchiseeName    || '—'],
+                ['Franchisee Email',    selectedVeh.franchiseeEmail   || '—'],
+                ['Submitted At',        fmt(selectedVeh.createdAt)],
+                ['Last Updated',        fmt(selectedVeh.updatedAt)],
+              ].map(([k, val]) => (
+                <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                  <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                  <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:13 }}>{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {selectedVeh.description && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+                <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                  {selectedVeh.description}
+                </div>
+              </div>
+            )}
+
+            {selectedVeh.status === 'REJECTED' && selectedVeh.rejectionReason && (
+              <InfoBanner Icon={AlertTriangle}>Rejection reason: {selectedVeh.rejectionReason}</InfoBanner>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setSelectedVeh(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Part Detail Modal ── */}
+    {selectedPart && (() => {
+      const p = selectedPart;
+      const isLow = p.quantity <= p.reorderLevel;
+      return (
+        <div className="modal-overlay" onClick={() => setSelectedPart(null)}>
+          <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(580px,100%)' }}>
+            <div className="modal-head">
+              <div>
+                <div className="modal-title">Part Details</div>
+                <div className="modal-subtitle">Complete information for this spare part</div>
+              </div>
+              <button className="icon-btn" onClick={() => setSelectedPart(null)}><X size={20} /></button>
+            </div>
+            <div className="modal-body">
+              {/* Hero: Part Code */}
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+                padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+                <div style={{ background:'#1d4ed8', color:'#fff', borderRadius:10,
+                  width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <Hash size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:'#1d4ed8', letterSpacing:'.1em',
+                    textTransform:'uppercase', marginBottom:3 }}>Part Code (SKU)</div>
+                  <div style={{ fontSize:26, fontWeight:900, fontFamily:'monospace', color:'#1e3a8a',
+                    letterSpacing:'.05em' }}>{p.sku || '—'}</div>
+                </div>
+              </div>
+              {/* Stock badge */}
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                <span className="status-pill" style={{
+                  background: isLow ? '#fee2e2' : '#dcfce7',
+                  color:      isLow ? '#991b1b' : '#166534',
+                  fontSize:13, padding:'4px 14px',
+                }}>
+                  {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                </span>
+                <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>
+                  {p.category || 'General'}
+                </span>
+                {p.partType && (
+                  <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>
+                    {p.partType}
+                  </span>
+                )}
+              </div>
+              {/* Core Info Grid */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px',
+                background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                {[
+                  ['Part Name',      p.name          || '—'],
+                  ['Category',       p.category      || 'General'],
+                  ['Current Stock',  p.quantity ?? 0],
+                  ['Reorder Level',  p.reorderLevel  ?? 5],
+                  ['Unit Price',     `₹${Number(p.unitPrice||0).toLocaleString('en-IN')}`],
+                  ['Total Value',    `₹${Number((p.unitPrice||0)*(p.quantity||0)).toLocaleString('en-IN')}`],
+                  p.manufacturer ? ['Manufacturer', p.manufacturer] : null,
+                  p.location     ? ['Storage Location', p.location]  : null,
+                  p.partType     ? ['Part Type', p.partType]          : null,
+                ].filter(Boolean).map(([k, v]) => (
+                  <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                    <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600,
+                      textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                    <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:14 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {p.compatibleVehicles && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8,
+                    display:'flex', alignItems:'center', gap:6 }}>
+                    <Car size={13} /> Compatible Vehicles
+                  </div>
+                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                    {p.compatibleVehicles}
+                  </div>
+                </div>
+              )}
+              {p.description && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                    {p.description}
+                  </div>
+                </div>
+              )}
+              {isLow && (
+                <InfoBanner Icon={AlertTriangle}>
+                  Stock ({p.quantity}) is at or below reorder level ({p.reorderLevel}). Consider restocking soon.
+                </InfoBanner>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setSelectedPart(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+  </>;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1879,6 +2510,7 @@ function AdminVehicleApprovals({ call }) {
                 <div className="approval-meta">
                   <span>Reg: {v.registrationNo}</span>
                   <span>₹{v.pricePerDay}/day</span>
+                  <span>Stock: {v.quantity ?? 0}</span>
                   <span>{v.rangeKm} km range</span>
                   <span>{v.color}</span>
                 </div>
@@ -2393,7 +3025,7 @@ function AdminCustomers({ call }) {
               </thead>
               <tbody>
                 {data.customers?.length === 0 && (
-                  <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No customers found.</td></tr>
+                  <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No customers found.</td></tr>
                 )}
                 {data.customers?.map(c => (
                   <tr key={c._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -2563,19 +3195,21 @@ function AdminCustomerPayments({ call }) {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [selected, setSelected]   = useState(null);
-  const [handBusy, setHandBusy]   = useState(false);
-  const [handMsg, setHandMsg]     = useState({ type: '', text: '' });
   const [filter, setFilter]       = useState('ALL');
 
   const load = () => {
     setLoading(true); setError(null);
     call('/admin/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d : []))
+      .then(d => setRentals(Array.isArray(d) ? d.filter(r => r.paymentStatus === 'PAID') : []))
       .catch(e => setError(e.message || 'Failed to load rentals'))
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const statusColor = {
     BOOKED:           '#d97706',
@@ -2590,18 +3224,6 @@ function AdminCustomerPayments({ call }) {
   const paid     = rentals.filter(r => r.paymentStatus === 'PAID');
   const total    = paid.reduce((s, r) => s + (r.totalAmount || 0), 0);
 
-  const handleHandover = async (rentalId) => {
-    setHandBusy(true); setHandMsg({ type: '', text: '' });
-    try {
-      await call(`/admin/rentals/${rentalId}/handover`, { method: 'PUT' });
-      setHandMsg({ type: 'success', text: '✅ Handover marked! Vehicle is now Active.' });
-      // Refresh
-      load();
-      setSelected(prev => prev ? { ...prev, status: 'ACTIVE', handoverDate: new Date().toISOString() } : null);
-    } catch (e) {
-      setHandMsg({ type: 'error', text: e.response?.data?.message || 'Handover failed.' });
-    } finally { setHandBusy(false); }
-  };
 
   const fmt = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -2613,7 +3235,7 @@ function AdminCustomerPayments({ call }) {
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1f2e', margin: 0 }}>Customer Payments</h1>
         <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
-          All vehicle rental bookings and payments from customers
+          Paid vehicle rental bookings — refreshes every 30 seconds
         </p>
       </div>
 
@@ -2622,7 +3244,6 @@ function AdminCustomerPayments({ call }) {
         {[
           { label: 'Total Bookings',  value: rentals.length,                                       color: '#2563eb' },
           { label: 'Paid',            value: paid.length,                                           color: '#16a34a' },
-          { label: 'Pending Handover',value: rentals.filter(r=>r.status==='PAYMENT_DONE').length,   color: '#7c3aed' },
           { label: 'Active Rentals',  value: rentals.filter(r=>r.status==='ACTIVE').length,         color: '#16a34a' },
           { label: 'Revenue Collected',value: `₹${total.toLocaleString('en-IN')}`,                 color: '#16a34a' },
         ].map(({ label, value, color }) => (
@@ -2638,7 +3259,7 @@ function AdminCustomerPayments({ call }) {
 
       {/* Filter tabs */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {['ALL','BOOKED','PAYMENT_DONE','ACTIVE','COMPLETED','CANCELLED'].map(s => (
+        {['ALL','PAYMENT_DONE','ACTIVE','COMPLETED','CANCELLED'].map(s => (
           <button key={s} onClick={() => setFilter(s)} style={{
             padding: '6px 14px', borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: 'pointer',
             border: filter === s ? `1.5px solid ${statusColor[s] || '#2563eb'}` : '1.5px solid #e4e7ef',
@@ -2655,14 +3276,14 @@ function AdminCustomerPayments({ call }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#f8fafc' }}>
-              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Booking Status', 'Dates', 'Action'].map(h => (
+              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Booking Status', 'Dates'].map(h => (
                 <th key={h} style={{ padding: '12px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 12, borderBottom: '1px solid #e4e7ef' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No records found.</td></tr>
+              <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No records found.</td></tr>
             )}
             {filtered.map(r => {
               const sc   = statusColor[r.status] || '#6b7280';
@@ -2670,7 +3291,7 @@ function AdminCustomerPayments({ call }) {
               const vs   = r.vehicleSnapshot || {};
               return (
                 <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
-                  onClick={() => { setSelected(r); setHandMsg({ type: '', text: '' }); }}>
+                  onClick={() => setSelected(r)}>
                   <td style={{ padding: '12px 14px' }}>
                     <div style={{ fontWeight: 700 }}>{cust.name || '—'}</div>
                     <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.email || '—'}</div>
@@ -2702,27 +3323,6 @@ function AdminCustomerPayments({ call }) {
                     <div>{fmt(r.startDate)} →</div>
                     <div>{fmt(r.endDate)}</div>
                   </td>
-                  <td style={{ padding: '12px 14px' }}>
-                    {r.status === 'PAYMENT_DONE' && (
-                      <button
-                        onClick={e => { e.stopPropagation(); handleHandover(r._id); }}
-                        disabled={handBusy}
-                        style={{
-                          background: '#2563eb', color: '#fff', border: 'none',
-                          borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700,
-                          cursor: 'pointer', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        🚗 Handover
-                      </button>
-                    )}
-                    {r.status === 'ACTIVE' && (
-                      <span style={{ color: '#16a34a', fontSize: 12, fontWeight: 600 }}>✅ Active</span>
-                    )}
-                    {r.status === 'BOOKED' && (
-                      <span style={{ color: '#d97706', fontSize: 12, fontWeight: 600 }}>⏳ Awaiting Payment</span>
-                    )}
-                  </td>
                 </tr>
               );
             })}
@@ -2747,17 +3347,6 @@ function AdminCustomerPayments({ call }) {
               </div>
               <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
             </div>
-
-            {handMsg.text && (
-              <div style={{
-                background: handMsg.type === 'success' ? '#f0fdf4' : '#fef2f2',
-                border: `1px solid ${handMsg.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
-                borderRadius: 10, padding: '10px 14px', marginBottom: 16,
-                color: handMsg.type === 'success' ? '#15803d' : '#dc2626', fontSize: 13, fontWeight: 600,
-              }}>
-                {handMsg.text}
-              </div>
-            )}
 
             {/* Vehicle images */}
             {selected.vehicleSnapshot?.images?.length > 0 && (
@@ -2815,6 +3404,7 @@ function AdminCustomerPayments({ call }) {
                 ['End Date',     fmt(selected.endDate)],
                 ['Booked On',    fmt(selected.createdAt)],
                 ...(selected.handoverDate ? [['Handover Date', fmt(selected.handoverDate)]] : []),
+                ...(selected.returnDate ? [['Returned Date', fmt(selected.returnDate)]] : []),
                 ['Razorpay Order', selected.razorpayOrderId || '—'],
                 ['Payment ID',    selected.razorpayPaymentId || '—'],
               ].map(([k, v]) => (
@@ -2825,32 +3415,24 @@ function AdminCustomerPayments({ call }) {
               ))}
             </div>
 
-            {/* Delivery Address */}
+            {/* Pickup Location */}
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Delivery Address</div>
-              <div style={{ background: '#f8fafc', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#374151', lineHeight: 1.6 }}>
-                {selected.fullAddress || `${selected.area || ''}${selected.district ? ', ' + selected.district : ''}${selected.state ? ', ' + selected.state : ''}${selected.pincode ? ' - ' + selected.pincode : ''}`}
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Franchisee Pickup Location</div>
+              <div style={{ background: '#f0fdf4', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#166534', lineHeight: 1.6 }}>
+                {[selected.pickupLocation?.name || selected.franchiseeName, selected.pickupLocation?.address].filter(Boolean).join(' · ') || '—'}
               </div>
             </div>
 
-            {/* Handover action */}
-            {selected.status === 'PAYMENT_DONE' && (
-              <button
-                onClick={() => handleHandover(selected._id)}
-                disabled={handBusy}
-                style={{
-                  width: '100%', background: '#2563eb', color: '#fff', border: 'none',
-                  borderRadius: 10, padding: '14px', fontSize: 15, fontWeight: 700,
-                  cursor: handBusy ? 'not-allowed' : 'pointer', opacity: handBusy ? .7 : 1,
-                }}
-              >
-                {handBusy ? 'Processing…' : '🚗 Mark as Handed Over — Activate Rental'}
-              </button>
-            )}
-            {selected.status === 'ACTIVE' && (
+            {/* Handover action */}            {selected.status === 'ACTIVE' && (
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#16a34a', fontWeight: 700, fontSize: 14 }}>
                 ✅ Vehicle is with the customer — Rental Active
                 {selected.handoverDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Handed over: {fmt(selected.handoverDate)}</div>}
+              </div>
+            )}
+            {selected.status === 'COMPLETED' && (
+              <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#475569', fontWeight: 700, fontSize: 14 }}>
+                ✅ Booking Completed — Vehicle Returned to Franchise Stock
+                {selected.returnDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Returned: {fmt(selected.returnDate)}</div>}
               </div>
             )}
           </div>

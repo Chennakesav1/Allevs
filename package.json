@@ -12,6 +12,5 @@
     "start": "npm run start -w backend",
     "seed": "npm run seed -w backend",
     "smoke": "node scripts/smoke.js"
-  },
-  "devDependencies": {}
+  }
 }

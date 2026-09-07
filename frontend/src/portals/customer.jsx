@@ -4,7 +4,7 @@ import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image
+  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus
 } from 'lucide-react';
 import './customer.css';
 
@@ -94,11 +94,32 @@ function api() {
   };
 }
 
+// ── Error Boundary ─────────────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error('EV CORE UI Error:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{padding:32,textAlign:'center',color:'#b91c1c'}}>
+          <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+          <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>{this.state.error?.message || 'An unexpected error occurred.'}</div>
+          <button className="btn-primary" onClick={()=>this.setState({hasError:false,error:null})}>Try Again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ── useFetch hook ──────────────────────────────────────────────────
 function useFetch(call, path) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
+  const [tick, setTick]       = useState(0);
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
@@ -107,8 +128,32 @@ function useFetch(call, path) {
       .catch(e => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [path]);
-  return { data, loading, error };
+  }, [path, tick]);
+  const refresh = () => setTick(t => t + 1);
+  return { data, loading, error, refresh };
+}
+
+function useToast() {
+  const [toast, setToast] = useState(null);
+  const show = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
+  return { toast, show };
+}
+
+function Toast({ toast }) {
+  if (!toast) return null;
+  return <div className={`toast toast-${toast.type}`}>{toast.msg}</div>;
+}
+
+function InfoBanner({ Icon: I = Shield, children }) {
+  return (
+    <div className="info-banner">
+      <I size={15} />
+      <span>{children}</span>
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -304,17 +349,20 @@ function LoginPage({ setScreen, setPendingEmail, onAuth }) {
 // SCREEN 2 — REGISTER
 // ══════════════════════════════════════════════════════════════════
 function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', password: '', password2: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', pincode: '', state: '', district: '', password: '', password2: '' });
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinMsg, setPinMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg,  setMsg]  = useState({ type: '', text: '' });
 
   const submit = async () => {
     if (!form.name || !form.email) { setMsg({ type: 'error', text: 'Name and email are required.' }); return; }
+    if (!/^\d{6}$/.test(form.pincode) || !form.state || !form.district) { setMsg({ type: 'error', text: 'Enter a valid 6-digit pincode and wait for State/District to auto-fill.' }); return; }
     if (!form.password || form.password.length < 8) { setMsg({ type: 'error', text: 'Password must be at least 8 characters.' }); return; }
     if (form.password !== form.password2) { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
     setBusy(true); setMsg({ type: '', text: '' });
     try {
-      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone });
+      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone, pincode: form.pincode, state: form.state, district: form.district });
       setPendingEmail(form.email);
       if (setPendingPassword) setPendingPassword(form.password);
       setScreen('verify-register');
@@ -336,6 +384,32 @@ function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
         <label>Phone (optional)
           <input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
         </label>
+        <label>Pincode *
+          <div style={{ position:'relative' }}>
+            <input type="text" inputMode="numeric" maxLength={6} value={form.pincode}
+              onChange={async e => {
+                const pin=e.target.value.replace(/\D/g,'').slice(0,6);
+                setForm(f=>({...f,pincode:pin,state:'',district:''})); setPinMsg('');
+                if(pin.length===6){
+                  setPinBusy(true);
+                  try{ const r=await fetch(`https://api.postalpincode.in/pincode/${pin}`); const j=await r.json(); const po=j[0]?.PostOffice?.[0];
+                    if(j[0]?.Status==='Success'&&po){setForm(f=>({...f,pincode:pin,state:po.State||'',district:po.District||''}));setPinMsg('✓ Location found');}
+                    else setPinMsg('Invalid pincode');
+                  }catch{setPinMsg('Could not lookup pincode');} finally{setPinBusy(false);}
+                }
+              }} placeholder="6-digit pincode" />
+            {pinBusy && <span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)'}}>⏳</span>}
+          </div>
+          {pinMsg && <span style={{fontSize:12,color:pinMsg.startsWith('✓')?'#16a34a':'#dc2626'}}>{pinMsg}</span>}
+        </label>
+        <div className="row-2">
+          <label>State
+            <input type="text" value={form.state} readOnly placeholder="Auto-filled from pincode" style={{background:'#f8fafc'}} />
+          </label>
+          <label>District
+            <input type="text" value={form.district} readOnly placeholder="Auto-filled from pincode" style={{background:'#f8fafc'}} />
+          </label>
+        </div>
         <label>Password * <span style={{fontSize:11,color:'#94a3b8'}}>(min 8 characters)</span>
           <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
         </label>
@@ -663,7 +737,7 @@ function PageRouter({ page, call, setPage }) {
       complaints:           <CustComplaints        {...P} />,
       'charging-stations':  <CustChargingStations  {...P} />,
     };
-    return pages[page] || pages.dashboard;
+    return <ErrorBoundary key={page}>{pages[page] || pages.dashboard}</ErrorBoundary>;
   }
   if (kind === 'staff') {
     const pages = {
@@ -695,11 +769,14 @@ function PageRouter({ page, call, setPage }) {
 // ══════════════════════════════════════════════════════════════════
 // SHARED UI COMPONENTS
 // ══════════════════════════════════════════════════════════════════
-function PageHeader({ title, sub }) {
+function PageHeader({ title, sub, actions }) {
   return (
-    <div className="page-header">
-      <h1 className="page-title">{title}</h1>
-      {sub && <p className="page-sub">{sub}</p>}
+    <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10}}>
+      <div>
+        <h1 className="page-title">{title}</h1>
+        {sub && <p className="page-sub">{sub}</p>}
+      </div>
+      {actions && <div style={{flexShrink:0}}>{actions}</div>}
     </div>
   );
 }
@@ -816,6 +893,8 @@ function CustVehicles({ call }) {
   const { data: owned, loading: lo, error: eo } = useFetch(call, '/customer/vehicles');
   const [rentals, setRentals]   = useState([]);
   const [rentLoading, setRL]    = useState(true);
+  const [extendRental, setExtendRental] = useState(null);
+  const { toast, show } = useToast();
 
   useEffect(() => {
     call('/customer/rentals')
@@ -830,6 +909,7 @@ function CustVehicles({ call }) {
   const pastRentals   = rentals.filter(r => ['COMPLETED','CANCELLED'].includes(r.status));
 
   return <>
+    <Toast toast={toast}/>
     <PageHeader title="My Vehicles" sub="Rented and owned EV vehicles." />
 
     {/* Active Rentals */}
@@ -876,17 +956,17 @@ function CustVehicles({ call }) {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: '6px 16px' }}>
                   {[
-                    ['Reg. No.',     vs.registrationNo || '—'],
-                    ['Battery',      vs.batteryCapacityKwh ? `${vs.batteryCapacityKwh} kWh` : '—'],
-                    ['Range',        vs.rangeKm ? `${vs.rangeKm} km` : '—'],
-                    ['Rate',         `₹${r.pricePerDay}/day`],
-                    ['Duration',     `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
-                    ['Start Date',   r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
-                    ['End Date',     r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
-                    ['Total Paid',   `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`],
-                    ['Delivery',     r.fullAddress || `${r.area}, ${r.district}, ${r.state} - ${r.pincode}`],
+                    ['Reg. No.',       vs.registrationNo || '—'],
+                    ['Battery',        vs.batteryCapacityKwh ? `${vs.batteryCapacityKwh} kWh` : '—'],
+                    ['Range',          vs.rangeKm ? `${vs.rangeKm} km` : '—'],
+                    ['Rate',           `₹${r.pricePerDay}/day`],
+                    ['Duration',       `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
+                    ['Start Date',     r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
+                    ['End Date',       r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
+                    ['Total Paid',     `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`],
+                    ['Franchisee Location', [r.pickupLocation?.name || r.franchiseeName, r.pickupLocation?.address].filter(Boolean).join(' · ') || '—'],
                     ...(r.handoverDate ? [['Handover Date', new Date(r.handoverDate).toLocaleDateString('en-IN')]] : []),
-                    ...(r.returnDate  ? [['Return Due',    new Date(r.returnDate).toLocaleDateString('en-IN')]]   : []),
+                    ...(r.returnDate  ? [['Returned Date', new Date(r.returnDate).toLocaleDateString('en-IN')]]   : []),
                   ].map(([k, v]) => (
                     <div key={k} style={{ fontSize: 13 }}>
                       <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
@@ -894,11 +974,29 @@ function CustVehicles({ call }) {
                     </div>
                   ))}
                 </div>
+                <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
+                  <button className="btn-primary" onClick={() => setExtendRental(r)} disabled={r.status !== 'ACTIVE'}>
+                    <Plus size={15}/> Extend Rental
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
       </div>
+    )}
+
+    {extendRental && (
+      <ExtendRentalFlow
+        rental={extendRental}
+        call={call}
+        onClose={() => setExtendRental(null)}
+        onSuccess={(updated) => {
+          setRentals(prev => prev.map(x => String(x._id) === String(updated._id) ? updated : x));
+          setExtendRental(null);
+          show('Rental extended successfully.');
+        }}
+      />
     )}
 
     {/* Owned Vehicles */}
@@ -947,6 +1045,7 @@ function CustVehicles({ call }) {
 
 function CustBookings({ call, setPage }) {
   const [rentals, setRentals] = useState([]);
+  const [pickup, setPickup] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -958,16 +1057,17 @@ function CustBookings({ call, setPage }) {
 
   if (loading) return <Loader />;
 
-  const bookings = rentals.filter(r => ['BOOKED', 'PAYMENT_DONE', 'HANDOVER_PENDING'].includes(r.status));
+  const bookings = rentals.filter(r => !['COMPLETED', 'CANCELLED'].includes(r.status));
   const statusColor = { BOOKED: '#d97706', PAYMENT_DONE: '#2563eb', HANDOVER_PENDING: '#7c3aed' };
   const statusLabel = {
     BOOKED:           '🕐 Booked — Awaiting Payment',
-    PAYMENT_DONE:     '💳 Paid — Awaiting Handover',
+    PAYMENT_DONE:     '💳 Paid — Awaiting Franchise Handover',
     HANDOVER_PENDING: '⏳ Handover Pending',
+    ACTIVE:            '✅ Handed Over — Rental Active',
   };
 
   return <>
-    <PageHeader title="My Bookings" sub="Paid rentals awaiting vehicle handover by Command Center." />
+    <PageHeader title="My Bookings" sub="Your customer location is recorded for the booking; pickup and handover happen only at the selected franchisee." />
     <MetricGrid metrics={[
       { label: 'Total Bookings',    value: bookings.length, Icon: ClipboardList, color: '#2563eb' },
       { label: 'Awaiting Handover', value: bookings.filter(r => r.status === 'PAYMENT_DONE').length, Icon: Car, color: '#7c3aed' },
@@ -1016,9 +1116,11 @@ function CustBookings({ call, setPage }) {
                   ['End Date',   r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
                   ['Rate',       `\u20b9${r.pricePerDay}/day`],
                   ['Total Paid', `\u20b9${(r.totalAmount || 0).toLocaleString('en-IN')}`],
-                  ['Delivery',   r.fullAddress || [r.area, r.district, r.state, r.pincode].filter(Boolean).join(', ')],
+                  ['Customer Location', r.fullAddress || [r.area, r.district, r.state, r.pincode].filter(Boolean).join(', ')],
                   ['Payment ID', r.razorpayPaymentId || '—'],
                   ['Booked On',  new Date(r.createdAt).toLocaleDateString('en-IN')],
+                  ['Handover Date', r.handoverDate ? new Date(r.handoverDate).toLocaleDateString('en-IN') : 'Pending'],
+                  ['Pickup Location', [r.pickupLocation?.name || r.franchiseeName, r.pickupLocation?.address].filter(Boolean).join(' · ') || '—'],
                 ].map(([k, v]) => (
                   <div key={k} style={{ fontSize: 13 }}>
                     <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
@@ -1026,15 +1128,53 @@ function CustBookings({ call, setPage }) {
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 14, padding: '10px 14px', background: '#fefce8', border: '1px solid #fde68a', borderRadius: 8, fontSize: 13, color: '#92400e' }}>
-                ⏳ The Command Center will handover your vehicle shortly. Once done it moves to <strong>My Vehicles</strong>.
+              <div style={{ marginTop: 14, padding: '12px 14px', background: r.handoverDate ? '#f0fdf4' : '#fefce8', border: `1px solid ${r.handoverDate ? '#bbf7d0' : '#fde68a'}`, borderRadius: 8, fontSize: 13, color: r.handoverDate ? '#166534' : '#92400e' }}>
+                {r.handoverDate
+                  ? <>✅ Vehicle handed over on <strong>{new Date(r.handoverDate).toLocaleDateString('en-IN')}</strong>. Rental is active.</>
+                  : <>⏳ Your payment is confirmed. The franchisee will handover your vehicle.</>}
               </div>
+              {r.pickupLocation && (r.pickupLocation.lat || r.pickupLocation.lng) && (
+                <button className="btn-primary" style={{marginTop:10,display:'inline-flex',alignItems:'center',gap:7}}
+                  onClick={() => setPickup(r.pickupLocation)}>
+                  <MapPin size={15}/> Go to Pickup Location
+                </button>
+              )}
             </div>
           );
         })}
       </div>
     )}
+    {pickup && <PickupLocationMap location={pickup} onClose={()=>setPickup(null)} />}
   </>;
+}
+
+
+function PickupLocationMap({ location, onClose }) {
+  const mapRef = React.useRef(null);
+  React.useEffect(() => {
+    if (!location || !mapRef.current || !window.L) return;
+    const lat = Number(location.lat), lng = Number(location.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const L = window.L;
+    const map = L.map(mapRef.current).setView([lat,lng], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap contributors',maxZoom:18}).addTo(map);
+    const marker = L.marker([lat,lng]).addTo(map);
+    marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
+    return () => map.remove();
+  }, [location]);
+  if (!location) return null;
+  return <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(850px,100%)'}}>
+      <div className="modal-head">
+        <div><div className="modal-title">Pickup Location</div><div className="modal-subtitle">{location.name || 'Franchisee'} · {location.address || 'India'}</div></div>
+        <button className="icon-btn" onClick={onClose}>✕</button>
+      </div>
+      <div className="modal-body">
+        <div ref={mapRef} style={{height:450,borderRadius:12,overflow:'hidden',border:'1px solid #e4e7ef'}} />
+        <div style={{marginTop:10,fontSize:12,color:'#64748b'}}>📍 Coordinates: {location.lat}, {location.lng}</div>
+      </div>
+    </div>
+  </div>;
 }
 
 function CustWallet({ call }) {
@@ -1096,7 +1236,7 @@ function CustInvoices({ call }) {
     <PageHeader title="Invoices" sub="Rental payment invoices. Download as HTML and print/save as PDF from your browser." />
     <MetricGrid metrics={[
       { label: 'Total Invoices', value: invoices.length,                                               Icon: FileText, color: '#2563eb' },
-      { label: 'Total Paid',     value: fmt(invoices.reduce((s, i) => s + (i.total || 0), 0)),         Icon: DollarSign, color: '#16a34a' },
+      { label: 'Total Paid',     value: fmt(invoices.reduce((s, i) => s + (i.subtotal || 0), 0)),         Icon: DollarSign, color: '#16a34a' },
     ]} />
 
     {invoices.length === 0 ? (
@@ -1124,9 +1264,7 @@ function CustInvoices({ call }) {
               </div>
               <div style={{ marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                 {[
-                  ['Subtotal', fmt(inv.subtotal)],
-                  ['GST (18%)', fmt(inv.tax)],
-                  ['Total', fmt(inv.total)],
+                  ['Total', fmt(inv.subtotal)],
                 ].map(([k, v]) => (
                   <div key={k} style={{ fontSize: 13 }}>
                     <span style={{ color: '#94a3b8', fontSize: 11, display: 'block' }}>{k}</span>
@@ -1164,14 +1302,78 @@ function CustInvoices({ call }) {
 }
 
 function CustComplaints({ call }) {
-  const { data, loading, error } = useFetch(call, '/customer/complaints');
+  const { data, loading, error, refresh } = useFetch(call, '/customer/complaints');
+  const { data: options } = useFetch(call, '/customer/complaint-options');
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ vehicleId:'', franchiseeId:'', category:'Service Issue', message:'', subject:'' });
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState({});
+  const [feedbackBusy, setFeedbackBusy] = useState(null);
+  const { toast, show } = useToast();
+
+  const activeVehicles = options?.activeVehicles || [];
+  const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
+
+  const submit = async () => {
+    if(!form.vehicleId || !form.franchiseeId || !form.message){show('Select an active bike, franchisee and enter the complaint.', 'error');return;}
+    setSaving(true);
+    try{
+      const fr=(options.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId));
+      await call('/customer/complaints',{method:'post',data:{...form,subject:form.subject||form.category,vehicleSnapshot:selectedVehicle?.vehicleSnapshot,paymentDetails:selectedVehicle?.paymentDetails,franchiseeId:form.franchiseeId,franchiseeName:fr?.name||''}});
+      show('Complaint sent to the selected franchisee.'); setOpen(false); setForm({vehicleId:'',franchiseeId:'',category:'Service Issue',message:'',subject:''}); refresh();
+    }catch(e){show(e.response?.data?.message||'Could not register complaint','error');} finally{setSaving(false);}
+  };
+
+  const sendFeedback = async (c) => {
+    const f=feedback[c._id]||{};
+    if(!f.rating){show('Select a rating first','error');return;}
+    setFeedbackBusy(c._id);
+    try{await call(`/customer/complaints/${c._id}/feedback`,{method:'post',data:{rating:Number(f.rating),feedback:f.comment||''}});show('Thank you. Your franchisee rating was saved.');refresh();}
+    catch(e){show(e.response?.data?.message||'Could not save feedback','error');}finally{setFeedbackBusy(null);}
+  };
+
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
   return <>
-    <PageHeader title="Support & Complaints" sub="Raise and track support tickets." />
-    <Card title="My Complaints" badge={`${data?.length ?? 0}`}>
-      <DataTable rows={data} cols={['subject', 'status', 'priority', 'createdAt']} />
-    </Card>
+    <Toast toast={toast}/>
+    <PageHeader title="Support & Complaints" sub="Register a complaint against an active vehicle and track franchisee resolution."
+      actions={<button className="btn-primary" onClick={()=>setOpen(true)} disabled={!activeVehicles.length}><Plus size={15}/> Register Complaint</button>} />
+    {!activeVehicles.length && <InfoBanner Icon={Bell}>You need an active vehicle before you can register a vehicle complaint.</InfoBanner>}
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+          <div><strong>{c.subject || c.category || 'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Franchisee: {c.franchiseeName||'—'} · {new Date(c.createdAt).toLocaleString()}</div></div>
+          <span style={{fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:999,background:c.status==='SOLVED'?'#dcfce7':c.status==='CLOSED'?'#e2e8f0':c.status==='IN_PROGRESS'?'#fef3c7':'#fee2e2',color:c.status==='SOLVED'?'#166534':c.status==='CLOSED'?'#475569':c.status==='IN_PROGRESS'?'#92400e':'#991b1b'}}>{c.status}</span>
+        </div>
+        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
+        {c.resolution && <div style={{marginTop:10,padding:10,borderRadius:8,background:'#f0fdf4',fontSize:12}}><strong>Resolution:</strong> {c.resolution}</div>}
+        {c.replacementVehicleSnapshot && <div style={{marginTop:8,fontSize:12,color:'#166534'}}>🔁 Replacement vehicle: {c.replacementVehicleSnapshot.make} {c.replacementVehicleSnapshot.model}</div>}
+        {c.status==='SOLVED' && !c.feedbackSubmitted && <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid #eef2f7'}}><strong style={{fontSize:13}}>How was the franchisee service?</strong><div style={{display:'flex',gap:6,marginTop:8}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>setFeedback(f=>({...f,[c._id]:{...f[c._id],rating:n}}))} style={{border:'1px solid #dbe3ef',background:(feedback[c._id]?.rating===n)?'#2563eb':'#fff',color:(feedback[c._id]?.rating===n)?'#fff':'#64748b',borderRadius:7,padding:'5px 9px',cursor:'pointer'}}>{n}★</button>)}</div><input style={{marginTop:8,width:'100%',padding:9,border:'1px solid #dbe3ef',borderRadius:7}} placeholder="Feedback (optional)" value={feedback[c._id]?.comment||''} onChange={e=>setFeedback(f=>({...f,[c._id]:{...f[c._id],comment:e.target.value}}))}/><button className="btn-primary" style={{marginTop:8}} onClick={()=>sendFeedback(c)} disabled={feedbackBusy===c._id}>{feedbackBusy===c._id?'Saving…':'Submit Feedback'}</button></div>}
+      </div>)}
+      {!data?.length && <div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25,marginBottom:12}}/><p>No complaints yet.</p></div></div>}
+    </div>
+
+    {open && <div className="modal-overlay" onClick={()=>setOpen(false)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Register a Complaint</div><div className="modal-subtitle">Active bike → auto-filled vehicle & payment details → franchisee</div></div><button className="icon-btn" onClick={()=>setOpen(false)}>✕</button></div><div className="modal-body">
+      <div className="login-form">
+        <label>Active Bike *<select value={form.vehicleId} onChange={e=>{const v=e.target.value;const av=activeVehicles.find(x=>String(x.vehicleId)===v);setForm(f=>({...f,vehicleId:v,franchiseeId:av?.franchiseeId||f.franchiseeId}))}}><option value="">Select active bike…</option>{activeVehicles.map(v=><option key={String(v.vehicleId)} value={String(v.vehicleId)}>{v.vehicleSnapshot?.make||''} {v.vehicleSnapshot?.model||v.vehicleSnapshot?.modelName||'Vehicle'} · {v.vehicleSnapshot?.registrationNo||v.vehicleSnapshot?.vin||String(v.vehicleId).slice(-6)}</option>)}</select></label>
+        {selectedVehicle && <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:12}}><strong style={{fontSize:13}}>Vehicle details (non-editable)</strong>{[['Vehicle',`${selectedVehicle.vehicleSnapshot?.make||''} ${selectedVehicle.vehicleSnapshot?.model||selectedVehicle.vehicleSnapshot?.modelName||'Vehicle'}`],['Registration',selectedVehicle.vehicleSnapshot?.registrationNo||'—'],['Payment Status',selectedVehicle.paymentDetails?.paymentStatus||'—'],['Payment ID',selectedVehicle.paymentDetails?.razorpayPaymentId||'—'],['Amount',selectedVehicle.paymentDetails?.totalAmount?`₹${selectedVehicle.paymentDetails.totalAmount}`:'—']].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:10,fontSize:12,padding:'4px 0'}}><span style={{color:'#64748b'}}>{k}</span><strong>{v}</strong></div>)}</div>}
+        {form.franchiseeId && (() => {
+          const fr=(options?.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId)) || selectedVehicle;
+          const name=fr?.name||selectedVehicle?.franchiseeName||'—';
+          const pin=fr?.address?.pincode||'—';
+          return (
+            <div style={{background:'#f0fdf4',border:'1.5px solid #bbf7d0',borderRadius:10,padding:'10px 14px',fontSize:13}}>
+              <span style={{fontSize:11,fontWeight:700,color:'#166534',display:'block',marginBottom:4}}>FRANCHISEE (auto-filled from rental)</span>
+              <strong style={{color:'#14532d'}}>{name}</strong>
+              {pin!=='—' && <span style={{color:'#16a34a',marginLeft:8,fontSize:12}}>PIN {pin}</span>}
+            </div>
+          );
+        })()}
+        {!form.franchiseeId && <div style={{background:'#fef9c3',border:'1px solid #fde68a',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#92400e'}}>⚠ Select an active bike above to auto-fill franchisee</div>}
+        <label>Issue Category<select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{['Service Issue','Vehicle Fault','Battery Issue','Charging Issue','Accident/Damage','Other'].map(x=><option key={x}>{x}</option>)}</select></label>
+        <label>Complaint *<textarea rows={4} value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} placeholder="Describe the issue clearly…"/></label>
+      </div>
+    </div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving?'Sending…':'Send Complaint'}</button></div></div></div>}
   </>;
 }
 
@@ -1184,6 +1386,9 @@ function CustAvailableVehicles({ call, setPage }) {
   const [filterCat, setFilterCat] = useState('all');
   const [loading, setLoading]     = useState(true);
   const [bookingVehicle, setBookingVehicle] = useState(null);
+  const [location, setLocation] = useState(null);
+  const [nearbyFranchisees, setNearbyFranchisees] = useState([]);
+  const [selectedFranchiseeId, setSelectedFranchiseeId] = useState('');
 
   // FIX: Fetch approved vehicles from the API (MongoDB) instead of
   // localStorage. The Command Center writes approvals to MongoDB via
@@ -1193,8 +1398,13 @@ function CustAvailableVehicles({ call, setPage }) {
     const load = async () => {
       try {
         setLoading(true);
-        const list = await call('/customer/available-vehicles');
+        const profile = await call('/customer/profile');
+        const pin = profile?.address?.pincode || '';
+        const list = await call(`/customer/available-vehicles${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
         setVehicles(Array.isArray(list) ? list : []);
+        setLocation(profile?.address || null);
+        const opt = await call(`/customer/complaint-options${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
+        setNearbyFranchisees(opt?.franchisees || []);
       } catch { setVehicles([]); }
       finally { setLoading(false); }
     };
@@ -1204,12 +1414,59 @@ function CustAvailableVehicles({ call, setPage }) {
   }, []);
 
   const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
-  const filtered = filterCat === 'all' ? vehicles : vehicles.filter(v => v.category === filterCat);
+  // Only show franchisees that actually have available vehicles, already ordered
+  // by the backend from nearest to farthest for the customer's pincode.
+  const availableFranchisees = nearbyFranchisees.filter(fr =>
+    vehicles.some(v => String(v.franchiseeId || '') === String(fr._id))
+  );
+
+  useEffect(() => {
+    if (!availableFranchisees.length) {
+      setSelectedFranchiseeId('');
+      return;
+    }
+    if (!availableFranchisees.some(fr => String(fr._id) === String(selectedFranchiseeId))) {
+      setSelectedFranchiseeId(String(availableFranchisees[0]._id));
+    }
+  }, [vehicles, nearbyFranchisees, selectedFranchiseeId]);
+
+  const filtered = vehicles
+    .filter(v => filterCat === 'all' || v.category === filterCat)
+    .filter(v => !selectedFranchiseeId || String(v.franchiseeId || '') === String(selectedFranchiseeId));
+
+  const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
 
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
 
   return <>
-    <PageHeader title="Available Vehicles" />
+    <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
+
+    {location?.pincode && (
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14}}>
+        <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
+        <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
+        {availableFranchisees.length > 0 && (
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',width:'100%'}}>
+            <span style={{fontSize:12,color:'#64748b',fontWeight:700}}>Nearest available franchise:</span>
+            {availableFranchisees.map((fr, i) => {
+              const active = String(fr._id) === String(selectedFranchiseeId);
+              return (
+                <button key={fr._id} type="button" onClick={() => setSelectedFranchiseeId(String(fr._id))}
+                  style={{fontSize:12,fontWeight:700,color:active?'#fff':'#1d4ed8',background:active?'#2563eb':'#fff',border:`1px solid ${active?'#2563eb':'#bfdbfe'}`,borderRadius:999,padding:'6px 11px',cursor:'pointer'}}>
+                  {i === 0 ? '📍 ' : '🏪 '}{fr.name}{fr.address?.pincode ? ` · ${fr.address.pincode}` : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {selectedFranchisee && (
+          <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569'}}>
+            <strong>Booking from:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
+            <span style={{marginLeft:6,color:'#64748b'}}>The vehicle will be handed over only by this franchisee.</span>
+          </div>
+        )}
+      </div>
+    )}
 
     {/* Category filter tabs */}
     <div className="filter-tabs">
@@ -1247,6 +1504,7 @@ function CustAvailableVehicles({ call, setPage }) {
                 {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
                 {v.chargingType && <span>🔌 {v.chargingType}</span>}
               </div>
+              <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:4}}>{v.quantity} unit{Number(v.quantity)===1?'':'s'} available · {v.franchiseeName || 'EV CORE franchise'}</div>
               <div className="vbc-price">
                 <span className="price-amt">₹{v.pricePerDay}</span>
                 <span className="price-unit">/day</span>
@@ -1284,7 +1542,8 @@ function CustAvailableVehicles({ call, setPage }) {
                 ['Range', `${selected.rangeKm} km`],
                 ['Charging', selected.chargingType],
                 ['Price/Day', `₹${selected.pricePerDay}`],
-                ['Availability', 'Available Now'],
+                ['Availability', `${selected.quantity ?? 0} unit(s) available`],
+                ['Franchisee', selected.franchiseeName || 'EV CORE franchise'],
               ].map(([k, v]) => v && (
                 <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
               ))}
@@ -1309,6 +1568,104 @@ function CustAvailableVehicles({ call, setPage }) {
       />
     )}
   </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EXTEND RENTAL FLOW: select days → Razorpay → verify → extend plan
+// ══════════════════════════════════════════════════════════════════
+function ExtendRentalFlow({ rental, call, onClose, onSuccess }) {
+  const [days, setDays] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ type: '', text: '' });
+  const amount = Number(rental.pricePerDay || 0) * Number(days || 0);
+  const currentEnd = rental.endDate ? new Date(rental.endDate) : new Date();
+  const previewEnd = new Date(currentEnd.getTime() + Number(days || 0) * 86400000);
+
+  const payAndExtend = async () => {
+    const extraDays = Number(days);
+    if (!Number.isInteger(extraDays) || extraDays < 1 || extraDays > 30) {
+      setMsg({ type: 'error', text: 'Choose between 1 and 30 additional days.' });
+      return;
+    }
+    if (amount <= 0) { setMsg({ type: 'error', text: 'This rental has no valid daily rate.' }); return; }
+    setBusy(true); setMsg({ type: '', text: '' });
+    try {
+      const order = await call(`/customer/rentals/${rental._id}/extend/create-order`, {
+        method: 'POST', data: { days: extraDays },
+      });
+      if (!window.Razorpay) {
+        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
+        setBusy(false); return;
+      }
+      const options = {
+        key: order.keyId, amount: order.amount, currency: order.currency || 'INR',
+        name: 'EV Core',
+        description: `Extend ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} by ${extraDays} day(s)`,
+        order_id: order.orderId, redirect: false,
+        handler: async (response) => {
+          try {
+            const result = await call(`/customer/rentals/${rental._id}/extend/verify-payment`, {
+              method: 'POST',
+              data: {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              },
+            });
+            onSuccess(result.rental);
+          } catch (e) {
+            setMsg({ type: 'error', text: e.response?.data?.message || 'Extension payment verification failed.' });
+            setBusy(false);
+          }
+        },
+        modal: { ondismiss: () => setBusy(false), escape: false, backdropclose: false },
+        theme: { color: '#2563eb' },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', resp => {
+        setMsg({ type: 'error', text: 'Payment failed: ' + (resp.error?.description || 'Please try again.') });
+        setBusy(false);
+      });
+      rzp.open();
+    } catch (e) {
+      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not create extension payment.' });
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(520px,100%)' }}>
+        <div className="modal-head">
+          <div><div className="modal-title">Extend Rental</div><div className="modal-subtitle">Payment is required before the plan is extended.</div></div>
+          <button className="icon-btn" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <Msg type={msg.type} text={msg.text} />
+          <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:14, marginBottom:14 }}>
+            <strong>{rental.vehicleSnapshot?.make} {rental.vehicleSnapshot?.model}</strong>
+            <div style={{ fontSize:12, color:'#64748b', marginTop:4 }}>Current end date: {currentEnd.toLocaleDateString('en-IN')}</div>
+            <div style={{ fontSize:12, color:'#64748b', marginTop:3 }}>Daily rate: ₹{Number(rental.pricePerDay || 0).toLocaleString('en-IN')}</div>
+          </div>
+          <div className="login-form">
+            <label>Additional days *
+              <input type="number" min="1" max="30" value={days} onChange={e => setDays(e.target.value)} />
+            </label>
+          </div>
+          <div style={{ marginTop:14, padding:14, background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}><span>Extension charge</span><strong>₹{amount.toLocaleString('en-IN')}</strong></div>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginTop:7 }}><span>New end date</span><strong>{previewEnd.toLocaleDateString('en-IN')}</strong></div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" disabled={busy} onClick={payAndExtend}>
+            {busy ? 'Processing…' : `Pay ₹${amount.toLocaleString('en-IN')} & Extend`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1385,6 +1742,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         method: 'POST',
         data: {
           vehicleId:   vehicle._id,
+          franchiseeId: vehicle.franchiseeId,
           pincode,
           state:       addrData?.state,
           district:    addrData?.district,
@@ -1425,6 +1783,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
               days: durationDays,
               startDate, endDate,
               address: `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`,
+              pickup: [vehicle.franchiseeName, vehicle.franchiseeAddress ? [vehicle.franchiseeAddress.line1, vehicle.franchiseeAddress.line2, vehicle.franchiseeAddress.city, vehicle.franchiseeAddress.district, vehicle.franchiseeAddress.state, vehicle.franchiseeAddress.pincode].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '),
               paymentId: response.razorpay_payment_id,
             });
             setStep('success');
@@ -1467,7 +1826,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
               {step === 'success' ? '🎉 Booking Confirmed!' : `Book — ${vehicle.make} ${vehicle.model}`}
             </div>
             <div className="modal-subtitle">
-              {step === 'address' && 'Step 1 of 3 — Delivery Address'}
+              {step === 'address' && 'Step 1 of 3 — Customer Location'}
               {step === 'dates'   && 'Step 2 of 3 — Rental Duration'}
               {step === 'payment' && 'Step 3 of 3 — Payment'}
               {step === 'success' && 'Your booking is live!'}
@@ -1521,9 +1880,17 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
           {/* ── STEP 2: Dates ── */}
           {step === 'dates' && (
             <div className="login-form">
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 700 }}>
+                  📍 Pickup: {vehicle.franchiseeName || 'Selected Franchisee'}
+                </div>
+                {vehicle.franchiseeAddress && <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>
+                  {[vehicle.franchiseeAddress.line1, vehicle.franchiseeAddress.line2, vehicle.franchiseeAddress.city, vehicle.franchiseeAddress.district, vehicle.franchiseeAddress.state, vehicle.franchiseeAddress.pincode].filter(Boolean).join(', ')}
+                </div>}
+              </div>
               <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
                 <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
-                  ✅ Delivery to: {area || addrData?.area}, {addrData?.district}, {addrData?.state} - {pincode}
+                  📍 Customer Location: {area || addrData?.area}, {addrData?.district}, {addrData?.state} - {pincode}
                 </div>
               </div>
               <label>Start Date *
@@ -1557,7 +1924,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                   ['Vehicle',  `${vehicle.make} ${vehicle.model} (${vehicle.year})`],
                   ['Category', vehicle.category],
                   ['Duration', `${durationDays} day${durationDays !== 1 ? 's' : ''} (${startDate} → ${endDate})`],
-                  ['Delivery', `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`],
+                  ['Customer Location', `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`],
                   ['Rate',     `₹${vehicle.pricePerDay}/day`],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f1f5f9' }}>
@@ -1591,7 +1958,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                   ['Vehicle',    successData.vehicleName],
                   ['Duration',   `${successData.days} day${successData.days !== 1 ? 's' : ''}`],
                   ['Dates',      `${successData.startDate} → ${successData.endDate}`],
-                  ['Delivery',   successData.address],
+                  ['Customer Location', successData.address],
+                  ['Pickup Location', successData.pickup || vehicle.franchiseeName || '—'],
                   ['Payment ID', successData.paymentId],
                 ].map(([k, v]) => (
                   <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, borderBottom: '1px solid #d1fae5' }}>
@@ -1601,8 +1969,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 ))}
               </div>
               <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
-                The vehicle will be delivered to your address once the Command Center completes the handover.<br />
-                You can track it in <strong>My Vehicles</strong>.
+                Payment is confirmed. Go to the selected franchisee pickup location for vehicle handover. The selected franchisee alone can mark the handover.<br />
+                You can track the handover date in <strong>My Bookings</strong> and the active rental in <strong>My Vehicles</strong>.
               </div>
             </div>
           )}

@@ -79,7 +79,7 @@ function issueTokens(user) {
 // ──────────────────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, email, phone, pincode, state, district } = req.body;
     if (!name || !email) return res.status(400).json({ message: 'name and email are required' });
 
     // Sanitize phone — treat blank string as absent
@@ -95,6 +95,7 @@ exports.register = async (req, res) => {
         existingByEmail.otpExpiry = otpExpiry();
         // Only update phone if provided and not already taken by someone else
         if (cleanPhone && !existingByEmail.phone) existingByEmail.phone = cleanPhone;
+        if (pincode || state || district) existingByEmail.address = { ...(existingByEmail.address || {}), pincode: pincode || existingByEmail.address?.pincode || '', state: state || existingByEmail.address?.state || '', district: district || existingByEmail.address?.district || '' };
         await existingByEmail.save();
         await sendEmail(email, 'EV Core – Your OTP', otp, 'verification OTP');
         return res.status(200).json({ message: 'OTP resent to your email', email });
@@ -115,6 +116,7 @@ exports.register = async (req, res) => {
       name,
       email:        email.toLowerCase(),
       phone:        cleanPhone,          // undefined if blank — sparse index allows multiple nulls
+      address:      (pincode || state || district) ? { pincode: pincode || '', state: state || '', district: district || '' } : undefined,
       role:         'CUSTOMER',
       otpHash:      await hashOTP(otp),
       otpExpiry:    otpExpiry(),

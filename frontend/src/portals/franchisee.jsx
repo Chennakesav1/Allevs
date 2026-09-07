@@ -5,7 +5,7 @@ import {
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell,
   FileText, Plus, X, Save, Upload, Clock, Image, ChevronRight,
-  UserX, UserCheck, UserMinus
+  UserX, UserCheck, UserMinus, Hash, Tag, Layers, Wrench, Building2
 } from 'lucide-react';
 import './franchisee.css';
 
@@ -30,6 +30,9 @@ const NAV_ITEMS = {
     { id: 'inventory',        label: 'Inventory',        Icon: Package },
     { id: 'staff',            label: 'Staff Management', Icon: Users },
     { id: 'jobs',             label: 'Jobs',             Icon: ClipboardList },
+    { id: 'rentals',           label: 'Customer Bookings', Icon: Car },
+    { id: 'complaints',       label: 'Customer Complaints', Icon: Bell },
+    { id: 'fault-vehicles',   label: 'Fault Vehicles',      Icon: AlertTriangle },
   ],
 };
 
@@ -254,6 +257,9 @@ function PageRouter({ page, call, user, setPage }) {
     inventory:        <FranInventory  call={call} user={user} setPage={setPage} />,
     staff:            <FranStaff     call={call} user={user} setPage={setPage} />,
     jobs:             <FranJobs      call={call} />,
+    rentals:          <FranRentals   call={call} />,
+    complaints:       <FranComplaints call={call} />,
+    'fault-vehicles': <FaultVehicles call={call} />,
   };
   return pages[page] || pages.dashboard;
 }
@@ -411,7 +417,7 @@ function InfoBanner({ Icon: I = Shield, type = 'info', children }) {
   );
 }
 
-function Drawer({ open, onClose, title, subtitle, children, footer, width = 520 }) {
+function Drawer({ open, onClose, title, subtitle, children, footer, width = 560 }) {
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose(); };
     if (open) window.addEventListener('keydown', h);
@@ -423,15 +429,14 @@ function Drawer({ open, onClose, title, subtitle, children, footer, width = 520 
     return () => { document.body.style.overflow = ''; };
   }, [open]);
 
+  if (!open) return null;
+
   return (
-    <>
+    <div className="fmodal-overlay" onClick={onClose}>
       <div
-        className={'drawer-overlay' + (open ? ' drawer-overlay-open' : '')}
-        onClick={onClose}
-      />
-      <div
-        className={'drawer-panel' + (open ? ' drawer-panel-open' : '')}
-        style={{ width }}
+        className="fmodal-panel"
+        style={{ width: `min(${width}px, 96vw)` }}
+        onClick={e => e.stopPropagation()}
       >
         <div className="drawer-head">
           <div>
@@ -440,7 +445,7 @@ function Drawer({ open, onClose, title, subtitle, children, footer, width = 520 
           </div>
           <button className="icon-btn" onClick={onClose}><X size={20} /></button>
         </div>
-        <div className="drawer-body">
+        <div className="drawer-body fmodal-body">
           {children}
         </div>
         {footer && (
@@ -449,7 +454,7 @@ function Drawer({ open, onClose, title, subtitle, children, footer, width = 520 
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -527,10 +532,13 @@ function FranFinancials({ call }) {
 // FRAN INVENTORY PAGE
 // ══════════════════════════════════════════════════════════════════
 function FranInventory({ call, user, setPage }) {
-  const { data: apiInv, loading, error } = useFetch(call, '/franchise/inventory');
-  // ── FIXED: read from API, not localStorage ────────────────────
+  const { data: apiInv, loading, error, refresh: refreshParts } = useFetch(call, '/franchise/inventory');
   const { data: pendingVehicles, loading: pvLoading, refresh } = useFetch(call, '/franchise/pending-vehicles');
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [vehicleDrawerOpen, setVehicleDrawerOpen] = useState(false);
+  const [partDrawerOpen,    setPartDrawerOpen]    = useState(false);
+  const [selectedPart,      setSelectedPart]      = useState(null);
+  const [selectedVehicle,   setSelectedVehicle]   = useState(null);
+  const [activeTab,         setActiveTab]         = useState('vehicles');
   const { toast, show } = useToast();
 
   const onVehicleAdded = () => {
@@ -538,31 +546,48 @@ function FranInventory({ call, user, setPage }) {
     show('Vehicle submitted for Command Center approval!');
   };
 
+  const onPartAdded = () => {
+    refreshParts();
+    show('New part added to inventory!');
+  };
+
   if (loading || pvLoading) return <Loader />;
   if (error) return <Err msg={error} />;
 
   const vehicles  = pendingVehicles || [];
+  const parts     = apiInv || [];
   const approved  = vehicles.filter(v => v.status === 'APPROVED');
   const pending   = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
-  const rejected  = vehicles.filter(v => v.status === 'REJECTED');
+  const lowStock  = parts.filter(p => p.quantity <= p.reorderLevel);
+
+  const INV_TABS = [
+    { id: 'vehicles', label: 'My Vehicles', Icon: Car,     count: vehicles.length },
+    { id: 'parts',    label: 'Parts Inventory', Icon: Package, count: parts.length },
+  ];
 
   return <>
     <Toast toast={toast} />
     <PageHeader
-      title="Inventory — Vehicles"
-      sub="Add EV vehicles to your fleet. New vehicles need Command Center approval before going live."
+      title="Inventory"
+      sub="Manage your EV fleet vehicles and spare parts inventory."
       actions={
-        <button className="btn-primary" onClick={() => setDrawerOpen(true)}>
-          <Plus size={15} /> Add Inventory
-        </button>
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn-ghost" onClick={() => setPartDrawerOpen(true)}>
+            <Package size={15} /> Add Part
+          </button>
+          <button className="btn-primary" onClick={() => setVehicleDrawerOpen(true)}>
+            <Plus size={15} /> Add Vehicle
+          </button>
+        </div>
       }
     />
 
     <MetricGrid metrics={[
-      { label: 'Total Listed',     value: vehicles.length, Icon: Car,           color: '#2563eb' },
+      { label: 'Total Vehicles',   value: vehicles.length, Icon: Car,           color: '#2563eb' },
       { label: 'Pending Approval', value: pending.length,  Icon: Clock,         color: '#d97706' },
       { label: 'Approved & Live',  value: approved.length, Icon: CheckCircle,   color: '#16a34a' },
-      { label: 'Rejected',         value: rejected.length, Icon: AlertTriangle, color: '#dc2626' },
+      { label: 'Parts SKUs',       value: parts.length,    Icon: Package,       color: '#7c3aed' },
+      { label: 'Low Stock Parts',  value: lowStock.length, Icon: AlertTriangle, color: '#dc2626' },
     ]} />
 
     {pending.length > 0 && (
@@ -570,32 +595,716 @@ function FranInventory({ call, user, setPage }) {
         {pending.length} vehicle(s) sent to Command Center — awaiting approval before they appear in Customer Portal.
       </InfoBanner>
     )}
+    {lowStock.length > 0 && (
+      <InfoBanner type="warning" Icon={AlertTriangle}>
+        {lowStock.length} part(s) are at or below reorder level — consider restocking soon.
+      </InfoBanner>
+    )}
 
-    <Card title="My Vehicles" badge={`${vehicles.length} vehicles`}>
-      {vehicles.length === 0
-        ? <div className="empty-state" style={{ padding: '40px 24px' }}>
-            <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
-            <p>No vehicles added yet. Click <strong>Add Inventory</strong> to get started.</p>
-          </div>
-        : <DataTable
-            rows={vehicles}
-            cols={['category', 'make', 'model', 'registrationNo', 'color', 'pricePerDay', 'status']}
-          />
-      }
-    </Card>
+    {/* ── Subtab Bar ── */}
+    <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
+      {INV_TABS.map(t => (
+        <button key={t.id} onClick={() => setActiveTab(t.id)}
+          style={{
+            display:'flex', alignItems:'center', gap:7, padding:'10px 22px',
+            border:'none', background:'none', cursor:'pointer',
+            borderBottom: activeTab === t.id ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === t.id ? '#2563eb' : '#6b7280',
+            fontWeight: activeTab === t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
+            transition:'all 0.15s',
+          }}>
+          <t.Icon size={15} />
+          {t.label}
+          <span style={{
+            background: activeTab === t.id ? '#2563eb' : '#e5e7eb',
+            color: activeTab === t.id ? '#fff' : '#374151',
+            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
+          }}>{t.count}</span>
+        </button>
+      ))}
+    </div>
 
-    <Card title="Parts Inventory">
-      <DataTable rows={apiInv} cols={['sku', 'name', 'quantity', 'reorderLevel', 'unitPrice']} />
-    </Card>
+    {/* ── Vehicles Tab ── */}
+    {activeTab === 'vehicles' && (
+      <Card title="My Vehicles" badge={`${vehicles.length} vehicles`}>
+        {vehicles.length === 0
+          ? <div className="empty-state" style={{ padding: '40px 24px' }}>
+              <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
+              <p>No vehicles added yet. Click <strong>Add Vehicle</strong> to get started.</p>
+            </div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Make</th>
+                    <th>Model</th>
+                    <th>Registration No</th>
+                    <th>Color</th>
+                    <th>Price Per Day</th>
+                    <th>Quantity</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vehicles.map((v, i) => {
+                    const sc = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
+                    return (
+                      <tr key={v._id || i}>
+                        <td>{v.category || '—'}</td>
+                        <td style={{ fontWeight:600 }}>{v.make || '—'}</td>
+                        <td>{v.model || '—'}</td>
+                        <td style={{ fontFamily:'monospace', fontSize:12 }}>{v.registrationNo || '—'}</td>
+                        <td>{v.color || '—'}</td>
+                        <td>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                        <td style={{ fontWeight:700, textAlign:'center' }}>{v.quantity ?? 1}</td>
+                        <td>
+                          <span className="status-pill" style={{ background: sc + '18', color: sc }}>
+                            {v.status === 'APPROVED' ? '✓ Approved' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                            onClick={() => setSelectedVehicle(v)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+    )}
+
+    {/* ── Parts Tab ── */}
+    {activeTab === 'parts' && (
+      <Card
+        title="Parts Inventory"
+        badge={`${parts.length} SKUs`}
+        action={
+          <button className="btn-ghost" style={{ fontSize:12, padding:'4px 12px' }} onClick={() => setPartDrawerOpen(true)}>
+            <Plus size={13} /> Add Part
+          </button>
+        }
+      >
+        {parts.length === 0
+          ? <div className="empty-state" style={{ padding:'32px 24px' }}>
+              <Package size={38} style={{ opacity:.2, marginBottom:10 }} />
+              <p>No parts added yet. Click <strong>Add Part</strong> to begin tracking spare parts.</p>
+            </div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Part Code (SKU)</th>
+                    <th>Part Name</th>
+                    <th>Category</th>
+                    <th>Quantity</th>
+                    <th>Reorder Level</th>
+                    <th>Unit Price</th>
+                    <th>Stock Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parts.map((p, i) => {
+                    const isLow = p.quantity <= p.reorderLevel;
+                    return (
+                      <tr key={p._id || p.sku || i}>
+                        <td>
+                          <span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8',
+                            background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>
+                            {p.sku || '—'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
+                        <td>
+                          <span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px',
+                            borderRadius:4, color:'#374151' }}>
+                            {p.category || 'General'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>
+                          {p.quantity ?? 0}
+                        </td>
+                        <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
+                        <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
+                        <td>
+                          <span className="status-pill" style={{
+                            background: isLow ? '#fee2e2' : '#dcfce7',
+                            color:      isLow ? '#991b1b' : '#166534',
+                          }}>
+                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                            onClick={() => setSelectedPart(p)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+    )}
+
+    {/* Part Detail Modal */}
+    {selectedPart && (
+      <PartDetailModal part={selectedPart} onClose={() => setSelectedPart(null)} />
+    )}
+
+    {/* Vehicle Detail Modal */}
+    {selectedVehicle && (
+      <VehicleDetailModal vehicle={selectedVehicle} onClose={() => setSelectedVehicle(null)} />
+    )}
 
     <AddInventoryDrawer
-      open={drawerOpen}
-      onClose={() => setDrawerOpen(false)}
+      open={vehicleDrawerOpen}
+      onClose={() => setVehicleDrawerOpen(false)}
       call={call}
       user={user}
       onAdded={onVehicleAdded}
     />
+
+    <AddPartDrawer
+      open={partDrawerOpen}
+      onClose={() => setPartDrawerOpen(false)}
+      call={call}
+      onAdded={onPartAdded}
+    />
   </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VEHICLE DETAIL MODAL — shows ALL input details for a vehicle
+// ══════════════════════════════════════════════════════════════════
+function VehicleDetailModal({ vehicle: v, onClose }) {
+  const cat = VEHICLE_CATEGORIES.find(c => c.value === v.category);
+  const statusColor = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
+  const statusLabel = v.status === 'APPROVED' ? '✓ Approved & Live' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending Approval';
+  const fmt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(640px,100%)' }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Vehicle Details</div>
+            <div className="modal-subtitle">Complete information for this vehicle listing</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div className="modal-body">
+          {/* Hero: Vehicle Identity */}
+          <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+            padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+            <div style={{ background:'#2563eb', color:'#fff', borderRadius:10,
+              width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 }}>
+              {cat?.emoji || '🚗'}
+            </div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:'#2563eb', letterSpacing:'.08em',
+                textTransform:'uppercase', marginBottom:3 }}>{v.category || 'Vehicle'}</div>
+              <div style={{ fontSize:22, fontWeight:900, color:'#1e3a8a' }}>{v.make} {v.model}</div>
+              <div style={{ fontSize:12, color:'#3b82f6', marginTop:2, fontFamily:'monospace' }}>{v.registrationNo || '—'}</div>
+            </div>
+          </div>
+
+          {/* Status + Badges */}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
+            <span className="status-pill" style={{ background: statusColor + '18', color: statusColor, fontSize:13, padding:'4px 14px' }}>
+              {statusLabel}
+            </span>
+            {v.year && <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>Year: {v.year}</span>}
+            {v.color && <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>{v.color}</span>}
+            {v.chargingType && <span className="status-pill" style={{ background:'#ecfdf5', color:'#065f46', fontSize:13, padding:'4px 14px' }}>⚡ {v.chargingType}</span>}
+          </div>
+
+          {/* Vehicle Images */}
+          {v.images?.length > 0 && (
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                <Package size={13} /> Vehicle Images ({v.images.length})
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                {v.images.map((img, i) => (
+                  <div key={i} style={{ width:80, height:64, borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb', flexShrink:0 }}>
+                    <img src={img.url} alt={img.name || `Image ${i+1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Core Info Grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px',
+            background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+            {[
+              ['Make / Brand',        v.make              || '—'],
+              ['Model Name',          v.model             || '—'],
+              ['Category',            v.category          || '—'],
+              ['Year of Manufacture', v.year              || '—'],
+              ['Color',               v.color             || '—'],
+              ['Registration No.',    v.registrationNo    || '—'],
+              ['Battery Capacity',    v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'],
+              ['Range',               v.rangeKm           ? `${v.rangeKm} km` : '—'],
+              ['Charging Type',       v.chargingType      || '—'],
+              ['Price Per Day',       `₹${Number(v.pricePerDay || 0).toLocaleString('en-IN')}`],
+              ['Quantity in Stock',   v.quantity ?? 1],
+              ['Approval Status',     v.status            || '—'],
+            ].map(([k, val]) => (
+              <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600,
+                  textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:14 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Description / Notes */}
+          {v.description && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                {v.description}
+              </div>
+            </div>
+          )}
+
+          {/* Franchisee Info */}
+          {(v.franchiseeName || v.franchiseeEmail) && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                <Building2 size={13} /> Submitted By
+              </div>
+              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px' }}>
+                {v.franchiseeName && <div style={{ fontWeight:700, fontSize:13, color:'#1a1f2e' }}>{v.franchiseeName}</div>}
+                {v.franchiseeEmail && <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{v.franchiseeEmail}</div>}
+              </div>
+            </div>
+          )}
+
+          {/* Rejection Reason */}
+          {v.status === 'REJECTED' && v.rejectionReason && (
+            <InfoBanner type="warning" Icon={AlertTriangle}>
+              Rejection reason: {v.rejectionReason}
+            </InfoBanner>
+          )}
+
+          {/* Timestamps */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:8 }}>
+            {[
+              ['Submitted At', fmt(v.createdAt)],
+              ['Last Updated', fmt(v.updatedAt)],
+            ].map(([k, val]) => (
+              <div key={k} style={{ background:'#f9fafb', borderRadius:8, padding:'10px 14px', border:'1px solid #e5e7eb' }}>
+                <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:3 }}>{k}</div>
+                <div style={{ fontWeight:600, color:'#374151', fontSize:12 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PART DETAIL MODAL  — shows complete info for a selected part
+// ══════════════════════════════════════════════════════════════════
+function PartDetailModal({ part, onClose }) {
+  const isLow = part.quantity <= part.reorderLevel;
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(580px,100%)' }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Part Details</div>
+            <div className="modal-subtitle">Complete information for this spare part</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div className="modal-body">
+          {/* Hero: Part Code */}
+          <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+            padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+            <div style={{ background:'#1d4ed8', color:'#fff', borderRadius:10,
+              width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <Hash size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:'#1d4ed8', letterSpacing:'.1em',
+                textTransform:'uppercase', marginBottom:3 }}>Part Code (SKU)</div>
+              <div style={{ fontSize:26, fontWeight:900, fontFamily:'monospace', color:'#1e3a8a',
+                letterSpacing:'.05em' }}>{part.sku || '—'}</div>
+            </div>
+          </div>
+
+          {/* Stock badge */}
+          <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+            <span className="status-pill" style={{
+              background: isLow ? '#fee2e2' : '#dcfce7',
+              color:      isLow ? '#991b1b' : '#166534',
+              fontSize: 13, padding:'4px 14px',
+            }}>
+              {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+            </span>
+            <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>
+              {part.category || 'General'}
+            </span>
+            {part.partType && (
+              <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>
+                {part.partType}
+              </span>
+            )}
+          </div>
+
+          {/* Core Info Grid */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px',
+            background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+            {[
+              ['Part Name',      part.name          || '—'],
+              ['Category',       part.category      || 'General'],
+              ['Current Stock',  part.quantity ?? 0],
+              ['Reorder Level',  part.reorderLevel  ?? 5],
+              ['Unit Price',     `₹${Number(part.unitPrice||0).toLocaleString('en-IN')}`],
+              ['Total Value',    `₹${Number((part.unitPrice||0)*(part.quantity||0)).toLocaleString('en-IN')}`],
+              part.manufacturer ? ['Manufacturer', part.manufacturer] : null,
+              part.location     ? ['Storage Location', part.location]  : null,
+              part.partType     ? ['Part Type', part.partType]          : null,
+            ].filter(Boolean).map(([k, v]) => (
+              <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600,
+                  textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:14 }}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Compatible Vehicles */}
+          {part.compatibleVehicles && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8,
+                display:'flex', alignItems:'center', gap:6 }}>
+                <Car size={13} /> Compatible Vehicles
+              </div>
+              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                {part.compatibleVehicles}
+              </div>
+            </div>
+          )}
+
+          {/* Description */}
+          {part.description && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+              <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                {part.description}
+              </div>
+            </div>
+          )}
+
+          {/* Low stock alert */}
+          {isLow && (
+            <InfoBanner type="warning" Icon={AlertTriangle}>
+              Stock ({part.quantity}) is at or below reorder level ({part.reorderLevel}).
+              Consider restocking this part soon to avoid service delays.
+            </InfoBanner>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADD PART DRAWER — detailed form with Part Code (SKU) in focus
+// ══════════════════════════════════════════════════════════════════
+const PART_CATEGORIES = [
+  'Battery & Charging', 'Motor & Drive', 'Brakes & Suspension',
+  'Tyres & Wheels', 'Body & Frame', 'Electronics & Controls',
+  'Lighting', 'Cabin & Comfort', 'Fasteners & Hardware', 'General', 'Other',
+];
+
+const PART_TYPES = [
+  'OEM Original', 'Aftermarket', 'Refurbished', 'Consumable', 'Tool / Equipment', 'Other',
+];
+
+const EMPTY_PART = {
+  sku: '', name: '', category: '', partType: '', quantity: '',
+  reorderLevel: '5', unitPrice: '', manufacturer: '',
+  compatibleVehicles: '', location: '', description: '',
+};
+
+function AddPartDrawer({ open, onClose, call, onAdded }) {
+  const [form,      setForm]      = useState(EMPTY_PART);
+  const [saving,    setSaving]    = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [savedPart, setSavedPart] = useState(null);
+  const { toast, show } = useToast();
+
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
+
+  // Auto-generate SKU suggestion from name + category
+  const autoSku = () => {
+    if (form.sku) return;          // don't overwrite manual entry
+    const prefix = (form.category || 'GEN').slice(0, 3).toUpperCase().replace(/\s/g, '');
+    const nameCode = (form.name || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
+    const rand = Math.floor(Math.random() * 9000 + 1000);
+    ff('sku')(`${prefix}-${nameCode}-${rand}`);
+  };
+
+  const handleClose = () => {
+    onClose();
+    setTimeout(() => { setForm(EMPTY_PART); setSubmitted(false); setSavedPart(null); }, 350);
+  };
+
+  const submit = async () => {
+    if (!form.sku.trim()) { show('Part code (SKU) is required', 'error'); return; }
+    if (!form.name.trim()) { show('Part name is required', 'error'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        ...form,
+        quantity:     Number(form.quantity)     || 0,
+        reorderLevel: Number(form.reorderLevel) || 5,
+        unitPrice:    Number(form.unitPrice)    || 0,
+      };
+      const part = await call('/franchise/inventory', { method: 'post', data: payload });
+      setSavedPart(part);
+      if (onAdded) onAdded(part);
+      setSubmitted(true);
+    } catch (e) {
+      show(e.response?.data?.message || 'Failed to add part', 'error');
+    } finally { setSaving(false); }
+  };
+
+  const footer = submitted ? (
+    <>
+      <button className="btn-ghost" onClick={() => { setForm(EMPTY_PART); setSubmitted(false); setSavedPart(null); }}>
+        + Add Another Part
+      </button>
+      <button className="btn-primary" onClick={handleClose}>Done</button>
+    </>
+  ) : (
+    <>
+      <button className="btn-ghost" onClick={handleClose}>Cancel</button>
+      <button className="btn-primary" onClick={submit} disabled={saving}>
+        {saving ? 'Saving…' : <><Save size={14} /> Add Part to Inventory</>}
+      </button>
+    </>
+  );
+
+  return (
+    <>
+      <Toast toast={toast} />
+      <Drawer
+        open={open}
+        onClose={handleClose}
+        title={submitted ? '✅ Part Added!' : 'Add New Part to Inventory'}
+        subtitle={submitted ? 'Part saved to spare parts inventory' : 'Enter complete details — Part Code (SKU) is the unique identifier'}
+        footer={footer}
+        width={560}
+      >
+        {submitted ? (
+          <PartAddSuccess part={savedPart || form} />
+        ) : (
+          <PartAddForm form={form} ff={ff} autoSku={autoSku} />
+        )}
+      </Drawer>
+    </>
+  );
+}
+
+function PartAddSuccess({ part }) {
+  return (
+    <div className="success-card">
+      <div className="success-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
+        <Package size={32} />
+      </div>
+      <h3>Part Added Successfully</h3>
+      <p>The part is now tracked in your inventory.</p>
+      <div className="cred-box" style={{ width: '100%' }}>
+        <div className="cred-row">
+          <span>Part Code (SKU)</span>
+          <code style={{ color:'#1d4ed8', fontWeight:900, fontSize:15 }}>{part.sku}</code>
+        </div>
+        <div className="cred-row"><span>Part Name</span><code>{part.name}</code></div>
+        <div className="cred-row"><span>Category</span><code>{part.category || 'General'}</code></div>
+        <div className="cred-row"><span>Quantity</span><code>{part.quantity ?? 0}</code></div>
+        <div className="cred-row"><span>Unit Price</span><code>₹{Number(part.unitPrice||0).toLocaleString('en-IN')}</code></div>
+        {part.manufacturer && <div className="cred-row"><span>Manufacturer</span><code>{part.manufacturer}</code></div>}
+        {part.location && <div className="cred-row"><span>Location</span><code>{part.location}</code></div>}
+      </div>
+    </div>
+  );
+}
+
+function PartAddForm({ form, ff, autoSku }) {
+  return (
+    <>
+      {/* ── Section 1: Part Identification ── */}
+      <div className="drawer-section-label">Part Identification</div>
+
+      <div style={{ background:'#eff6ff', border:'1.5px solid #bfdbfe', borderRadius:10,
+        padding:'14px 16px', marginBottom:16 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+          <Hash size={14} color="#1d4ed8" />
+          <span style={{ fontSize:12, fontWeight:700, color:'#1d4ed8' }}>PART CODE (SKU) — Unique Identifier</span>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <input
+            className="fld-input"
+            style={{ flex:1, fontFamily:'monospace', fontWeight:700, fontSize:15,
+              letterSpacing:'.04em', textTransform:'uppercase' }}
+            value={form.sku}
+            onChange={e => ff('sku')(e.target.value.toUpperCase())}
+            placeholder="e.g. BAT-CELL-1042"
+          />
+          <button
+            type="button"
+            className="btn-ghost"
+            style={{ whiteSpace:'nowrap', fontSize:12, padding:'0 12px' }}
+            onClick={autoSku}
+          >
+            Auto-generate
+          </button>
+        </div>
+        <div style={{ fontSize:11, color:'#3b82f6', marginTop:5 }}>
+          Format: CATEGORY-NAME-NUMBER  · Must be unique across all inventories
+        </div>
+      </div>
+
+      <Fld label="Part Name" required>
+        <Inp value={form.name} onChange={ff('name')} placeholder="e.g. Lithium Cell 18650 — 3.7V 3000mAh" />
+      </Fld>
+
+      <div className="row-2">
+        <Fld label="Category" required>
+          <Sel
+            value={PART_CATEGORIES.includes(form.category) ? form.category : (form.category ? 'Other' : '')}
+            onChange={v => ff('category')(v === 'Other' ? 'Other' : v)}
+            opts={PART_CATEGORIES}
+            placeholder="Select category…"
+          />
+          {form.category === 'Other' && (
+            <input
+              className="fld-input"
+              style={{ marginTop: 6 }}
+              placeholder="Type your category"
+              onBlur={e => { if (e.target.value.trim()) ff('category')(e.target.value.trim()); }}
+            />
+          )}
+        </Fld>
+        <Fld label="Part Type">
+          <Sel
+            value={PART_TYPES.includes(form.partType) ? form.partType : (form.partType ? 'Other' : '')}
+            onChange={v => ff('partType')(v === 'Other' ? 'Other' : v)}
+            opts={PART_TYPES}
+            placeholder="Select type…"
+          />
+          {form.partType === 'Other' && (
+            <input
+              className="fld-input"
+              style={{ marginTop: 6 }}
+              placeholder="Type your part type"
+              onBlur={e => { if (e.target.value.trim()) ff('partType')(e.target.value.trim()); }}
+            />
+          )}
+        </Fld>
+      </div>
+
+      {/* ── Section 2: Stock & Pricing ── */}
+      <div className="drawer-section-label" style={{ marginTop:4 }}>Stock & Pricing</div>
+
+      <div className="row-2">
+        <Fld label="Current Quantity" required hint="Units currently in stock">
+          <Inp value={form.quantity} onChange={ff('quantity')} type="number" placeholder="50" />
+        </Fld>
+        <Fld label="Reorder Level" hint="Trigger restocking when stock falls to this">
+          <Inp value={form.reorderLevel} onChange={ff('reorderLevel')} type="number" placeholder="5" />
+        </Fld>
+      </div>
+
+      <Fld label="Unit Price (₹)" required hint="Price per single unit">
+        <Inp value={form.unitPrice} onChange={ff('unitPrice')} type="number" placeholder="299" />
+      </Fld>
+
+      {/* Live total value preview */}
+      {(form.quantity && form.unitPrice) && (
+        <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8,
+          padding:'10px 14px', marginBottom:12, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontSize:12, color:'#166534', fontWeight:600 }}>Total Stock Value</span>
+          <span style={{ fontSize:16, fontWeight:900, color:'#166534' }}>
+            ₹{(Number(form.quantity) * Number(form.unitPrice)).toLocaleString('en-IN')}
+          </span>
+        </div>
+      )}
+
+      {/* ── Section 3: Supplier & Storage ── */}
+      <div className="drawer-section-label" style={{ marginTop:4 }}>Supplier & Storage</div>
+
+      <div className="row-2">
+        <Fld label="Manufacturer / Brand" hint="OEM or aftermarket maker">
+          <Inp value={form.manufacturer} onChange={ff('manufacturer')} placeholder="e.g. Samsung SDI" />
+        </Fld>
+        <Fld label="Storage Location" hint="Shelf, bin, or warehouse location">
+          <Inp value={form.location} onChange={ff('location')} placeholder="e.g. Rack-A / Shelf-3" />
+        </Fld>
+      </div>
+
+      {/* ── Section 4: Vehicle Compatibility ── */}
+      <div className="drawer-section-label" style={{ marginTop:4 }}>Compatibility</div>
+
+      <Fld label="Compatible Vehicles" hint="List vehicle makes/models this part fits">
+        <Txt
+          value={form.compatibleVehicles}
+          onChange={ff('compatibleVehicles')}
+          placeholder="e.g. Ola S1 Pro, Ather 450X, Hero Electric Optima…"
+          rows={2}
+        />
+      </Fld>
+
+      {/* ── Section 5: Description ── */}
+      <div className="drawer-section-label" style={{ marginTop:4 }}>Additional Notes</div>
+
+      <Fld label="Description / Technical Notes" hint="Specifications, usage notes, warranty info">
+        <Txt
+          value={form.description}
+          onChange={ff('description')}
+          placeholder="Technical specs, installation notes, warranty period, condition…"
+          rows={3}
+        />
+      </Fld>
+
+      <InfoBanner Icon={Package}>
+        The Part Code (SKU) must be unique. Use a consistent format like
+        <strong> CATEGORY-NAME-NUMBER</strong> (e.g. BAT-CELL-1042) for easy lookup.
+      </InfoBanner>
+    </>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -604,7 +1313,7 @@ function FranInventory({ call, user, setPage }) {
 const EMPTY_VEH = {
   category: '', make: '', model: '', year: new Date().getFullYear() + '',
   color: '', registrationNo: '', batteryCapacityKwh: '', rangeKm: '',
-  chargingType: 'AC', pricePerDay: '', description: '', images: [],
+  chargingType: 'AC', pricePerDay: '', quantity: 1, description: '', images: [],
 };
 
 function AddInventoryDrawer({ open, onClose, call, user, onAdded, standalone, setPage }) {
@@ -663,6 +1372,7 @@ function AddInventoryDrawer({ open, onClose, call, user, onAdded, standalone, se
         batteryCapacityKwh: form.batteryCapacityKwh ? +form.batteryCapacityKwh : undefined,
         rangeKm:            form.rangeKm            ? +form.rangeKm            : undefined,
         pricePerDay:        form.pricePerDay        ? +form.pricePerDay        : undefined,
+        quantity:           Math.max(1, Number(form.quantity || 1)),
       };
       const record = await call('/franchise/pending-vehicles', { method: 'post', data: payload });
       setSavedRecord(record);
@@ -738,15 +1448,56 @@ function VehicleSubmitSuccess({ form }) {
   );
 }
 
+// ── Custom makes persisted per-category in localStorage ─────────────
+function useCustomMakes() {
+  const KEY = 'ev_custom_makes';
+  const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; } };
+  const save = (cat, val) => {
+    const all = load();
+    const existing = all[cat] || [];
+    if (val && !existing.includes(val)) all[cat] = [...existing, val];
+    localStorage.setItem(KEY, JSON.stringify(all));
+  };
+  return { loadCustom: (cat) => load()[cat] || [], saveCustom: save };
+}
+
 function VehicleStep1({ form, ff }) {
-  const makes = VEHICLE_MAKES[form.category] || [];
+  const { loadCustom, saveCustom } = useCustomMakes();
+  const baseMakes = VEHICLE_MAKES[form.category] || [];
+  const customMakes = form.category ? loadCustom(form.category) : [];
+  // Merge: base makes (without "Other") + custom makes + "Other"
+  const baseWithoutOther = baseMakes.filter(m => m !== 'Other');
+  const allMakes = [...baseWithoutOther, ...customMakes.filter(m => !baseWithoutOther.includes(m)), 'Other'];
+
+  const isOtherSelected = form.make === 'Other' || (form.make && !allMakes.slice(0, -1).includes(form.make) && form.make !== '');
+  const [customMakeInput, setCustomMakeInput] = useState(
+    (form.make && form.make !== 'Other' && !baseWithoutOther.includes(form.make) && !customMakes.includes(form.make)) ? form.make : ''
+  );
+
+  const handleMakeChange = (val) => {
+    if (val === 'Other') {
+      ff('make')('Other');
+      setCustomMakeInput('');
+    } else {
+      ff('make')(val);
+    }
+  };
+
+  const handleCustomMakeBlur = () => {
+    if (customMakeInput.trim()) {
+      const v = customMakeInput.trim();
+      saveCustom(form.category, v);
+      ff('make')(v);
+    }
+  };
+
   return <>
     <div className="drawer-section-label">Select Vehicle Category</div>
     <div className="vehicle-cat-grid">
       {VEHICLE_CATEGORIES.map(c => (
         <button key={c.value} type="button"
           className={'cat-btn' + (form.category === c.value ? ' selected' : '')}
-          onClick={() => { ff('category')(c.value); ff('make')(''); }}>
+          onClick={() => { ff('category')(c.value); ff('make')(''); setCustomMakeInput(''); }}>
           <span className="cat-emoji">{c.emoji}</span>
           <span className="cat-label">{c.label}</span>
           <span className="cat-desc">{c.desc}</span>
@@ -758,7 +1509,22 @@ function VehicleStep1({ form, ff }) {
       <div className="drawer-section-label" style={{ marginTop: 4 }}>Vehicle Details</div>
       <div className="row-2">
         <Fld label="Make / Brand" required>
-          <Sel value={form.make} onChange={ff('make')} opts={makes} placeholder="Select make…" />
+          <Sel
+            value={isOtherSelected ? 'Other' : form.make}
+            onChange={handleMakeChange}
+            opts={allMakes}
+            placeholder="Select make…"
+          />
+          {(form.make === 'Other' || isOtherSelected) && (
+            <input
+              className="fld-input"
+              style={{ marginTop: 6 }}
+              value={customMakeInput}
+              onChange={e => setCustomMakeInput(e.target.value)}
+              onBlur={handleCustomMakeBlur}
+              placeholder="Type brand name & press Tab/click away"
+            />
+          )}
         </Fld>
         <Fld label="Model Name" required>
           <Inp value={form.model} onChange={ff('model')} placeholder="e.g. Nexon EV Max" />
@@ -790,6 +1556,9 @@ function VehicleStep1({ form, ff }) {
         </Fld>
         <Fld label="Price Per Day (₹)" required>
           <Inp value={form.pricePerDay} onChange={ff('pricePerDay')} type="number" placeholder="1499" />
+        </Fld>
+        <Fld label="Available Quantity" required hint="Number of identical units in inventory">
+          <Inp value={form.quantity} onChange={ff('quantity')} type="number" placeholder="1" />
         </Fld>
       </div>
       <Fld label="Description / Notes">
@@ -1499,12 +2268,245 @@ function FranJobs({ call }) {
   const { data, loading, error } = useFetch(call, '/franchise/jobs');
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
+  const jobs = Array.isArray(data) ? data : [];
+  const completed = jobs.filter(j => j.status === 'COMPLETED');
   return <>
-    <PageHeader title="Jobs" sub="Total jobs count for this franchise." />
+    <PageHeader title="Jobs" sub="Completed rental-return tasks and service jobs for this franchise." />
     <MetricGrid metrics={[
-      { label: 'Total Jobs', value: typeof data === 'number' ? data : 0, Icon: ClipboardList, color: '#2563eb' },
+      { label: 'Total Jobs', value: jobs.length, Icon: ClipboardList, color: '#2563eb' },
+      { label: 'Completed Tasks', value: completed.length, Icon: CheckCircle, color: '#16a34a' },
+      { label: 'Rental Returns', value: jobs.filter(j => j.serviceType === 'RENTAL_RETURN').length, Icon: Car, color: '#7c3aed' },
     ]} />
+    {jobs.length > 0 && <Card title="Recent Tasks" badge={`${jobs.length} tasks`}>
+      <DataTable rows={jobs.map(j => ({
+        ...j,
+        task: j.serviceType === 'RENTAL_RETURN' ? 'Rental Vehicle Return' : (j.serviceType || 'Service Task'),
+        statusLabel: j.status,
+        tracking: j.trackingStatus || '—',
+        created: j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-IN') : '—',
+      }))} cols={['task','statusLabel','tracking','created']} />
+    </Card>}
+    {!jobs.length && <div className="card"><div className="empty-state"><ClipboardList size={40} style={{opacity:.25}}/><p>No tasks yet.</p></div></div>}
   </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CUSTOMER COMPLAINTS + FAULT VEHICLES
+// ══════════════════════════════════════════════════════════════════
+
+function FranRentals({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/franchise/rentals');
+  const [busy, setBusy] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const { toast, show } = useToast();
+
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—';
+  const handover = async id => {
+    setBusy(id);
+    try {
+      await call(`/franchise/rentals/${id}/handover`, { method:'put' });
+      show('Vehicle handover marked successfully.');
+      refresh();
+      setSelected(null);
+    } catch(e) { show(e.response?.data?.message || 'Handover failed','error'); }
+    finally { setBusy(null); }
+  };
+  const markReturned = async id => {
+    if (!window.confirm('Mark this vehicle as returned? It will move back into franchise stock and the rental will be completed.')) return;
+    setBusy(id);
+    try {
+      await call(`/franchise/rentals/${id}/return`, { method:'put' });
+      show('Vehicle returned, stock restored and completion task created.');
+      refresh();
+      setSelected(null);
+    } catch(e) { show(e.response?.data?.message || 'Vehicle return failed','error'); }
+    finally { setBusy(null); }
+  };
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+  const rows = data || [];
+
+  return <>
+    <Toast toast={toast}/>
+    <PageHeader title="Customer Bookings" sub="Customer rental payments, pickup details and vehicle handover." />
+    <MetricGrid metrics={[
+      {label:'Total Bookings',value:rows.length,Icon:ClipboardList,color:'#2563eb'},
+      {label:'Paid',value:rows.filter(r=>r.paymentStatus==='PAID').length,Icon:CheckCircle,color:'#16a34a'},
+      {label:'Awaiting Handover',value:rows.filter(r=>r.paymentStatus==='PAID'&&!r.handoverDate).length,Icon:Clock,color:'#d97706'},
+      {label:'Active Rentals',value:rows.filter(r=>r.status==='ACTIVE').length,Icon:Car,color:'#16a34a'},
+      {label:'Completed',value:rows.filter(r=>r.status==='COMPLETED').length,Icon:CheckCircle,color:'#64748b'},
+    ]}/>
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      {rows.map(r => {
+        const vs=r.vehicleSnapshot||{}, cust=r.customerId||{};
+        return <div key={r._id} className="card" style={{padding:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+            <div>
+              <div style={{fontWeight:800,fontSize:16}}>{cust.name||'Customer'} · {vs.make||''} {vs.model||''}</div>
+              <div style={{fontSize:12,color:'#64748b',marginTop:4}}>{cust.email||'—'} · {cust.phone||'—'}</div>
+            </div>
+            <span className="status-pill" style={{background:r.paymentStatus==='PAID'?'#dcfce7':'#fef3c7',color:r.paymentStatus==='PAID'?'#166534':'#92400e'}}>{r.paymentStatus}</span>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginTop:14}}>
+            <div><small>Vehicle</small><strong>{vs.registrationNo||'—'}</strong></div>
+            <div><small>Rental Start</small><strong>{fmt(r.startDate)}</strong></div>
+            <div><small>Due / End</small><strong>{fmt(r.endDate)}</strong></div>
+            <div><small>Duration</small><strong>{r.durationDays||0} day(s)</strong></div>
+            <div><small>Amount Paid</small><strong>₹{Number(r.totalAmount||0).toLocaleString('en-IN')}</strong></div>
+            <div><small>Handover Date</small><strong>{fmt(r.handoverDate)}</strong></div>
+            {(r.extensionHistory||[]).length>0 && <div><small>Extensions</small><strong style={{color:'#7c3aed'}}>{(r.extensionHistory||[]).length}×</strong></div>}
+            {(r.extensionHistory||[]).length>0 && <div><small>Extended By</small><strong style={{color:'#7c3aed'}}>+{(r.extensionHistory||[]).reduce((s,e)=>s+(e.days||0),0)} day(s)</strong></div>}
+          </div>
+          {(r.extensionHistory||[]).length>0 && (
+            <div style={{marginTop:10,padding:'10px 12px',background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:10}}>
+              <div style={{fontSize:12,fontWeight:700,color:'#5b21b6',marginBottom:6}}>🔄 Rental Extensions ({(r.extensionHistory||[]).length})</div>
+              <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                {(r.extensionHistory||[]).map((ex,i)=>(
+                  <div key={i} style={{display:'flex',flexWrap:'wrap',gap:'4px 16px',fontSize:12,color:'#4c1d95',background:'#ede9fe',padding:'6px 10px',borderRadius:7}}>
+                    <span>📅 <b>Ext #{i+1}</b></span>
+                    <span>+{ex.days} day{ex.days!==1?'s':''}</span>
+                    <span>₹{Number(ex.amount||0).toLocaleString('en-IN')}</span>
+                    <span>{fmt(ex.oldEndDate)} → <b>{fmt(ex.newEndDate)}</b></span>
+                    <span style={{color:'#7c3aed'}}>{ex.at?new Date(ex.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}>
+            <div style={{padding:10,background:'#f8fafc',borderRadius:9,fontSize:12,color:'#475569'}}><b>Customer Location:</b><br/>{r.customerLocation?.fullAddress || r.fullAddress || [r.area,r.district,r.state,r.pincode].filter(Boolean).join(', ') || '—'}</div>
+            <div style={{padding:10,background:'#f0fdf4',borderRadius:9,fontSize:12,color:'#166534'}}><b>Pickup Location:</b><br/>{r.pickupLocation?.name || r.franchiseeName || '—'} · {r.pickupLocation?.address || '—'}</div>
+          </div>
+          <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
+            <button className="btn-ghost" onClick={()=>setSelected(r)}>View Complete Details</button>
+            {r.paymentStatus==='PAID' && !r.handoverDate && <button className="btn-primary" disabled={busy===r._id} onClick={()=>handover(r._id)}>
+              {busy===r._id?'Processing…':'🚗 Mark Handover'}
+            </button>}
+            {r.handoverDate && r.status === 'ACTIVE' && <button className="btn-primary" disabled={busy===r._id} onClick={()=>markReturned(r._id)}>
+              {busy===r._id?'Processing…':'↩ Mark Returned'}
+            </button>}
+            {r.handoverDate && r.status === 'ACTIVE' && <span style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#166534'}}>✓ Handed over {fmt(r.handoverDate)}</span>}
+            {r.status === 'COMPLETED' && <span style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#475569'}}>✓ Returned {fmt(r.returnDate)}</span>}
+          </div>
+        </div>;
+      })}
+      {!rows.length && <div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer bookings for this franchisee.</p></div></div>}
+    </div>
+    {selected && <div className="modal-overlay" onClick={()=>setSelected(null)}>
+      <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}>
+        <div className="modal-head"><div><div className="modal-title">Booking Details</div><div className="modal-subtitle">Customer payment and handover record</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div>
+        <div className="modal-body">
+          <div style={{marginBottom:14,padding:14,borderRadius:12,background:selected.paymentStatus==='PAID'?'#dcfce7':selected.paymentStatus==='FAILED'?'#fee2e2':'#fef3c7',border:`1px solid ${selected.paymentStatus==='PAID'?'#86efac':selected.paymentStatus==='FAILED'?'#fca5a5':'#fde68a'}`}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <span style={{width:34,height:34,borderRadius:'50%',display:'inline-flex',alignItems:'center',justifyContent:'center',background:selected.paymentStatus==='PAID'?'#16a34a':selected.paymentStatus==='FAILED'?'#dc2626':'#d97706',color:'#fff',fontSize:20,fontWeight:900}}>{selected.paymentStatus==='PAID'?'✓':selected.paymentStatus==='FAILED'?'✕':'!'}</span>
+              <div><div style={{fontWeight:900,color:selected.paymentStatus==='PAID'?'#166534':selected.paymentStatus==='FAILED'?'#991b1b':'#92400e'}}>Payment {selected.paymentStatus}</div><div style={{fontSize:12,color:'#475569'}}>Booking payment status</div></div>
+            </div>
+          </div>
+          {[
+            ['Customer',selected.customerId?.name||'—'],['Email',selected.customerId?.email||'—'],['Phone',selected.customerId?.phone||'—'],
+            ['Customer Location',selected.customerLocation?.fullAddress || selected.fullAddress || [selected.area,selected.district,selected.state,selected.pincode].filter(Boolean).join(', ') || '—'],
+            ['Customer Pincode',selected.customerLocation?.pincode || selected.pincode || '—'],
+            ['Vehicle',`${selected.vehicleSnapshot?.make||''} ${selected.vehicleSnapshot?.model||''}`],['Registration',selected.vehicleSnapshot?.registrationNo||'—'],
+            ['Payment ID',selected.razorpayPaymentId||'—'],['Amount Paid',`₹${Number(selected.totalAmount||0).toLocaleString('en-IN')}`],
+            ['Start Date',fmt(selected.startDate)],['Due / End Date',fmt(selected.endDate)],['Duration',`${selected.durationDays||0} day(s)`],
+            ['Pickup Franchisee',selected.pickupLocation?.name||selected.franchiseeName||'—'],['Pickup Address',selected.pickupLocation?.address||'—'],
+            ['Pickup Coordinates',selected.pickupLocation?.lat!=null&&selected.pickupLocation?.lng!=null?`${selected.pickupLocation.lat}, ${selected.pickupLocation.lng}`:'—'],
+            ['Handover Date',fmt(selected.handoverDate)],['Booking Created',fmt(selected.createdAt)],
+            ...((selected.extensionHistory||[]).length>0?[
+              ['Extensions',`${(selected.extensionHistory||[]).length} extension(s) — +${(selected.extensionHistory||[]).reduce((s,e)=>s+(e.days||0),0)} day(s)`],
+              ['Extended End Date',fmt(selected.endDate)],
+            ]:[]),
+          ].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'7px 0',borderBottom:'1px solid #f1f5f9',fontSize:13}}><span style={{color:'#64748b'}}>{k}</span><strong style={{textAlign:'right',wordBreak:'break-word'}}>{v}</strong></div>)}
+          <div style={{marginTop:16,fontWeight:800,fontSize:14}}>Booking History</div>
+          <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:7}}>
+            {(selected.bookingHistory||[]).slice().reverse().map((h,i)=><div key={i} style={{padding:10,borderRadius:9,background:'#f8fafc',border:'1px solid #e2e8f0',fontSize:12}}><b>{String(h.event||'EVENT').replaceAll('_',' ')}</b><span style={{float:'right',color:'#64748b'}}>{h.at?fmt(h.at):'—'}</span><div style={{marginTop:4,color:'#475569'}}>Payment: {h.paymentStatus||selected.paymentStatus||'—'} · Status: {h.status||selected.status||'—'} · Customer Location: {h.customerLocation?.fullAddress||selected.fullAddress||'—'}</div></div>)}
+            {!(selected.bookingHistory||[]).length&&<div style={{fontSize:12,color:'#64748b'}}>No historical events recorded for this booking.</div>}
+          </div>
+          {(selected.extensionHistory||[]).length>0 && <>
+            <div style={{marginTop:16,fontWeight:800,fontSize:14,color:'#5b21b6'}}>🔄 Extension History ({(selected.extensionHistory||[]).length})</div>
+            <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:7}}>
+              {(selected.extensionHistory||[]).map((ex,i)=>(
+                <div key={i} style={{padding:10,borderRadius:9,background:'#f5f3ff',border:'1px solid #ddd6fe',fontSize:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:4}}>
+                    <b style={{color:'#5b21b6'}}>Extension #{i+1}</b>
+                    <span style={{color:'#7c3aed'}}>{ex.at?new Date(ex.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):''}</span>
+                  </div>
+                  <div style={{marginTop:6,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:'4px 12px',color:'#4c1d95'}}>
+                    <div><span style={{opacity:.7}}>Extra Days: </span><b>+{ex.days} day{ex.days!==1?'s':''}</b></div>
+                    <div><span style={{opacity:.7}}>Extension Paid: </span><b>₹{Number(ex.amount||0).toLocaleString('en-IN')}</b></div>
+                    <div><span style={{opacity:.7}}>Old End Date: </span><b>{fmt(ex.oldEndDate)}</b></div>
+                    <div><span style={{opacity:.7}}>New End Date: </span><b>{fmt(ex.newEndDate)}</b></div>
+                    {ex.razorpayPaymentId && <div style={{gridColumn:'1/-1'}}><span style={{opacity:.7}}>Payment ID: </span><code style={{fontSize:11,background:'#ede9fe',padding:'1px 5px',borderRadius:4}}>{ex.razorpayPaymentId}</code></div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>}
+        </div>
+        <div className="modal-footer">
+          {selected.paymentStatus==='PAID' && !selected.handoverDate && <button className="btn-primary" disabled={busy===selected._id} onClick={()=>handover(selected._id)}>{busy===selected._id?'Processing…':'🚗 Mark Handover'}</button>}
+          {selected.status==='ACTIVE' && selected.handoverDate && <button className="btn-primary" disabled={busy===selected._id} onClick={()=>markReturned(selected._id)}>{busy===selected._id?'Processing…':'↩ Mark Returned'}</button>}
+          <button className="btn-ghost" onClick={()=>setSelected(null)}>Close</button>
+        </div>
+      </div>
+    </div>}
+  </>;
+}
+
+function FranComplaints({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/franchise/complaints');
+  const { data: inventory } = useFetch(call, '/franchise/pending-vehicles');
+  const [selected, setSelected] = useState(null);
+  const [resolution, setResolution] = useState('');
+  const [replaceId, setReplaceId] = useState('');
+  const [faultReason, setFaultReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { toast, show } = useToast();
+  const available = (inventory || []).filter(v => v.status === 'APPROVED' && Number(v.quantity ?? 1) > 0);
+  const solve = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await call(`/franchise/complaints/${selected._id}/solve`, { method:'put', data:{ resolution, replacementVehicleId:replaceId||undefined, faultReason:faultReason||undefined } });
+      show('Complaint marked solved. Customer feedback request sent.');
+      setSelected(null); setResolution(''); setReplaceId(''); setFaultReason(''); refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not solve complaint','error'); }
+    finally { setBusy(false); }
+  };
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+  return <>
+    <Toast toast={toast}/>
+    <PageHeader title="Customer Complaints" sub="Resolve complaints and optionally issue a replacement from approved inventory."/>
+    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><div><strong>{c.subject||c.category||'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Customer: {c.customerId?.name||'Customer'} · {new Date(c.createdAt).toLocaleString()}</div></div><span style={{fontSize:11,fontWeight:700}}>{c.status}</span></div>
+        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
+        {c.vehicleSnapshot&&<div style={{fontSize:12,color:'#475569',marginTop:7}}>🚗 {c.vehicleSnapshot.make||''} {c.vehicleSnapshot.model||''} · Reg {c.vehicleSnapshot.registrationNo||'—'}</div>}
+        {c.paymentDetails&&<div style={{fontSize:11,color:'#64748b',marginTop:4}}>Payment: {c.paymentDetails.paymentStatus||'—'} · {c.paymentDetails.razorpayPaymentId||'—'} · ₹{c.paymentDetails.totalAmount||0}</div>}
+        {c.status!=='SOLVED'&&c.status!=='CLOSED'&&<button className="btn-primary" style={{marginTop:12}} onClick={()=>setSelected(c)}>Open & Resolve</button>}
+        {c.status==='SOLVED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>✓ Solved. Waiting for customer feedback.</div>}
+        {c.status==='CLOSED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>⭐ Customer rating: {c.franchiseeRating||'—'}/5 {c.feedback?`· ${c.feedback}`:''}</div>}
+      </div>)}
+      {!data?.length&&<div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25}}/><p>No customer complaints.</p></div></div>}
+    </div>
+    {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Resolve Complaint</div><div className="modal-subtitle">Solve the issue or issue a replacement vehicle.</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div><div className="modal-body"><div className="login-form">
+      <div style={{background:'#f8fafc',padding:12,borderRadius:10,border:'1px solid #e2e8f0'}}><strong>Complaint</strong><div style={{fontSize:13,marginTop:5}}>{selected.message}</div></div>
+      <label>Resolution *<textarea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Explain how the issue was resolved…"/></label>
+      <label>Replacement Vehicle (optional)<select value={replaceId} onChange={e=>setReplaceId(e.target.value)}><option value="">No replacement</option>{available.map(v=><option key={v._id} value={v._id}>{v.make} {v.model} · {v.registrationNo} · {v.quantity??1} available</option>)}</select></label>
+      {replaceId&&<label>Old Vehicle Fault / Replacement Reason *<textarea rows={2} value={faultReason} onChange={e=>setFaultReason(e.target.value)} placeholder="Why is the old vehicle being replaced?"/></label>}
+      {replaceId&&<InfoBanner Icon={AlertTriangle}>Replacement stock is reduced by 1 and the old vehicle is added to Fault Vehicles with its vehicle/payment snapshot and your reason.</InfoBanner>}
+    </div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setSelected(null)}>Cancel</button><button className="btn-primary" onClick={solve} disabled={busy||!resolution||!!(replaceId&&!faultReason)}>{busy?'Saving…':'Mark as Solved'}</button></div></div></div>}
+  </>;
+}
+
+function FaultVehicles({ call }) {
+  const {data,loading,error}=useFetch(call,'/franchise/fault-vehicles');
+  if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
+  return <><PageHeader title="Fault Vehicles" sub="Replaced/faulty vehicles retained for service and audit history."/><Card title="Fault Vehicle Register" badge={`${data?.length||0} vehicles`}>
+    {!data?.length?<div className="empty-state"><AlertTriangle size={40} style={{opacity:.25}}/><p>No fault vehicles recorded.</p></div>:<div style={{display:'flex',flexDirection:'column',gap:10}}>{data.map(f=><div key={f._id} style={{border:'1px solid #fecaca',background:'#fffafa',borderRadius:10,padding:14}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><strong>{f.vehicleSnapshot?.make||''} {f.vehicleSnapshot?.model||'Vehicle'}</strong><span style={{fontSize:11,color:'#991b1b',fontWeight:700}}>FAULT / REPLACED</span></div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(180px,1fr))',gap:6,marginTop:9,fontSize:12,color:'#475569'}}><span>Reg: {f.vehicleSnapshot?.registrationNo||'—'}</span><span>Customer: {f.customerId?.name||'—'}</span><span>Payment ID: {f.paymentSnapshot?.razorpayPaymentId||'—'}</span><span>Amount: ₹{f.paymentSnapshot?.totalAmount||0}</span><span>Reason: {f.reason||'—'}</span></div></div>)}</div>}
+  </Card></>;
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -1,10 +1,10 @@
 const mongoose=require('mongoose'); const {Schema}=mongoose;
 const id=Schema.Types.ObjectId;
-const userSchema=new Schema({name:{type:String,required:true},email:{type:String,unique:true,sparse:true,lowercase:true},phone:{type:String,unique:true,sparse:true},passwordHash:{type:String},role:{type:String,enum:['CUSTOMER','TECHNICIAN','STAFF','HUB_MANAGER','FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'],required:true},franchiseeId:id,hubId:id,active:{type:Boolean,default:true},refreshTokenHash:String,otpHash:String,otpExpiry:Date,otpVerified:{type:Boolean,default:false},isPasswordSet:{type:Boolean,default:false}},{timestamps:true});
+const userSchema=new Schema({name:{type:String,required:true},email:{type:String,unique:true,sparse:true,lowercase:true},phone:{type:String,unique:true,sparse:true},address:Schema.Types.Mixed,passwordHash:{type:String},role:{type:String,enum:['CUSTOMER','TECHNICIAN','STAFF','HUB_MANAGER','FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'],required:true},franchiseeId:id,hubId:id,active:{type:Boolean,default:true},refreshTokenHash:String,otpHash:String,otpExpiry:Date,otpVerified:{type:Boolean,default:false},isPasswordSet:{type:Boolean,default:false}},{timestamps:true});
 const vehicleSchema=new Schema({customerId:{type:id,ref:'User',required:true},vin:{type:String,unique:true,required:true},registrationNo:String,model:String,batterySoc:{type:Number,default:0},batterySoh:{type:Number,default:100},status:{type:String,default:'ACTIVE'}},{timestamps:true});
 const hubSchema=new Schema({name:String,code:{type:String,unique:true},city:String,address:String,lat:Number,lng:Number,status:{type:String,default:'ONLINE'},chargerCount:{type:Number,default:0},franchiseeId:id},{timestamps:true});
 const chargerSchema=new Schema({hubId:{type:id,ref:'Hub'},code:{type:String,unique:true},status:{type:String,default:'AVAILABLE'},powerKw:{type:Number,default:7.2},connectorType:{type:String,default:'AC'},pricePerKwh:{type:Number,default:12},lastHeartbeat:Date,lastTelemetry:Schema.Types.Mixed},{timestamps:true});
-const jobSchema=new Schema({customerId:{type:id,ref:'User'},vehicleId:{type:id,ref:'Vehicle'},hubId:{type:id,ref:'Hub'},technicianId:{type:id,ref:'User'},serviceType:{type:String,default:'REPAIR'},problem:String,priority:{type:String,default:'NORMAL'},status:{type:String,enum:['PENDING','ASSIGNED','EN_ROUTE','REACHED','INSPECTION','IN_PROGRESS','WAITING_FOR_PARTS','QC','COMPLETED','CANCELLED','EMERGENCY'],default:'PENDING'},location:Schema.Types.Mixed,parts:[{partId:id,qty:Number,unitPrice:Number}],labourAmount:{type:Number,default:0},totalAmount:{type:Number,default:0},trackingStatus:{type:String,default:'Technician Assigned'},slaDueAt:Date},{timestamps:true});
+const jobSchema=new Schema({customerId:{type:id,ref:'User'},vehicleId:{type:id,ref:'Vehicle'},rentalId:{type:id,ref:'VehicleRental'},franchiseeId:{type:id,ref:'User'},hubId:{type:id,ref:'Hub'},technicianId:{type:id,ref:'User'},serviceType:{type:String,default:'REPAIR'},problem:String,priority:{type:String,default:'NORMAL'},status:{type:String,enum:['PENDING','ASSIGNED','EN_ROUTE','REACHED','INSPECTION','IN_PROGRESS','WAITING_FOR_PARTS','QC','COMPLETED','CANCELLED','EMERGENCY'],default:'PENDING'},location:Schema.Types.Mixed,parts:[{partId:id,qty:Number,unitPrice:Number}],labourAmount:{type:Number,default:0},totalAmount:{type:Number,default:0},trackingStatus:{type:String,default:'Technician Assigned'},slaDueAt:Date},{timestamps:true});
 const jobCardSchema=new Schema({jobId:{type:id,ref:'Job',unique:true},complaint:String,diagnosis:String,workPerformed:String,technicianNotes:String,partsUsed:[{partId:id,qty:Number,unitPrice:Number}],photos:[String],beforeAfter:[{before:String,after:String}],customerApproval:{type:Boolean,default:false},qcApproved:{type:Boolean,default:false},completedAt:Date},{timestamps:true});
 const inventorySchema=new Schema({hubId:id,sku:{type:String,unique:true},name:String,category:String,quantity:{type:Number,default:0},reorderLevel:{type:Number,default:5},unitPrice:{type:Number,default:0},supplierId:id},{timestamps:true});
 const supplierSchema=new Schema({name:String,phone:String,email:String,address:String,active:{type:Boolean,default:true}},{timestamps:true});
@@ -17,8 +17,9 @@ const chargingSchema=new Schema({chargerId:id,customerId:id,vehicleId:id,energyK
 const telemetrySchema=new Schema({vehicleId:id,chargerId:id,soc:Number,soh:Number,temperature:Number,voltage:Number,current:Number,powerKw:Number,faultCodes:[String],source:String,recordedAt:{type:Date,default:Date.now}},{timestamps:true});
 const diagnosticSchema=new Schema({vehicleId:id,faultCodes:[String],healthScore:Number,summary:String,raw:Schema.Types.Mixed,createdAt:{type:Date,default:Date.now}});
 const notificationSchema=new Schema({userId:id,type:String,title:String,message:String,read:{type:Boolean,default:false},data:Schema.Types.Mixed},{timestamps:true});
-const reviewSchema=new Schema({customerId:id,jobId:id,rating:{type:Number,min:1,max:5},comment:String,technicianRating:Number,serviceRating:Number,chargerRating:Number},{timestamps:true});
-const complaintSchema=new Schema({customerId:id,jobId:id,category:String,message:String,status:{type:String,default:'OPEN'},priority:{type:String,default:'NORMAL'}},{timestamps:true});
+const reviewSchema=new Schema({customerId:id,jobId:id,rating:{type:Number,min:1,max:5},comment:String,technicianRating:Number,serviceRating:Number,chargerRating:Number,franchiseeId:id,franchiseeRating:{type:Number,min:1,max:5}});
+const complaintSchema=new Schema({customerId:{type:id,ref:'User',required:true},jobId:{type:id,ref:'Job'},category:String,message:String,subject:String,status:{type:String,enum:['OPEN','IN_PROGRESS','SOLVED','CLOSED'],default:'OPEN'},priority:{type:String,default:'NORMAL'},franchiseeId:{type:id,ref:'User'},vehicleId:id,vehicleSnapshot:Schema.Types.Mixed,paymentDetails:Schema.Types.Mixed,franchiseeName:String,resolution:String,solvedAt:Date,feedbackRequested:{type:Boolean,default:false},feedbackSubmitted:{type:Boolean,default:false},franchiseeRating:{type:Number,min:1,max:5},feedback:String,feedbackAt:Date,replacementRequested:{type:Boolean,default:false},replacementVehicleId:id,replacementVehicleSnapshot:Schema.Types.Mixed,replacementAt:Date,faultReason:String,faultVehicleId:id},{timestamps:true});
+const faultVehicleSchema=new Schema({complaintId:{type:id,ref:'Complaint'},customerId:{type:id,ref:'User'},franchiseeId:{type:id,ref:'User'},vehicleId:id,vehicleSnapshot:Schema.Types.Mixed,paymentSnapshot:Schema.Types.Mixed,reason:String},{timestamps:true});
 const assetSchema=new Schema({hubId:id,name:String,category:String,serialNo:String,purchaseCost:Number,purchaseDate:Date,status:{type:String,default:'ACTIVE'},utilization:Number},{timestamps:true});
 const maintenanceSchema=new Schema({assetId:id,chargerId:id,type:String,dueAt:Date,status:{type:String,default:'SCHEDULED'},notes:String},{timestamps:true});
 const anomalySchema=new Schema({type:String,severity:{type:String,default:'MEDIUM'},hubId:id,chargerId:id,userId:id,jobId:id,expected:Number,actual:Number,deviation:Number,status:{type:String,default:'OPEN'},details:Schema.Types.Mixed},{timestamps:true});
@@ -45,6 +46,7 @@ const pendingVehicleSchema = new Schema({
   chargingType:       String,
   pricePerDay:        Number,
   description:        String,
+  quantity:           { type: Number, default: 1, min: 0 },
   // images stored as base64 data-URLs (small previews) or upload paths
   images: [{ name: String, url: String }],
   // Approval workflow
@@ -94,12 +96,33 @@ const pendingStaffSchema = new Schema({
 const vehicleRentalSchema = new Schema({
   customerId:       { type: id, ref: 'User', required: true },
   vehicleId:        { type: id, ref: 'PendingVehicle', required: true },
-  // Customer address / delivery info
+  // Customer location / delivery info (the customer's requested location)
   pincode:          String,
   state:            String,
   district:         String,
   area:             String,
   fullAddress:      String,
+  customerLocation: {
+    pincode: String,
+    state: String,
+    district: String,
+    area: String,
+    fullAddress: String,
+  },
+  // Exact franchise pickup point selected by the customer/vehicle owner.
+  // This is intentionally stored on the booking so it remains available in history.
+  franchiseeId:     { type: id, ref: 'User' },
+  franchiseeName:   String,
+  pickupLocation: {
+    name: String,
+    address: String,
+    city: String,
+    district: String,
+    state: String,
+    pincode: String,
+    lat: Number,
+    lng: Number,
+  },
   // Booking dates
   startDate:        Date,
   endDate:          Date,
@@ -119,6 +142,16 @@ const vehicleRentalSchema = new Schema({
   },
   handoverDate:     Date,
   returnDate:       Date,
+  pendingExtension: {
+    days: Number,
+    amount: Number,
+    orderId: String,
+    createdAt: Date,
+  },
+  extensionHistory: { type: [Schema.Types.Mixed], default: [] },
+  // Immutable-style booking history snapshots. Each lifecycle/payment change
+  // appends a full snapshot so Customer Bookings history remains available.
+  bookingHistory:   { type: [Schema.Types.Mixed], default: [] },
   // Vehicle snapshot (so details remain even if vehicle doc changes)
   vehicleSnapshot:  Schema.Types.Mixed,
 }, { timestamps: true });
@@ -143,6 +176,7 @@ const models={
   Notification:mongoose.model('Notification',notificationSchema),
   Review:mongoose.model('Review',reviewSchema),
   Complaint:mongoose.model('Complaint',complaintSchema),
+  FaultVehicle:mongoose.model('FaultVehicle',faultVehicleSchema),
   Asset:mongoose.model('Asset',assetSchema),
   Maintenance:mongoose.model('Maintenance',maintenanceSchema),
   Anomaly:mongoose.model('Anomaly',anomalySchema),

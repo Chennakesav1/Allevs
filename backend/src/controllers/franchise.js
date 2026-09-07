@@ -53,3 +53,41 @@ exports.emi = async (req, res) => {
   const months    = Number(req.query.months    || 36);
   res.json({ principal, annualRate: rate, tenureMonths: months, monthlyEmi: emi(principal, rate, months) });
 };
+
+exports.addInventoryPart = async (req, res) => {
+  try {
+    const {
+      sku, name, category, quantity, reorderLevel, unitPrice,
+      description, manufacturer, compatibleVehicles, location, partType
+    } = req.body;
+
+    if (!sku || !name) {
+      return res.status(400).json({ message: 'Part code (SKU) and name are required.' });
+    }
+
+    const existing = await Inventory.findOne({ sku: sku.trim().toUpperCase() });
+    if (existing) {
+      return res.status(409).json({ message: `Part code "${sku}" already exists.` });
+    }
+
+    const part = await Inventory.create({
+      sku:       sku.trim().toUpperCase(),
+      name:      name.trim(),
+      category:  category || 'General',
+      quantity:  Number(quantity) || 0,
+      reorderLevel: Number(reorderLevel) || 5,
+      unitPrice: Number(unitPrice) || 0,
+      // Extra meta stored in a flexible field
+      description,
+      manufacturer,
+      compatibleVehicles,
+      location,
+      partType,
+    });
+
+    res.status(201).json(part);
+  } catch (err) {
+    console.error('addInventoryPart error:', err);
+    res.status(500).json({ message: err.message || 'Failed to add part.' });
+  }
+};

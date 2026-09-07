@@ -788,7 +788,7 @@ select.fld-input { cursor: pointer; }
   border: 1px solid #e4e7ef;
   box-shadow: 0 2px 12px rgba(0,0,0,.07);
 }
-#india-hub-map {
+#india-hub-map, #india-franchise-map {
   width: 100%;
   height: 100%;
 }

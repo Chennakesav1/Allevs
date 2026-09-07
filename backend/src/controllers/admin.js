@@ -28,8 +28,29 @@ exports.anomalies = async (req, res) => {
   })));
 };
 
-exports.franchisees = async (req, res) =>
-  res.json(await User.find({ role: 'FRANCHISEE' }).select('name email phone role franchiseeId active createdAt'));
+exports.franchisees = async (req, res) => {
+  const { Complaint } = require('../models');
+  const list = await User.find({ role: 'FRANCHISEE' }).select('name email phone role franchiseeId active createdAt address').lean();
+  const ids = list.map(x => x._id);
+  const stats = await Complaint.aggregate([
+    { $match: { franchiseeId: { $in: ids }, feedbackSubmitted: true, franchiseeRating: { $gte: 1 } } },
+    { $group: { _id: '$franchiseeId', rating: { $avg: '$franchiseeRating' }, reviews: { $sum: 1 } } },
+  ]);
+  const sm = new Map(stats.map(x => [String(x._id), x]));
+  res.json(list.map(x => ({ ...x, franchiseeRating: sm.get(String(x._id))?.rating || 0, ratingCount: sm.get(String(x._id))?.reviews || 0 })));
+};
+
+exports.franchiseRatings = async (req, res) => {
+  const { Complaint } = require('../models');
+  const rows = await Complaint.aggregate([
+    { $match: { feedbackSubmitted: true, franchiseeId: { $ne: null }, franchiseeRating: { $gte: 1 } } },
+    { $group: { _id: '$franchiseeId', averageRating: { $avg: '$franchiseeRating' }, ratingCount: { $sum: 1 }, lastRating: { $max: '$feedbackAt' } } },
+    { $sort: { averageRating: -1 } },
+  ]);
+  const users = await User.find({ _id: { $in: rows.map(x => x._id) } }).select('name email phone address').lean();
+  const um = new Map(users.map(u => [String(u._id), u]));
+  res.json(rows.map(x => ({ ...x, franchisee: um.get(String(x._id)) || null })));
+};
 
 // Demand — reads from the Expansion collection (entries added via the app)
 exports.demand = async (req, res) => {
