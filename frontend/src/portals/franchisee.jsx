@@ -23,12 +23,20 @@ const PORTAL_CFG = {
 };
 const cfg = PORTAL_CFG[kind];
 
+// ── Local storage helper (shared with Staff portal) ──
+const store = {
+  get: (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+};
+
 const NAV_ITEMS = {
   franchisee: [
     { id: 'dashboard',        label: 'Dashboard',        Icon: LayoutDashboard },
     { id: 'financials',       label: 'Financials',       Icon: DollarSign },
     { id: 'inventory',        label: 'Inventory',        Icon: Package },
     { id: 'staff',            label: 'Staff Management', Icon: Users },
+    { id: 'attendance',       label: 'Attendance',       Icon: Clock },
+    { id: 'leave-approval',   label: 'Leave Approvals',  Icon: FileText },
     { id: 'jobs',             label: 'Jobs',             Icon: ClipboardList },
     { id: 'rentals',           label: 'Customer Bookings', Icon: Car },
     { id: 'complaints',       label: 'Customer Complaints', Icon: Bell },
@@ -256,6 +264,8 @@ function PageRouter({ page, call, user, setPage }) {
     financials:       <FranFinancials call={call} />,
     inventory:        <FranInventory  call={call} user={user} setPage={setPage} />,
     staff:            <FranStaff     call={call} user={user} setPage={setPage} />,
+    attendance:       <FranAttendance />,
+    'leave-approval': <FranLeaveApproval />,
     jobs:             <FranJobs      call={call} />,
     rentals:          <FranRentals   call={call} />,
     complaints:       <FranComplaints call={call} />,
@@ -2259,6 +2269,270 @@ function AddStaffDrawer({ open, onClose, call, user, onAdded, standalone, setPag
       </Drawer>
     </>
   );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FRAN ATTENDANCE — reads from shared localStorage written by Staff portal
+// ══════════════════════════════════════════════════════════════════
+function FranAttendance() {
+  const [records, setRecords] = useState(() => store.get('ev_franchise_attendance') || []);
+  const [filterDate, setFilterDate] = useState('');
+  const [filterStaff, setFilterStaff] = useState('');
+
+  // Refresh every 30 seconds for live duty status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRecords(store.get('ev_franchise_attendance') || []);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const filtered = records
+    .filter(r => (!filterDate || r.date === filterDate))
+    .filter(r => (!filterStaff || r.staffName.toLowerCase().includes(filterStaff.toLowerCase())))
+    .sort((a, b) => new Date(b.dutyIn) - new Date(a.dutyIn));
+
+  const todayRecs    = records.filter(r => r.date === today);
+  const onDutyNow    = todayRecs.filter(r => r.status === 'ON_DUTY').length;
+  const completedToday = todayRecs.filter(r => r.status === 'OFF_DUTY').length;
+
+  const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return <>
+    <PageHeader title="Staff Attendance" sub="Live duty status and daily attendance records from your staff." />
+
+    <div className="metric-grid">
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#dcfce7', color:'#16a34a' }}><Clock size={20}/></div>
+        <div className="metric-body">
+          <div className="metric-label">On Duty Now (Today)</div>
+          <div className="metric-value">{onDutyNow}</div>
+        </div>
+      </div>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#dbeafe', color:'#2563eb' }}><CheckCircle size={20}/></div>
+        <div className="metric-body">
+          <div className="metric-label">Completed Today</div>
+          <div className="metric-value">{completedToday}</div>
+        </div>
+      </div>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#fef9c3', color:'#ca8a04' }}><Users size={20}/></div>
+        <div className="metric-body">
+          <div className="metric-label">Total Records</div>
+          <div className="metric-value">{records.length}</div>
+        </div>
+      </div>
+    </div>
+
+    <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+      <input
+        type="date"
+        value={filterDate}
+        onChange={e => setFilterDate(e.target.value)}
+        style={{ border:'1.5px solid #e5e7eb', borderRadius:8, padding:'8px 12px', fontSize:13 }}
+        placeholder="Filter by date"
+      />
+      <input
+        type="text"
+        value={filterStaff}
+        onChange={e => setFilterStaff(e.target.value)}
+        placeholder="Search staff name…"
+        style={{ border:'1.5px solid #e5e7eb', borderRadius:8, padding:'8px 12px', fontSize:13, minWidth:180 }}
+      />
+      {(filterDate || filterStaff) && (
+        <button
+          onClick={() => { setFilterDate(''); setFilterStaff(''); }}
+          style={{ border:'1.5px solid #e5e7eb', borderRadius:8, padding:'8px 14px', fontSize:13, cursor:'pointer', background:'#f9fafb' }}
+        >Clear</button>
+      )}
+    </div>
+
+    {filtered.length === 0 ? (
+      <div className="empty-state">
+        <div className="empty-icon">🕐</div>
+        <div className="empty-title">No Attendance Records</div>
+        <div className="empty-sub">Records appear here when staff toggle their duty status from the Staff Portal.</div>
+      </div>
+    ) : (
+      <div className="card" style={{ padding:0, overflow:'hidden' }}>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Staff</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Date</th>
+                <th>Duty In</th>
+                <th>Duty Out</th>
+                <th>Hours</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.id}>
+                  <td style={{ fontWeight:600 }}>{r.staffName}</td>
+                  <td style={{ fontSize:12, color:'#374151' }}>{r.staffPhone || '—'}</td>
+                  <td style={{ fontSize:12, color:'#374151' }}>{r.staffEmail || '—'}</td>
+                  <td>{r.date}</td>
+                  <td>{fmtTime(r.dutyIn)}</td>
+                  <td>{fmtTime(r.dutyOut)}</td>
+                  <td>{r.hoursWorked ? `${r.hoursWorked}h` : '—'}</td>
+                  <td>
+                    <span style={{
+                      background: r.status === 'ON_DUTY' ? '#dcfce7' : '#f3f4f6',
+                      color:      r.status === 'ON_DUTY' ? '#16a34a' : '#374151',
+                      borderRadius:99, padding:'2px 10px', fontSize:11, fontWeight:700
+                    }}>{r.status === 'ON_DUTY' ? '🟢 On Duty' : '⚫ Off Duty'}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+  </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FRAN LEAVE APPROVAL — reads staff leave requests from shared localStorage
+// ══════════════════════════════════════════════════════════════════
+function FranLeaveApproval() {
+  const [leaves, setLeaves] = useState(() => store.get('ev_franchise_leave_requests') || []);
+  const [tab, setTab] = useState('pending');
+  const [toast, setToast] = useState(null);
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const updateStatus = (id, status) => {
+    const updated = leaves.map(l => l.id === id ? { ...l, status, reviewedOn: new Date().toISOString() } : l);
+    setLeaves(updated);
+    store.set('ev_franchise_leave_requests', updated);
+    showToast(`Leave ${status === 'APPROVED' ? 'approved ✅' : 'rejected ❌'} successfully.`);
+  };
+
+  const pending  = leaves.filter(l => l.status === 'PENDING');
+  const reviewed = leaves.filter(l => l.status !== 'PENDING');
+
+  const typeColors = { casual:'#2563eb', sick:'#dc2626', earned:'#16a34a', maternity:'#7c3aed', paternity:'#7c3aed', unpaid:'#6b7280', compensatory:'#d97706' };
+
+  const LeaveCard = ({ l }) => (
+    <div style={{
+      background:'#fff', border:'1.5px solid #e5e7eb', borderRadius:12, padding:'16px 20px',
+      marginBottom:12, display:'flex', alignItems:'flex-start', gap:16, flexWrap:'wrap'
+    }}>
+      <div style={{ minWidth:120 }}>
+        <span style={{
+          background: (typeColors[l.type] || '#6b7280') + '18',
+          color: typeColors[l.type] || '#6b7280',
+          borderRadius:99, padding:'3px 10px', fontSize:11, fontWeight:700, display:'block', marginBottom:6
+        }}>{l.type?.toUpperCase()} LEAVE</span>
+        <div style={{ fontSize:13, color:'#374151', fontWeight:600 }}>
+          {new Date(l.fromDate).toLocaleDateString('en-IN', { day:'numeric', month:'short' })} — {new Date(l.toDate).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}
+        </div>
+        <div style={{ fontSize:12, color:'#6b7280', marginTop:2 }}>{l.days} day{l.days !== 1 ? 's' : ''}</div>
+      </div>
+      <div style={{ flex:1 }}>
+        <div style={{ fontSize:14, fontWeight:600, color:'#111827', marginBottom:2 }}>{l.staffName}</div>
+        <div style={{ fontSize:13, color:'#6b7280', marginBottom:4 }}>{l.reason}</div>
+        {l.contactDuring && <div style={{ fontSize:12, color:'#6b7280' }}>📞 {l.contactDuring}</div>}
+        <div style={{ fontSize:11, color:'#9ca3af', marginTop:4 }}>Applied {new Date(l.appliedOn).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })}</div>
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:8 }}>
+        <span style={{
+          background: l.status === 'APPROVED' ? '#dcfce7' : l.status === 'REJECTED' ? '#fee2e2' : '#fef9c3',
+          color: l.status === 'APPROVED' ? '#16a34a' : l.status === 'REJECTED' ? '#dc2626' : '#ca8a04',
+          borderRadius:99, padding:'3px 12px', fontSize:11, fontWeight:700
+        }}>{l.status}</span>
+        {l.status === 'PENDING' && (
+          <div style={{ display:'flex', gap:8 }}>
+            <button
+              onClick={() => updateStatus(l.id, 'APPROVED')}
+              style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', cursor:'pointer', fontWeight:700, fontSize:12 }}
+            >✅ Approve</button>
+            <button
+              onClick={() => updateStatus(l.id, 'REJECTED')}
+              style={{ background:'#dc2626', color:'#fff', border:'none', borderRadius:8, padding:'6px 14px', cursor:'pointer', fontWeight:700, fontSize:12 }}
+            >❌ Reject</button>
+          </div>
+        )}
+        {l.reviewedOn && <div style={{ fontSize:11, color:'#9ca3af' }}>Reviewed {new Date(l.reviewedOn).toLocaleDateString('en-IN', { day:'numeric', month:'short' })}</div>}
+      </div>
+    </div>
+  );
+
+  return <>
+    {toast && (
+      <div style={{
+        position:'fixed', top:20, right:20, zIndex:9999,
+        background: toast.type === 'success' ? '#16a34a' : '#dc2626',
+        color:'#fff', borderRadius:10, padding:'12px 20px', fontWeight:600, fontSize:14,
+        boxShadow:'0 4px 20px rgba(0,0,0,0.15)'
+      }}>{toast.msg}</div>
+    )}
+
+    <PageHeader title="Leave Approvals" sub="Review and approve leave requests submitted by your staff." />
+
+    <div className="metric-grid" style={{ marginBottom:20 }}>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#fef9c3', color:'#ca8a04' }}><Clock size={20}/></div>
+        <div className="metric-body"><div className="metric-label">Pending</div><div className="metric-value">{pending.length}</div></div>
+      </div>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#dcfce7', color:'#16a34a' }}><CheckCircle size={20}/></div>
+        <div className="metric-body"><div className="metric-label">Approved</div><div className="metric-value">{leaves.filter(l => l.status === 'APPROVED').length}</div></div>
+      </div>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#fee2e2', color:'#dc2626' }}><X size={20}/></div>
+        <div className="metric-body"><div className="metric-label">Rejected</div><div className="metric-value">{leaves.filter(l => l.status === 'REJECTED').length}</div></div>
+      </div>
+      <div className="metric-card">
+        <div className="metric-icon" style={{ background:'#dbeafe', color:'#2563eb' }}><FileText size={20}/></div>
+        <div className="metric-body"><div className="metric-label">Total Requests</div><div className="metric-value">{leaves.length}</div></div>
+      </div>
+    </div>
+
+    <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb' }}>
+      {[['pending','⏳ Pending', pending.length], ['reviewed','📋 Reviewed', reviewed.length]].map(([key, label, count]) => (
+        <button key={key} onClick={() => setTab(key)} style={{
+          display:'flex', alignItems:'center', gap:6, padding:'8px 18px',
+          border:'none', background:'none', cursor:'pointer', marginBottom:'-2px',
+          borderBottom: tab === key ? '2px solid #2563eb' : '2px solid transparent',
+          color: tab === key ? '#2563eb' : '#6b7280',
+          fontWeight: tab === key ? 700 : 500, fontSize:14, transition:'all 0.15s',
+        }}>
+          {label}
+          <span style={{ background: tab === key ? '#2563eb' : '#e5e7eb', color: tab === key ? '#fff' : '#374151', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{count}</span>
+        </button>
+      ))}
+    </div>
+
+    {tab === 'pending' && (
+      pending.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">✅</div>
+          <div className="empty-title">No Pending Requests</div>
+          <div className="empty-sub">All leave requests have been reviewed.</div>
+        </div>
+      ) : pending.map(l => <LeaveCard key={l.id} l={l} />)
+    )}
+    {tab === 'reviewed' && (
+      reviewed.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">📋</div>
+          <div className="empty-title">No Reviewed Requests Yet</div>
+        </div>
+      ) : reviewed.map(l => <LeaveCard key={l.id} l={l} />)
+    )}
+  </>;
 }
 
 // ══════════════════════════════════════════════════════════════════
