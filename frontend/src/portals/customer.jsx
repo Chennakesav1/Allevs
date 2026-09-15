@@ -1218,7 +1218,7 @@ function PickupLocationMap({ location, onClose }) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const L = window.L;
     const map = L.map(mapRef.current).setView([lat,lng], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',maxZoom:19}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>', subdomains: 'abcd', maxZoom: 19 }).addTo(map);
     const marker = L.marker([lat,lng]).addTo(map);
     marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
     return () => map.remove();
@@ -2322,8 +2322,9 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
