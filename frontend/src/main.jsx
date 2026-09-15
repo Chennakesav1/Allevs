@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Zap, Users, Car, Wrench, Shield } from 'lucide-react';
+import { Users, Car, Wrench, Shield } from 'lucide-react';
+import allevLogo from './allevlogo.png';
 import CustomerApp from './portals/customer.jsx';
 import StaffApp from './portals/staff.jsx';
 import FranchiseeApp from './portals/franchisee.jsx';
@@ -27,7 +28,7 @@ function PortalChooser() {
   return (
     <div className="portal-chooser">
       <div className="chooser-card">
-        <div className="chooser-brand"><span><Zap size={20}/></span> EV CORE</div>
+        <div className="chooser-brand"><img src={allevLogo} alt="allEV" style={{height:"36px",objectFit:"contain"}} /></div>
         <div className="chooser-kicker">Integrated EV Operations Platform</div>
         <h1>Choose your portal</h1>
         <p>All four portals now run from one localhost and use the same Node/Express API and MongoDB.</p>
