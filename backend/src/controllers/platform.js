@@ -70,3 +70,57 @@ exports.admin={
  createHub:async(req,res)=>ok(res,await M.Hub.create(req.body),201),createCharger:async(req,res)=>ok(res,await M.Charger.create(req.body),201),updateCharger:async(req,res)=>ok(res,await M.Charger.findByIdAndUpdate(req.params.id,req.body,{new:true})),
  ingestTelemetry:async(req,res)=>{try{const t=await M.Telemetry.create(req.body);if(req.io){req.io.emit('telemetry:update',t)};if(t.chargerId&&t.powerKw!=null){const c=await M.Charger.findByIdAndUpdate(t.chargerId,{lastTelemetry:t,lastHeartbeat:new Date()},{new:true});if(c)await detectCharging({hubId:c.hubId,chargerId:c._id,expected:Number(req.body.expectedEnergy||t.powerKw),actual:Number(req.body.actualEnergy||t.powerKw)})};if(t.vehicleId)await M.Vehicle.findByIdAndUpdate(t.vehicleId,{batterySoc:t.soc,batterySoh:t.soh});return ok(res,t,201)}catch(e){fail(res,e)}}
 };
+
+// ── NEW: Franchise complaint → assign to staff ──────────────────────
+exports.franchise.assignComplaint = async (req, res) => {
+  try {
+    const { staffId, staffName } = req.body;
+    const c = await M.Complaint.findOne({ _id: req.params.id, franchiseeId: req.user._id });
+    if (!c) return ok(res, { message: 'Complaint not found' }, 404);
+    c.assignedStaffId = staffId;
+    c.assignedStaffName = staffName || 'Staff';
+    c.status = 'IN_PROGRESS';
+    await c.save();
+    await M.Notification.create({
+      userId: staffId,
+      type: 'COMPLAINT_ASSIGNED',
+      title: 'Complaint Assigned to You',
+      message: `A customer complaint has been assigned to you by ${req.user.name}`,
+      data: { complaintId: c._id },
+    }).catch(() => {});
+    return ok(res, c);
+  } catch (e) { return fail(res, e); }
+};
+
+// ── NEW: Franchise create work order from complaint ─────────────────
+exports.franchise.createWorkOrder = async (req, res) => {
+  try {
+    const { description, staffId, priority } = req.body;
+    const c = await M.Complaint.findOne({ _id: req.params.id, franchiseeId: req.user._id });
+    if (!c) return ok(res, { message: 'Complaint not found' }, 404);
+    const job = await M.Job.create({
+      customerId: c.customerId,
+      vehicleId:  c.vehicleId,
+      serviceType: 'COMPLAINT_JOB',
+      description: description || c.message,
+      status: staffId ? 'ASSIGNED' : 'PENDING',
+      trackingStatus: staffId ? 'Technician Assigned' : 'Work Order Created',
+      technicianId: staffId || undefined,
+      complaintId: c._id,
+      priority: priority || 'NORMAL',
+      franchiseeId: req.user._id,
+    });
+    c.jobId = job._id;
+    await c.save();
+    if (staffId) {
+      await M.Notification.create({
+        userId: staffId,
+        type: 'JOB_ASSIGNED',
+        title: 'Work Order Assigned',
+        message: `A work order from customer complaint has been assigned to you.`,
+        data: { jobId: job._id },
+      }).catch(() => {});
+    }
+    return ok(res, job, 201);
+  } catch (e) { return fail(res, e); }
+};

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -190,8 +191,7 @@ function LoginPage({ creds, setCreds, onSubmit, busy }) {
     <div className="login-wrap">
       <div className="login-box">
         <div className="login-logo">
-          <div className="logo-icon"><Zap size={22} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"44px",objectFit:"contain"}} />
         </div>
         <p className="login-sub">{cfg.accent}</p>
         <h2 className="login-title">{cfg.title}</h2>
@@ -221,8 +221,7 @@ function Shell({ user, page, setPage, call, logout }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-icon sm"><Zap size={16} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
           {navItems.map(({ id, label, Icon, parent, sub }) => {

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -238,8 +239,7 @@ function AuthBox({ title, sub, children }) {
     <div className="login-wrap">
       <div className="login-box">
         <div className="login-logo">
-          <div className="logo-icon"><Zap size={22} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"44px",objectFit:"contain"}} />
         </div>
         <p className="login-sub">{sub || cfg.accent}</p>
         <h2 className="login-title">{title}</h2>
@@ -704,8 +704,7 @@ function Shell({ user, page, setPage, call, logout }) {
         </button>
 
         <div className="sidebar-logo">
-          <div className="logo-icon sm"><Zap size={16} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
 
         <nav className="sidebar-nav">
@@ -1219,7 +1218,7 @@ function PickupLocationMap({ location, onClose }) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const L = window.L;
     const map = L.map(mapRef.current).setView([lat,lng], 15);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',subdomains:'abcd',maxZoom:19}).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',subdomains:'abc',maxZoom:19}).addTo(map);
     const marker = L.marker([lat,lng]).addTo(map);
     marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
     return () => map.remove();
@@ -2323,9 +2322,9 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd', maxZoom: 19,
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      subdomains: 'abc', maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
     drawHubMarkers(map, hubs);   // instant — no waiting

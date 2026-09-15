@@ -113,7 +113,20 @@ fr.put( '/rentals/:id/handover', Rn.franchiseHandover);
 fr.put( '/rentals/:id/return',   Rn.franchiseReturn);
 fr.get( '/complaints',          P.franchise.complaints);
 fr.get( '/fault-vehicles',       P.franchise.faultVehicles);
-fr.put( '/complaints/:id/solve', P.franchise.solveComplaint);
+fr.put( '/complaints/:id/solve',      P.franchise.solveComplaint);
+fr.put( '/complaints/:id/assign',     P.franchise.assignComplaint);
+fr.post('/complaints/:id/work-order', P.franchise.createWorkOrder);
+fr.get( '/staff-list', async (req, res) => {
+  try {
+    const M = require('../models');
+    const staff = await M.User.find({
+      franchiseeId: req.user._id,
+      role: { $in: ['STAFF', 'TECHNICIAN', 'HUB_MANAGER'] },
+      active: true,
+    }).select('_id name role email').lean();
+    return res.json(staff || []);
+  } catch (e) { return res.status(500).json({ message: e.message }); }
+});
 // ── NEW: vehicle & staff approval submissions ─────────────────────
 fr.post('/pending-vehicles',   Ap.submitVehicle);
 fr.get( '/pending-vehicles',   Ap.myVehicles);

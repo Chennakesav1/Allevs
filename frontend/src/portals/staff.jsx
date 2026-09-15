@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, createContext, useContext } from 'react';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -336,8 +337,7 @@ function LoginPage({ creds, setCreds, onSubmit, busy, authView, setAuthView,
   const logoBlock = (
     <>
       <div className="login-logo">
-        <div className="logo-icon"><Zap size={22} /></div>
-        <span className="logo-text">EV CORE</span>
+        <img src={allevLogo} alt="allEV" style={{height:"44px",objectFit:"contain"}} />
       </div>
       <p className="login-sub">{cfg.accent}</p>
     </>
@@ -431,8 +431,7 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
       <aside className={'sidebar' + (sidebarCollapsed ? ' collapsed' : '')}>
         <div className="sidebar-header">
           <div className="sidebar-logo">
-            <div className="logo-icon sm"><Zap size={16} /></div>
-            {!sidebarCollapsed && <span className="logo-text">EV CORE</span>}
+            <img src={allevLogo} alt="allEV" style={{height:"30px",objectFit:"contain"}} />
           </div>
           <button className="sidebar-collapse-btn" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title="Toggle sidebar">
             {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
@@ -475,8 +474,7 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
       {/* ── Mobile Header ── */}
       <header className="mobile-topbar">
         <div className="topnav-logo">
-          <div className="logo-icon sm"><Zap size={16} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"30px",objectFit:"contain"}} />
         </div>
         <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}><Menu size={20} /></button>
       </header>

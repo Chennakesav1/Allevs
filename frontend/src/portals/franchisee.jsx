@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -173,8 +174,7 @@ function LoginPage({ creds, setCreds, onSubmit, busy }) {
     <div className="login-wrap">
       <div className="login-box">
         <div className="login-logo">
-          <div className="logo-icon"><Zap size={22} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"44px",objectFit:"contain"}} />
         </div>
         <p className="login-sub">{cfg.accent}</p>
         <h2 className="login-title">{cfg.title}</h2>
@@ -206,8 +206,7 @@ function Shell({ user, page, setPage, call, logout }) {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="logo-icon sm"><Zap size={16} /></div>
-          <span className="logo-text">EV CORE</span>
+          <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
           {navItems.map(({ id, label, Icon, parent, sub }) => {
@@ -2731,49 +2730,217 @@ function FranRentals({ call }) {
 function FranComplaints({ call }) {
   const { data, loading, error, refresh } = useFetch(call, '/franchise/complaints');
   const { data: inventory } = useFetch(call, '/franchise/pending-vehicles');
+  const { data: staffList } = useFetch(call, '/franchise/staff-list');
   const [selected, setSelected] = useState(null);
+  const [modalTab, setModalTab] = useState('resolve'); // 'resolve' | 'assign' | 'workorder'
   const [resolution, setResolution] = useState('');
   const [replaceId, setReplaceId] = useState('');
   const [faultReason, setFaultReason] = useState('');
+  const [assignStaffId, setAssignStaffId] = useState('');
+  const [woDesc, setWoDesc] = useState('');
+  const [woPriority, setWoPriority] = useState('NORMAL');
+  const [woStaffId, setWoStaffId] = useState('');
   const [busy, setBusy] = useState(false);
   const { toast, show } = useToast();
   const available = (inventory || []).filter(v => v.status === 'APPROVED' && Number(v.quantity ?? 1) > 0);
+  const staff = staffList || [];
+
+  const openModal = (c, tab = 'resolve') => {
+    setSelected(c); setModalTab(tab);
+    setResolution(''); setReplaceId(''); setFaultReason('');
+    setAssignStaffId(c.assignedStaffId || '');
+    setWoDesc(c.message || ''); setWoPriority('NORMAL'); setWoStaffId('');
+  };
+  const closeModal = () => { setSelected(null); };
+
   const solve = async () => {
     if (!selected) return;
     setBusy(true);
     try {
       await call(`/franchise/complaints/${selected._id}/solve`, { method:'put', data:{ resolution, replacementVehicleId:replaceId||undefined, faultReason:faultReason||undefined } });
       show('Complaint marked solved. Customer feedback request sent.');
-      setSelected(null); setResolution(''); setReplaceId(''); setFaultReason(''); refresh();
+      closeModal(); refresh();
     } catch(e) { show(e.response?.data?.message || 'Could not solve complaint','error'); }
     finally { setBusy(false); }
   };
+
+  const assignStaff = async () => {
+    if (!selected || !assignStaffId) { show('Select a staff member first', 'error'); return; }
+    setBusy(true);
+    try {
+      const s = staff.find(x => x._id === assignStaffId);
+      await call(`/franchise/complaints/${selected._id}/assign`, { method:'put', data:{ staffId:assignStaffId, staffName:s?.name||'' } });
+      show(`Complaint assigned to ${s?.name || 'staff'} successfully.`);
+      closeModal(); refresh();
+    } catch(e) { show(e.response?.data?.message || 'Assignment failed','error'); }
+    finally { setBusy(false); }
+  };
+
+  const createWorkOrder = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await call(`/franchise/complaints/${selected._id}/work-order`, { method:'post', data:{ description:woDesc, staffId:woStaffId||undefined, priority:woPriority } });
+      show('Work order created' + (woStaffId ? ' and assigned to staff.' : '.'));
+      closeModal(); refresh();
+    } catch(e) { show(e.response?.data?.message || 'Work order creation failed','error'); }
+    finally { setBusy(false); }
+  };
+
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
+
+  const sc = (status) => ({
+    OPEN:'#2563eb',IN_PROGRESS:'#d97706',SOLVED:'#16a34a',CLOSED:'#64748b'
+  })[status] || '#6b7280';
+
   return <>
     <Toast toast={toast}/>
-    <PageHeader title="Customer Complaints" sub="Resolve complaints and optionally issue a replacement from approved inventory."/>
+    <PageHeader title="Customer Complaints" sub="Assign to staff, create work orders, and resolve complaints from customers."/>
+    <MetricGrid metrics={[
+      {label:'Total',value:(data||[]).length,Icon:Bell,color:'#2563eb'},
+      {label:'Open',value:(data||[]).filter(c=>c.status==='OPEN').length,Icon:AlertTriangle,color:'#dc2626'},
+      {label:'In Progress',value:(data||[]).filter(c=>c.status==='IN_PROGRESS').length,Icon:Clock,color:'#d97706'},
+      {label:'Solved',value:(data||[]).filter(c=>c.status==='SOLVED'||c.status==='CLOSED').length,Icon:CheckCircle,color:'#16a34a'},
+    ]}/>
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><div><strong>{c.subject||c.category||'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Customer: {c.customerId?.name||'Customer'} · {new Date(c.createdAt).toLocaleString()}</div></div><span style={{fontSize:11,fontWeight:700}}>{c.status}</span></div>
-        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
-        {c.vehicleSnapshot&&<div style={{fontSize:12,color:'#475569',marginTop:7}}>🚗 {c.vehicleSnapshot.make||''} {c.vehicleSnapshot.model||''} · Reg {c.vehicleSnapshot.registrationNo||'—'}</div>}
-        {c.paymentDetails&&<div style={{fontSize:11,color:'#64748b',marginTop:4}}>Payment: {c.paymentDetails.paymentStatus||'—'} · {c.paymentDetails.razorpayPaymentId||'—'} · ₹{c.paymentDetails.totalAmount||0}</div>}
-        {c.status!=='SOLVED'&&c.status!=='CLOSED'&&<button className="btn-primary" style={{marginTop:12}} onClick={()=>setSelected(c)}>Open & Resolve</button>}
-        {c.status==='SOLVED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>✓ Solved. Waiting for customer feedback.</div>}
-        {c.status==='CLOSED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>⭐ Customer rating: {c.franchiseeRating||'—'}/5 {c.feedback?`· ${c.feedback}`:''}</div>}
-      </div>)}
-      {!data?.length&&<div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25}}/><p>No customer complaints.</p></div></div>}
+      {(data||[]).map(c=>{
+        const color = sc(c.status);
+        return <div key={c._id} className="card" style={{padding:16}}>
+          <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'flex-start'}}>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:15}}>{c.subject||c.category||'Vehicle Complaint'}</div>
+              <div style={{fontSize:12,color:'#64748b',marginTop:3}}>
+                Customer: <strong>{c.customerId?.name||'Customer'}</strong> · {new Date(c.createdAt).toLocaleString()}
+              </div>
+              {c.assignedStaffName && (
+                <div style={{fontSize:12,color:'#7c3aed',marginTop:3}}>
+                  👤 Assigned to: <strong>{c.assignedStaffName}</strong>
+                </div>
+              )}
+              {c.jobId && (
+                <div style={{fontSize:12,color:'#16a34a',marginTop:3}}>
+                  🔧 Work order created
+                </div>
+              )}
+            </div>
+            <span className="status-pill" style={{background:color+'18',color,fontSize:12,padding:'3px 12px'}}>{c.status}</span>
+          </div>
+          <div style={{fontSize:13,color:'#374151',marginTop:10,background:'#f8fafc',padding:'10px 12px',borderRadius:8}}>{c.message}</div>
+          {c.vehicleSnapshot&&<div style={{fontSize:12,color:'#475569',marginTop:7}}>🚗 {c.vehicleSnapshot.make||''} {c.vehicleSnapshot.model||''} · Reg {c.vehicleSnapshot.registrationNo||'—'}</div>}
+          {c.paymentDetails&&<div style={{fontSize:11,color:'#64748b',marginTop:4}}>Payment: {c.paymentDetails.paymentStatus||'—'} · ₹{c.paymentDetails.totalAmount||0}</div>}
+          {c.status==='SOLVED'&&<div style={{marginTop:8,color:'#166534',fontSize:12,fontWeight:600}}>✓ Solved. Waiting for customer feedback.</div>}
+          {c.status==='CLOSED'&&<div style={{marginTop:8,color:'#166534',fontSize:12,fontWeight:600}}>⭐ Rating: {c.franchiseeRating||'—'}/5 {c.feedback?`· ${c.feedback}`:''}</div>}
+          {c.status!=='SOLVED'&&c.status!=='CLOSED'&&(
+            <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
+              <button className="btn-primary" onClick={()=>openModal(c,'resolve')}>✅ Resolve</button>
+              <button className="btn-ghost" onClick={()=>openModal(c,'assign')} style={{display:'flex',alignItems:'center',gap:6}}>
+                <Users size={14}/> Assign to Staff
+              </button>
+              {!c.jobId && <button className="btn-ghost" onClick={()=>openModal(c,'workorder')} style={{display:'flex',alignItems:'center',gap:6}}>
+                <Wrench size={14}/> Create Work Order
+              </button>}
+            </div>
+          )}
+        </div>;
+      })}
+      {!data?.length&&<div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25,marginBottom:12}}/><p>No customer complaints.</p></div></div>}
     </div>
-    {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Resolve Complaint</div><div className="modal-subtitle">Solve the issue or issue a replacement vehicle.</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div><div className="modal-body"><div className="login-form">
-      <div style={{background:'#f8fafc',padding:12,borderRadius:10,border:'1px solid #e2e8f0'}}><strong>Complaint</strong><div style={{fontSize:13,marginTop:5}}>{selected.message}</div></div>
-      <label>Resolution *<textarea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Explain how the issue was resolved…"/></label>
-      <label>Replacement Vehicle (optional)<select value={replaceId} onChange={e=>setReplaceId(e.target.value)}><option value="">No replacement</option>{available.map(v=><option key={v._id} value={v._id}>{v.make} {v.model} · {v.registrationNo} · {v.quantity??1} available</option>)}</select></label>
-      {replaceId&&<label>Old Vehicle Fault / Replacement Reason *<textarea rows={2} value={faultReason} onChange={e=>setFaultReason(e.target.value)} placeholder="Why is the old vehicle being replaced?"/></label>}
-      {replaceId&&<InfoBanner Icon={AlertTriangle}>Replacement stock is reduced by 1 and the old vehicle is added to Fault Vehicles with its vehicle/payment snapshot and your reason.</InfoBanner>}
-    </div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setSelected(null)}>Cancel</button><button className="btn-primary" onClick={solve} disabled={busy||!resolution||!!(replaceId&&!faultReason)}>{busy?'Saving…':'Mark as Solved'}</button></div></div></div>}
+
+    {/* ─── Modal ─── */}
+    {selected&&(
+      <div className="modal-overlay" onClick={closeModal}>
+        <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">
+                {modalTab==='resolve'?'Resolve Complaint':modalTab==='assign'?'Assign to Staff':'Create Work Order'}
+              </div>
+              <div className="modal-subtitle">{selected.subject||selected.category||'Vehicle Complaint'} · {selected.customerId?.name||'Customer'}</div>
+            </div>
+            <button className="icon-btn" onClick={closeModal}>✕</button>
+          </div>
+
+          {/* Tab switcher */}
+          <div style={{display:'flex',borderBottom:'2px solid #e5e7eb',padding:'0 20px'}}>
+            {[['resolve','✅ Resolve'],['assign','👤 Assign Staff'],['workorder','🔧 Work Order']].map(([key,label])=>(
+              <button key={key} onClick={()=>setModalTab(key)} style={{
+                padding:'10px 16px',border:'none',background:'none',cursor:'pointer',
+                borderBottom:modalTab===key?'2px solid #2563eb':'2px solid transparent',
+                color:modalTab===key?'#2563eb':'#6b7280',
+                fontWeight:modalTab===key?700:500,fontSize:13,marginBottom:'-2px',
+              }}>{label}</button>
+            ))}
+          </div>
+
+          <div className="modal-body">
+            {/* Complaint summary */}
+            <div style={{background:'#f8fafc',padding:'10px 14px',borderRadius:10,border:'1px solid #e2e8f0',marginBottom:14}}>
+              <div style={{fontSize:11,color:'#9ca3af',fontWeight:600,textTransform:'uppercase',marginBottom:4}}>Complaint</div>
+              <div style={{fontSize:13,color:'#1a1f2e'}}>{selected.message}</div>
+              {selected.vehicleSnapshot&&<div style={{fontSize:12,color:'#475569',marginTop:6}}>🚗 {selected.vehicleSnapshot.make} {selected.vehicleSnapshot.model} · {selected.vehicleSnapshot.registrationNo||'—'}</div>}
+            </div>
+
+            {/* ── RESOLVE TAB ── */}
+            {modalTab==='resolve'&&<div className="login-form">
+              <label>Resolution * <textarea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Explain how the issue was resolved…"/></label>
+              <label>Replacement Vehicle (optional)
+                <select value={replaceId} onChange={e=>setReplaceId(e.target.value)}>
+                  <option value="">No replacement</option>
+                  {available.map(v=><option key={v._id} value={v._id}>{v.make} {v.model} · {v.registrationNo} · {v.quantity??1} available</option>)}
+                </select>
+              </label>
+              {replaceId&&<label>Fault / Replacement Reason *<textarea rows={2} value={faultReason} onChange={e=>setFaultReason(e.target.value)} placeholder="Why is the old vehicle being replaced?"/></label>}
+              {replaceId&&<InfoBanner Icon={AlertTriangle}>Replacement stock is reduced by 1 and the old vehicle is logged to Fault Vehicles.</InfoBanner>}
+            </div>}
+
+            {/* ── ASSIGN STAFF TAB ── */}
+            {modalTab==='assign'&&<div>
+              {selected.assignedStaffName&&(
+                <InfoBanner type="warning" Icon={Users}>Currently assigned to: <strong>{selected.assignedStaffName}</strong>. Reassigning will notify the new staff member.</InfoBanner>
+              )}
+              <Fld label="Select Staff Member" required hint="Only active approved staff from your franchise are shown">
+                <Sel value={assignStaffId} onChange={setAssignStaffId}
+                  opts={staff.map(s=>({v:s._id,l:`${s.name} (${s.role})`}))}
+                  placeholder="Choose staff member…"
+                />
+              </Fld>
+              {staff.length===0&&<InfoBanner type="warning" Icon={Users}>No active staff found. Add and get staff approved in Staff Management first.</InfoBanner>}
+            </div>}
+
+            {/* ── WORK ORDER TAB ── */}
+            {modalTab==='workorder'&&<div>
+              {selected.jobId&&<InfoBanner type="success" Icon={CheckCircle}>A work order already exists for this complaint.</InfoBanner>}
+              <Fld label="Work Description" required hint="Describe the work to be done">
+                <Txt value={woDesc} onChange={setWoDesc} placeholder="Describe the service/repair work required…" rows={3}/>
+              </Fld>
+              <div className="row-2">
+                <Fld label="Priority">
+                  <Sel value={woPriority} onChange={setWoPriority} opts={['LOW','NORMAL','HIGH','URGENT']} placeholder="Select priority…"/>
+                </Fld>
+                <Fld label="Assign to Staff" hint="Optional — assign immediately">
+                  <Sel value={woStaffId} onChange={setWoStaffId}
+                    opts={staff.map(s=>({v:s._id,l:`${s.name} (${s.role})`}))}
+                    placeholder="Unassigned"
+                  />
+                </Fld>
+              </div>
+              <InfoBanner Icon={Wrench}>The work order will appear in your Jobs list. Staff will be notified if assigned.</InfoBanner>
+            </div>}
+          </div>
+
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={closeModal}>Cancel</button>
+            {modalTab==='resolve'&&<button className="btn-primary" onClick={solve} disabled={busy||!resolution||!!(replaceId&&!faultReason)}>{busy?'Saving…':'Mark as Solved'}</button>}
+            {modalTab==='assign'&&<button className="btn-primary" onClick={assignStaff} disabled={busy||!assignStaffId}>{busy?'Assigning…':'Assign Staff'}</button>}
+            {modalTab==='workorder'&&<button className="btn-primary" onClick={createWorkOrder} disabled={busy||!woDesc||!!selected.jobId}>{busy?'Creating…':'Create Work Order'}</button>}
+          </div>
+        </div>
+      </div>
+    )}
   </>;
 }
+
 
 function FaultVehicles({ call }) {
   const {data,loading,error}=useFetch(call,'/franchise/fault-vehicles');
