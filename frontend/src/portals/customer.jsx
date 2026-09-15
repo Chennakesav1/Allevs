@@ -4,7 +4,7 @@ import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus
+  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal
 } from 'lucide-react';
 import './customer.css';
 
@@ -666,13 +666,43 @@ function ResetPasswordPage({ setScreen, pendingEmail }) {
 // ══════════════════════════════════════════════════════════════════
 // SHELL WITH SIDEBAR
 // ══════════════════════════════════════════════════════════════════
+// Bottom-nav primary items (mobile): first 4 + "More" drawer trigger
+const BOTTOM_NAV_COUNT = 4;
+
 function Shell({ user, page, setPage, call, logout }) {
   const navItems = NAV_ITEMS[kind] || NAV_ITEMS.command;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const navigate = (id) => {
+    setPage(id);
+    setMenuOpen(false);
+  };
+
+  const bottomItems = navItems.slice(0, BOTTOM_NAV_COUNT);
+  const isBottomActive = bottomItems.some(i => i.id === page);
 
   return (
     <div className="shell">
+      {/* ── Mobile/Tablet sidebar overlay ── */}
+      {menuOpen && (
+        <div
+          className="sidebar-overlay"
+          onClick={() => setMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* ── Sidebar ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${menuOpen ? ' sidebar--open' : ''}`}>
+        {/* Close button visible only on mobile/tablet */}
+        <button
+          className="sidebar-close-btn"
+          onClick={() => setMenuOpen(false)}
+          aria-label="Close menu"
+        >
+          <X size={20} />
+        </button>
+
         <div className="sidebar-logo">
           <div className="logo-icon sm"><Zap size={16} /></div>
           <span className="logo-text">EV CORE</span>
@@ -683,7 +713,7 @@ function Shell({ user, page, setPage, call, logout }) {
             <button
               key={id}
               className={'nav-item' + (page === id ? ' active' : '')}
-              onClick={() => setPage(id)}
+              onClick={() => navigate(id)}
             >
               <Icon size={17} />
               <span>{label}</span>
@@ -700,13 +730,23 @@ function Shell({ user, page, setPage, call, logout }) {
       {/* ── Main ── */}
       <div className="main-wrap">
         <header className="topbar">
-          <div>
+          {/* Hamburger – hidden on desktop via CSS */}
+          <button
+            className="hamburger-btn"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Open menu"
+          >
+            <Menu size={22} />
+          </button>
+
+          <div className="topbar-brand">
             <div className="topbar-sub">{cfg.accent}</div>
             <div className="topbar-title">{cfg.title}</div>
           </div>
+
           <div className="topbar-user">
             <div className="avatar">{user?.name?.[0] ?? '?'}</div>
-            <div>
+            <div className="topbar-user-info">
               <div className="user-name">{user?.name}</div>
               <div className="user-role">{user?.role}</div>
             </div>
@@ -717,6 +757,28 @@ function Shell({ user, page, setPage, call, logout }) {
           <PageRouter page={page} call={call} setPage={setPage} />
         </div>
       </div>
+
+      {/* ── Bottom nav – mobile only ── */}
+      <nav className="bottom-nav" aria-label="Main navigation">
+        {bottomItems.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            className={`bottom-nav-item${page === id ? ' active' : ''}`}
+            onClick={() => navigate(id)}
+          >
+            <Icon size={20} />
+            <span>{label}</span>
+          </button>
+        ))}
+        {/* "More" opens the drawer for remaining items */}
+        <button
+          className={`bottom-nav-item${!isBottomActive ? ' active' : ''}`}
+          onClick={() => setMenuOpen(true)}
+        >
+          <MoreHorizontal size={20} />
+          <span>More</span>
+        </button>
+      </nav>
     </div>
   );
 }
