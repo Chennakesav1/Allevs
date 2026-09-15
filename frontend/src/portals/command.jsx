@@ -827,10 +827,7 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd', maxZoom: 19,
-    }).addTo(map);
+    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',{attribution:'© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',maxZoom:20}).addTo(map);
     leafRef.current = map;
     drawMarkers(map, hubs);   // draw immediately — no waiting
   }, []);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import allevLogo from '../allevlogo.png';
+import allevLogo from './allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -1218,7 +1218,7 @@ function PickupLocationMap({ location, onClose }) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const L = window.L;
     const map = L.map(mapRef.current).setView([lat,lng], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',subdomains:'abc',maxZoom:19}).addTo(map);
+    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',{attribution:'© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',maxZoom:20}).addTo(map);
     const marker = L.marker([lat,lng]).addTo(map);
     marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
     return () => map.remove();
@@ -2322,9 +2322,9 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      subdomains: 'abc', maxZoom: 19,
+    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 20,
     }).addTo(map);
     leafRef.current = map;
     drawHubMarkers(map, hubs);   // instant — no waiting
