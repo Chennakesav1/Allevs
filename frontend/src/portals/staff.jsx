@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, createContext, useContext } from 'react';
-import allevLogo from './allevlogo.png';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,

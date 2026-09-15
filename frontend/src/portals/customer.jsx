@@ -1,38 +1,37 @@
 import React, { useEffect, useState } from 'react';
-import allevLogo from './allevlogo.png';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal
+  Plus, X, Save, Eye, EyeOff, UserPlus, BarChart2, RefreshCw,
+  Clock, Key, UserCheck, UserX, UserMinus, Image, Layers, Hash
 } from 'lucide-react';
-import './customer.css';
+import './command.css';
 
 const API = import.meta.env.VITE_API_URL || '/api';
 
-// Portal identity is selected by the single-host path: /customer
-const kind = 'customer';
-const ALLOWED_ROLES = ['CUSTOMER'];
+// Portal identity is selected by the single-host path: /command
+const kind = 'command';
+const ALLOWED_ROLES = ['CENTRAL_ADMIN','SUPER_ADMIN'];
 
 const PORTAL_CFG = {
-  customer:   { title: 'Customer Portal',    accent: 'Customer Operations' , email: 'customer@ev.local'},
+  customer:   { title: 'Customer Portal',    accent: 'Customer Operations' },
   staff:      { title: 'Staff Portal',       accent: 'Service Operations' },
   franchisee: { title: 'Franchisee Portal',  accent: 'Business Intelligence' },
-  command:    { title: 'Central Command',    accent: 'Enterprise Control' },
+  command:    { title: 'Central Command',    accent: 'Enterprise Control', email: 'admin@ev.local' },
 };
 const cfg = PORTAL_CFG[kind];
 
 const NAV_ITEMS = {
   customer: [
-    { id: 'dashboard',           label: 'Dashboard',          Icon: LayoutDashboard },
-    { id: 'available-vehicles',  label: 'Available Vehicles', Icon: Sparkles },
-    { id: 'charging-stations',   label: 'Charging Stations',  Icon: MapPin },
-    { id: 'vehicles',            label: 'My Vehicles',        Icon: Car },
-    { id: 'bookings',            label: 'Bookings',           Icon: ClipboardList },
-    { id: 'wallet',              label: 'Wallet',             Icon: Wallet },
-    { id: 'invoices',            label: 'Invoices',           Icon: FileText },
-    { id: 'complaints',          label: 'Support',            Icon: Bell },
+    { id: 'dashboard',  label: 'Dashboard',   Icon: LayoutDashboard },
+    { id: 'vehicles',   label: 'My Vehicles', Icon: Car },
+    { id: 'bookings',   label: 'Bookings',    Icon: ClipboardList },
+    { id: 'wallet',     label: 'Wallet',      Icon: Wallet },
+    { id: 'invoices',   label: 'Invoices',    Icon: FileText },
+    { id: 'complaints', label: 'Support',     Icon: Bell },
   ],
   staff: [
     { id: 'dashboard',   label: 'Dashboard',   Icon: LayoutDashboard },
@@ -42,50 +41,51 @@ const NAV_ITEMS = {
     { id: 'suppliers',   label: 'Suppliers',   Icon: Truck },
   ],
   franchisee: [
-    { id: 'dashboard',  label: 'Dashboard',   Icon: LayoutDashboard },
-    { id: 'financials', label: 'Financials',  Icon: DollarSign },
-    { id: 'inventory',  label: 'Inventory',   Icon: Package },
-    { id: 'staff',      label: 'Staff',       Icon: Users },
-    { id: 'jobs',       label: 'Jobs',        Icon: ClipboardList },
+    { id: 'dashboard',  label: 'Dashboard',  Icon: LayoutDashboard },
+    { id: 'financials', label: 'Financials', Icon: DollarSign },
+    { id: 'inventory',  label: 'Inventory',  Icon: Package },
+    { id: 'staff',      label: 'Staff',      Icon: Users },
+    { id: 'jobs',       label: 'Jobs',       Icon: ClipboardList },
   ],
   command: [
-    { id: 'dashboard',   label: 'Dashboard',   Icon: LayoutDashboard },
-    { id: 'hubs',        label: 'Hubs',        Icon: Factory },
-    { id: 'chargers',    label: 'Chargers',    Icon: Zap },
-    { id: 'operations',  label: 'Live Ops',    Icon: Activity },
-    { id: 'revenue',     label: 'Revenue',     Icon: DollarSign },
-    { id: 'anomalies',   label: 'Anomalies',   Icon: AlertTriangle },
-    { id: 'franchisees', label: 'Franchisees', Icon: Users },
-    { id: 'demand',      label: 'Demand',      Icon: TrendingUp },
-    { id: 'expansion',   label: 'Expansion',   Icon: MapPin },
+    { id: 'dashboard',           label: 'Dashboard',              Icon: LayoutDashboard },
+    { id: 'hubs',                label: 'Hubs',                   Icon: Factory },
+    { id: 'franchisees',         label: 'Franchisees',            Icon: Users },
+    { id: 'vehicle-inventory',   label: 'Vehicle & Inventory',    Icon: Layers },
+    { id: 'vehicle-approvals',   label: 'Vehicle Approvals',      Icon: Car },
+    { id: 'staff-directory',     label: 'Staff Directory',        Icon: Users },
+    { id: 'customers',           label: 'Customers',              Icon: Users },
+    { id: 'franchise-ratings',   label: 'Franchisee Ratings',     Icon: BarChart2 },
+    { id: 'customer-payments',   label: 'Customer Payments',      Icon: DollarSign },
+    { id: 'demand',              label: 'Demand',                 Icon: TrendingUp },
   ],
 };
 
 // ── Axios helper — always reads token fresh from localStorage, auto-refreshes on 401 ──
 function api() {
   return async (path, opts = {}) => {
-    const token = localStorage.getItem('ev_customer_token');
+    const token = localStorage.getItem('ev_command_token');
     try {
       const r = await axios({ baseURL: API, url: path, headers: { Authorization: `Bearer ${token}` }, ...opts });
       return r.data;
     } catch (err) {
       if (err.response?.status === 401) {
-        const rt = localStorage.getItem('ev_customer_refresh_token');
+        const rt = localStorage.getItem('ev_command_refresh_token');
         if (rt) {
           try {
             const { data } = await axios.post(`${API}/auth/refresh`, { refreshToken: rt });
-            localStorage.setItem('ev_customer_token', data.accessToken);
-            localStorage.setItem('ev_customer_refresh_token', data.refreshToken);
+            localStorage.setItem('ev_command_token', data.accessToken);
+            localStorage.setItem('ev_command_refresh_token', data.refreshToken);
             const retry = await axios({ baseURL: API, url: path, headers: { Authorization: `Bearer ${data.accessToken}` }, ...opts });
             return retry.data;
           } catch (_) {
-            localStorage.removeItem('ev_customer_token');
-            localStorage.removeItem('ev_customer_refresh_token');
+            localStorage.removeItem('ev_command_token');
+            localStorage.removeItem('ev_command_refresh_token');
             window.location.reload();
             return;
           }
         } else {
-          localStorage.removeItem('ev_customer_token');
+          localStorage.removeItem('ev_command_token');
           window.location.reload();
           return;
         }
@@ -95,32 +95,12 @@ function api() {
   };
 }
 
-// ── Error Boundary ─────────────────────────────────────────────────
-class ErrorBoundary extends React.Component {
-  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
-  static getDerivedStateFromError(error) { return { hasError: true, error }; }
-  componentDidCatch(error, info) { console.error('EV CORE UI Error:', error, info); }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div style={{padding:32,textAlign:'center',color:'#b91c1c'}}>
-          <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
-          <div style={{fontWeight:700,fontSize:16,marginBottom:8}}>Something went wrong</div>
-          <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>{this.state.error?.message || 'An unexpected error occurred.'}</div>
-          <button className="btn-primary" onClick={()=>this.setState({hasError:false,error:null})}>Try Again</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 // ── useFetch hook ──────────────────────────────────────────────────
 function useFetch(call, path) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
-  const [tick, setTick]       = useState(0);
+  const [rev, setRev]         = useState(0);
   useEffect(() => {
     let alive = true;
     setLoading(true); setError(null);
@@ -129,46 +109,29 @@ function useFetch(call, path) {
       .catch(e => { if (alive) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [path, tick]);
-  const refresh = () => setTick(t => t + 1);
-  return { data, loading, error, refresh };
+  }, [path, rev]);
+  return { data, loading, error, refresh: () => setRev(r => r + 1) };
 }
 
+// ── useToast ──────────────────────────────────────────────────────
 function useToast() {
-  const [toast, setToast] = useState(null);
+  const [t, setT] = useState(null);
   const show = (msg, type = 'success') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
+    setT({ msg, type });
+    setTimeout(() => setT(null), 3500);
   };
-  return { toast, show };
-}
-
-function Toast({ toast }) {
-  if (!toast) return null;
-  return <div className={`toast toast-${toast.type}`}>{toast.msg}</div>;
-}
-
-function InfoBanner({ Icon: I = Shield, children }) {
-  return (
-    <div className="info-banner">
-      <I size={15} />
-      <span>{children}</span>
-    </div>
-  );
+  return { toast: t, show };
 }
 
 // ══════════════════════════════════════════════════════════════════
 // ROOT APP
 // ══════════════════════════════════════════════════════════════════
 export default function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('ev_customer_token'));
-  const [user,  setUser]  = useState(null);
-  const [page,  setPage]  = useState('dashboard');
-  // 'login' | 'register' | 'verify-register' | 'verify-login-otp'
-  // | 'forgot-password' | 'reset-password' | 'set-password'
-  const [authScreen, setAuthScreen] = useState('login');
-  const [pendingEmail, setPendingEmail] = useState('');
-  const [pendingPassword, setPendingPassword] = useState('');
+  const [token,  setToken]  = useState(() => localStorage.getItem('ev_command_token'));
+  const [user,   setUser]   = useState(null);
+  const [creds,  setCreds]  = useState({ email: cfg.email || '', password: 'Password123!' });
+  const [busy,   setBusy]   = useState(false);
+  const [page,   setPage]   = useState('dashboard');
   const call = api();
 
   useEffect(() => {
@@ -176,608 +139,131 @@ export default function App() {
     call('/auth/me')
       .then(u => {
         if (!ALLOWED_ROLES.includes(u.role)) {
-          localStorage.removeItem('ev_customer_token');
-          localStorage.removeItem('ev_customer_refresh_token');
-          setToken(null); setUser(null);
+          localStorage.removeItem('ev_command_token');
+          localStorage.removeItem('ev_command_refresh_token');
+          setToken(null);
+          setUser(null);
           return;
         }
         setUser(u);
       })
       .catch(() => {
-        localStorage.removeItem('ev_customer_token');
-        localStorage.removeItem('ev_customer_refresh_token');
+        localStorage.removeItem('ev_command_token');
+        localStorage.removeItem('ev_command_refresh_token');
         setToken(null);
       });
   }, []);
 
-  const handleAuth = (tok, rt, userData) => {
-    localStorage.setItem('ev_customer_token', tok);
-    if (rt) localStorage.setItem('ev_customer_refresh_token', rt);
-    setToken(tok);
-    setUser(userData);
-    setAuthScreen('login');
+  const login = async e => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await axios.post(`${API}/auth/login`, creds);
+      const tok = res.data.accessToken;
+      const rt  = res.data.refreshToken;
+      localStorage.setItem('ev_command_token', tok);
+      if (rt) localStorage.setItem('ev_command_refresh_token', rt);
+      if (!ALLOWED_ROLES.includes(res.data.user.role)) {
+        throw new Error(`This account belongs to the ${res.data.user.role} portal.`);
+      }
+      setToken(tok);
+      setUser(res.data.user);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Login failed');
+    } finally { setBusy(false); }
   };
 
   const logout = () => {
-    localStorage.removeItem('ev_customer_token');
-    localStorage.removeItem('ev_customer_refresh_token');
+    localStorage.removeItem('ev_command_token');
+    localStorage.removeItem('ev_command_refresh_token');
     setToken(null); setUser(null); setPage('dashboard');
   };
 
-  if (!token) {
-    return (
-      <AuthRouter
-        screen={authScreen}
-        setScreen={setAuthScreen}
-        pendingEmail={pendingEmail}
-        setPendingEmail={setPendingEmail}
-        pendingPassword={pendingPassword}
-        setPendingPassword={setPendingPassword}
-        onAuth={handleAuth}
-      />
-    );
-  }
+  if (!token) return <LoginPage creds={creds} setCreds={setCreds} onSubmit={login} busy={busy} />;
   return <Shell user={user} page={page} setPage={setPage} call={call} logout={logout} />;
 }
 
 // ══════════════════════════════════════════════════════════════════
-// AUTH ROUTER — selects which auth screen to show
+// LOGIN
 // ══════════════════════════════════════════════════════════════════
-function AuthRouter({ screen, setScreen, pendingEmail, setPendingEmail, pendingPassword, setPendingPassword, onAuth }) {
-  const common = { setScreen, pendingEmail, setPendingEmail, pendingPassword, setPendingPassword, onAuth };
-  if (screen === 'register')           return <RegisterPage {...common} />;
-  if (screen === 'verify-register')    return <VerifyRegisterOtpPage {...common} />;
-  if (screen === 'verify-login-otp')   return <VerifyLoginOtpPage {...common} />;
-  if (screen === 'forgot-password')    return <ForgotPasswordPage {...common} />;
-  if (screen === 'reset-password')     return <ResetPasswordPage {...common} />;
-  return <LoginPage {...common} />;
-}
-
-// ── shared inner-box ───────────────────────────────────────────────
-function AuthBox({ title, sub, children }) {
+function LoginPage({ creds, setCreds, onSubmit, busy }) {
   return (
     <div className="login-wrap">
       <div className="login-box">
         <div className="login-logo">
           <img src={allevLogo} alt="allEV" style={{height:"44px",objectFit:"contain"}} />
         </div>
-        <p className="login-sub">{sub || cfg.accent}</p>
-        <h2 className="login-title">{title}</h2>
-        {children}
+        <p className="login-sub">{cfg.accent}</p>
+        <h2 className="login-title">{cfg.title}</h2>
+        <form onSubmit={onSubmit} className="login-form">
+          <label>Email
+            <input type="email" value={creds.email}
+              onChange={e => setCreds({ ...creds, email: e.target.value })} />
+          </label>
+          <label>Password
+            <input type="password" value={creds.password}
+              onChange={e => setCreds({ ...creds, password: e.target.value })} />
+          </label>
+          <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        </form>
+        <p className="login-hint">Demo&nbsp;&mdash;&nbsp;<strong>{cfg.email || ''}</strong> / <strong>Password123!</strong></p>
       </div>
     </div>
-  );
-}
-
-// ── error/success banner ───────────────────────────────────────────
-function Msg({ type, text }) {
-  if (!text) return null;
-  return (
-    <div className={`auth-msg auth-msg--${type}`}>{text}</div>
-  );
-}
-
-// ── OTP input row ──────────────────────────────────────────────────
-function OtpInput({ value, onChange }) {
-  return (
-    <label className="otp-label">
-      OTP Code
-      <input
-        type="text"
-        inputMode="numeric"
-        maxLength={6}
-        value={value}
-        onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
-        className="otp-input"
-        placeholder="6-digit OTP"
-        autoFocus
-      />
-    </label>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 1 — LOGIN (password OR switch to OTP)
-// ══════════════════════════════════════════════════════════════════
-function LoginPage({ setScreen, setPendingEmail, onAuth }) {
-  const [email, setEmail]   = useState('');
-  const [pass,  setPass]    = useState('');
-  const [busy,  setBusy]    = useState(false);
-  const [msg,   setMsg]     = useState({ type: '', text: '' });
-  const [mode,  setMode]    = useState('password'); // 'password' | 'otp'
-
-  const loginWithPassword = async () => {
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      const res = await axios.post(`${API}/auth/customer/login-password`, { email, password: pass });
-      onAuth(res.data.accessToken, res.data.refreshToken, res.data.user);
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Login failed.' });
-    } finally { setBusy(false); }
-  };
-
-  const sendOtp = async () => {
-    if (!email) { setMsg({ type: 'error', text: 'Enter your email first.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      await axios.post(`${API}/auth/customer/login-otp`, { email });
-      setPendingEmail(email);
-      setScreen('verify-login-otp');
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not send OTP.' });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <AuthBox title="Welcome back" sub="Customer Portal">
-      <div className="auth-tabs">
-        <button className={'auth-tab' + (mode === 'password' ? ' active' : '')} onClick={() => setMode('password')}>Password</button>
-        <button className={'auth-tab' + (mode === 'otp' ? ' active' : '')} onClick={() => setMode('otp')}>OTP Login</button>
-      </div>
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <label>Email
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (mode === 'password' ? loginWithPassword() : sendOtp())} />
-        </label>
-        {mode === 'password' && (
-          <label>Password
-            <input type="password" value={pass} onChange={e => setPass(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && loginWithPassword()} />
-          </label>
-        )}
-        {mode === 'password' ? (
-          <button className="btn-auth" disabled={busy} onClick={loginWithPassword}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-        ) : (
-          <button className="btn-auth" disabled={busy} onClick={sendOtp}>
-            {busy ? 'Sending OTP…' : 'Send OTP to Email'}
-          </button>
-        )}
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('forgot-password')}>Forgot password?</button>
-        <span className="auth-sep">·</span>
-        <button className="link-btn" onClick={() => setScreen('register')}>Create account</button>
-      </div>
-    </AuthBox>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 2 — REGISTER
-// ══════════════════════════════════════════════════════════════════
-function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', pincode: '', state: '', district: '', password: '', password2: '' });
-  const [pinBusy, setPinBusy] = useState(false);
-  const [pinMsg, setPinMsg] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [msg,  setMsg]  = useState({ type: '', text: '' });
-
-  const submit = async () => {
-    if (!form.name || !form.email) { setMsg({ type: 'error', text: 'Name and email are required.' }); return; }
-    if (!/^\d{6}$/.test(form.pincode) || !form.state || !form.district) { setMsg({ type: 'error', text: 'Enter a valid 6-digit pincode and wait for State/District to auto-fill.' }); return; }
-    if (!form.password || form.password.length < 8) { setMsg({ type: 'error', text: 'Password must be at least 8 characters.' }); return; }
-    if (form.password !== form.password2) { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone, pincode: form.pincode, state: form.state, district: form.district });
-      setPendingEmail(form.email);
-      if (setPendingPassword) setPendingPassword(form.password);
-      setScreen('verify-register');
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Registration failed.' });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <AuthBox title="Create Account" sub="EV Customer Portal">
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <label>Full Name *
-          <input type="text" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-        </label>
-        <label>Email *
-          <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-        </label>
-        <label>Phone (optional)
-          <input type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-        </label>
-        <label>Pincode *
-          <div style={{ position:'relative' }}>
-            <input type="text" inputMode="numeric" maxLength={6} value={form.pincode}
-              onChange={async e => {
-                const pin=e.target.value.replace(/\D/g,'').slice(0,6);
-                setForm(f=>({...f,pincode:pin,state:'',district:''})); setPinMsg('');
-                if(pin.length===6){
-                  setPinBusy(true);
-                  try{ const r=await fetch(`https://api.postalpincode.in/pincode/${pin}`); const j=await r.json(); const po=j[0]?.PostOffice?.[0];
-                    if(j[0]?.Status==='Success'&&po){setForm(f=>({...f,pincode:pin,state:po.State||'',district:po.District||''}));setPinMsg('✓ Location found');}
-                    else setPinMsg('Invalid pincode');
-                  }catch{setPinMsg('Could not lookup pincode');} finally{setPinBusy(false);}
-                }
-              }} placeholder="6-digit pincode" />
-            {pinBusy && <span style={{position:'absolute',right:10,top:'50%',transform:'translateY(-50%)'}}>⏳</span>}
-          </div>
-          {pinMsg && <span style={{fontSize:12,color:pinMsg.startsWith('✓')?'#16a34a':'#dc2626'}}>{pinMsg}</span>}
-        </label>
-        <div className="row-2">
-          <label>State
-            <input type="text" value={form.state} readOnly placeholder="Auto-filled from pincode" style={{background:'#f8fafc'}} />
-          </label>
-          <label>District
-            <input type="text" value={form.district} readOnly placeholder="Auto-filled from pincode" style={{background:'#f8fafc'}} />
-          </label>
-        </div>
-        <label>Password * <span style={{fontSize:11,color:'#94a3b8'}}>(min 8 characters)</span>
-          <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
-        </label>
-        <label>Confirm Password *
-          <input type="password" value={form.password2} onChange={e => setForm({ ...form, password2: e.target.value })}
-            onKeyDown={e => e.key === 'Enter' && submit()} />
-        </label>
-        <button className="btn-auth" disabled={busy} onClick={submit}>
-          {busy ? 'Creating account…' : 'Create Account & Send OTP'}
-        </button>
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('login')}>← Back to login</button>
-      </div>
-    </AuthBox>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 3 — VERIFY OTP (after register)
-// ══════════════════════════════════════════════════════════════════
-function VerifyRegisterOtpPage({ setScreen, pendingEmail, pendingPassword, onAuth }) {
-  const [otp,    setOtp]    = useState('');
-  const [busy,   setBusy]   = useState(false);
-  const [resend, setResend] = useState(false);
-  const [msg,    setMsg]    = useState({ type: 'info', text: `OTP sent to ${pendingEmail}. Check your inbox (or server console in dev).` });
-  const [countdown, setCountdown] = useState(60);
-
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const verify = async () => {
-    if (otp.length !== 6) { setMsg({ type: 'error', text: 'Enter the 6-digit OTP.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      const res = await axios.post(`${API}/auth/customer/verify-otp`, { email: pendingEmail, otp });
-      // Immediately set password after OTP verification (using the token from verify response)
-      if (pendingPassword && res.data.accessToken) {
-        try {
-          await axios.post(`${API}/auth/customer/set-password`,
-            { password: pendingPassword },
-            { headers: { Authorization: `Bearer ${res.data.accessToken}` } }
-          );
-        } catch (_) { /* password set can be retried later */ }
-      }
-      onAuth(res.data.accessToken, res.data.refreshToken, res.data.user);
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'OTP verification failed.' });
-    } finally { setBusy(false); }
-  };
-
-  const doResend = async () => {
-    setResend(true); setMsg({ type: '', text: '' });
-    try {
-      await axios.post(`${API}/auth/customer/resend-otp`, { email: pendingEmail });
-      setOtp('');
-      setCountdown(60);
-      setMsg({ type: 'success', text: 'New OTP sent to your email.' });
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not resend OTP.' });
-    } finally { setResend(false); }
-  };
-
-  return (
-    <AuthBox title="Verify Email" sub="Enter the OTP sent to your email">
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <OtpInput value={otp} onChange={setOtp} />
-        <button className="btn-auth" disabled={busy || otp.length !== 6} onClick={verify}>
-          {busy ? 'Verifying…' : 'Verify OTP'}
-        </button>
-        <div className="resend-row">
-          {countdown > 0 ? (
-            <span className="resend-timer">Resend OTP in {countdown}s</span>
-          ) : (
-            <button className="link-btn" disabled={resend} onClick={doResend}>
-              {resend ? 'Sending…' : 'Resend OTP'}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('register')}>← Change email</button>
-      </div>
-    </AuthBox>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 4 — VERIFY LOGIN OTP (passwordless login)
-// ══════════════════════════════════════════════════════════════════
-function VerifyLoginOtpPage({ setScreen, pendingEmail, onAuth }) {
-  const [otp,    setOtp]    = useState('');
-  const [busy,   setBusy]   = useState(false);
-  const [resend, setResend] = useState(false);
-  const [msg,    setMsg]    = useState({ type: 'info', text: `OTP sent to ${pendingEmail}.` });
-  const [countdown, setCountdown] = useState(60);
-
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  const verify = async () => {
-    if (otp.length !== 6) { setMsg({ type: 'error', text: 'Enter the 6-digit OTP.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      const res = await axios.post(`${API}/auth/customer/verify-login-otp`, { email: pendingEmail, otp });
-      onAuth(res.data.accessToken, res.data.refreshToken, res.data.user);
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'OTP verification failed.' });
-    } finally { setBusy(false); }
-  };
-
-  const doResend = async () => {
-    setResend(true);
-    try {
-      await axios.post(`${API}/auth/customer/resend-otp`, { email: pendingEmail });
-      setOtp(''); setCountdown(60);
-      setMsg({ type: 'success', text: 'New OTP sent.' });
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not resend.' });
-    } finally { setResend(false); }
-  };
-
-  return (
-    <AuthBox title="Enter Login OTP" sub={`Sent to ${pendingEmail}`}>
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <OtpInput value={otp} onChange={setOtp} />
-        <button className="btn-auth" disabled={busy || otp.length !== 6} onClick={verify}>
-          {busy ? 'Verifying…' : 'Login with OTP'}
-        </button>
-        <div className="resend-row">
-          {countdown > 0 ? (
-            <span className="resend-timer">Resend in {countdown}s</span>
-          ) : (
-            <button className="link-btn" disabled={resend} onClick={doResend}>
-              {resend ? 'Sending…' : 'Resend OTP'}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('login')}>← Back to login</button>
-      </div>
-    </AuthBox>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 5 — FORGOT PASSWORD (send reset OTP)
-// ══════════════════════════════════════════════════════════════════
-function ForgotPasswordPage({ setScreen, setPendingEmail }) {
-  const [email, setEmail] = useState('');
-  const [busy,  setBusy]  = useState(false);
-  const [msg,   setMsg]   = useState({ type: '', text: '' });
-
-  const submit = async () => {
-    if (!email) { setMsg({ type: 'error', text: 'Enter your email.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      await axios.post(`${API}/auth/customer/forgot-password`, { email });
-      setPendingEmail(email);
-      setMsg({ type: 'success', text: 'If that email is registered, an OTP has been sent.' });
-      setTimeout(() => setScreen('reset-password'), 1500);
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Request failed.' });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <AuthBox title="Forgot Password" sub="We'll send a reset OTP to your email">
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <label>Email
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && submit()} />
-        </label>
-        <button className="btn-auth" disabled={busy} onClick={submit}>
-          {busy ? 'Sending…' : 'Send Reset OTP'}
-        </button>
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('login')}>← Back to login</button>
-      </div>
-    </AuthBox>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SCREEN 6 — RESET PASSWORD (OTP + new password)
-// ══════════════════════════════════════════════════════════════════
-function ResetPasswordPage({ setScreen, pendingEmail }) {
-  const [otp,   setOtp]   = useState('');
-  const [pass,  setPass]  = useState('');
-  const [pass2, setPass2] = useState('');
-  const [busy,  setBusy]  = useState(false);
-  const [msg,   setMsg]   = useState({ type: 'info', text: 'Enter the OTP sent to your email and choose a new password.' });
-
-  const submit = async () => {
-    if (otp.length !== 6) { setMsg({ type: 'error', text: 'Enter the 6-digit OTP.' }); return; }
-    if (pass.length < 8)  { setMsg({ type: 'error', text: 'Password must be at least 8 characters.' }); return; }
-    if (pass !== pass2)   { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      await axios.post(`${API}/auth/customer/reset-password`, { email: pendingEmail, otp, newPassword: pass });
-      setMsg({ type: 'success', text: 'Password reset! Redirecting to login…' });
-      setTimeout(() => setScreen('login'), 1500);
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Reset failed.' });
-    } finally { setBusy(false); }
-  };
-
-  const doResend = async () => {
-    try {
-      await axios.post(`${API}/auth/customer/forgot-password`, { email: pendingEmail });
-      setMsg({ type: 'success', text: 'New OTP sent.' });
-    } catch (e) {
-      setMsg({ type: 'error', text: 'Could not resend OTP.' });
-    }
-  };
-
-  return (
-    <AuthBox title="Reset Password" sub={`OTP sent to ${pendingEmail}`}>
-      <Msg type={msg.type} text={msg.text} />
-      <div className="login-form">
-        <OtpInput value={otp} onChange={setOtp} />
-        <label>New Password
-          <input type="password" value={pass} onChange={e => setPass(e.target.value)} />
-        </label>
-        <label>Confirm Password
-          <input type="password" value={pass2} onChange={e => setPass2(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && submit()} />
-        </label>
-        <button className="btn-auth" disabled={busy} onClick={submit}>
-          {busy ? 'Resetting…' : 'Reset Password'}
-        </button>
-        <div className="resend-row">
-          <button className="link-btn" onClick={doResend}>Resend OTP</button>
-        </div>
-      </div>
-      <div className="auth-links">
-        <button className="link-btn" onClick={() => setScreen('login')}>← Back to login</button>
-      </div>
-    </AuthBox>
   );
 }
 
 // ══════════════════════════════════════════════════════════════════
 // SHELL WITH SIDEBAR
 // ══════════════════════════════════════════════════════════════════
-// Bottom-nav primary items (mobile): first 4 + "More" drawer trigger
-const BOTTOM_NAV_COUNT = 4;
-
 function Shell({ user, page, setPage, call, logout }) {
   const navItems = NAV_ITEMS[kind] || NAV_ITEMS.command;
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const navigate = (id) => {
-    setPage(id);
-    setMenuOpen(false);
-  };
-
-  const bottomItems = navItems.slice(0, BOTTOM_NAV_COUNT);
-  const isBottomActive = bottomItems.some(i => i.id === page);
-
   return (
     <div className="shell">
-      {/* ── Mobile/Tablet sidebar overlay ── */}
-      {menuOpen && (
-        <div
-          className="sidebar-overlay"
-          onClick={() => setMenuOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* ── Sidebar ── */}
-      <aside className={`sidebar${menuOpen ? ' sidebar--open' : ''}`}>
-        {/* Close button visible only on mobile/tablet */}
-        <button
-          className="sidebar-close-btn"
-          onClick={() => setMenuOpen(false)}
-          aria-label="Close menu"
-        >
-          <X size={20} />
-        </button>
-
+      <aside className="sidebar">
         <div className="sidebar-logo">
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
-
         <nav className="sidebar-nav">
-          {navItems.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              className={'nav-item' + (page === id ? ' active' : '')}
-              onClick={() => navigate(id)}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-            </button>
-          ))}
+          {navItems.map(({ id, label, Icon, parent, sub }) => {
+            const isActive = page === id;
+            const isParentActive = parent && page === parent;
+            return (
+              <button key={id}
+                className={
+                  'nav-item' +
+                  (sub ? ' nav-sub' : '') +
+                  (isActive ? ' active' : '') +
+                  (isParentActive ? ' parent-active' : '')
+                }
+                onClick={() => setPage(id)}>
+                <Icon size={sub ? 14 : 17} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
         </nav>
-
         <button className="nav-item logout-btn" onClick={logout}>
-          <LogOut size={17} />
-          <span>Sign out</span>
+          <LogOut size={17} /><span>Sign out</span>
         </button>
       </aside>
-
-      {/* ── Main ── */}
       <div className="main-wrap">
         <header className="topbar">
-          {/* Hamburger – hidden on desktop via CSS */}
-          <button
-            className="hamburger-btn"
-            onClick={() => setMenuOpen(true)}
-            aria-label="Open menu"
-          >
-            <Menu size={22} />
-          </button>
-
-          <div className="topbar-brand">
+          <div>
             <div className="topbar-sub">{cfg.accent}</div>
             <div className="topbar-title">{cfg.title}</div>
           </div>
-
           <div className="topbar-user">
             <div className="avatar">{user?.name?.[0] ?? '?'}</div>
-            <div className="topbar-user-info">
+            <div>
               <div className="user-name">{user?.name}</div>
               <div className="user-role">{user?.role}</div>
             </div>
           </div>
         </header>
-
         <div className="page-body">
-          <PageRouter page={page} call={call} setPage={setPage} />
+          <PageRouter page={page} call={call} />
         </div>
       </div>
-
-      {/* ── Bottom nav – mobile only ── */}
-      <nav className="bottom-nav" aria-label="Main navigation">
-        {bottomItems.map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            className={`bottom-nav-item${page === id ? ' active' : ''}`}
-            onClick={() => navigate(id)}
-          >
-            <Icon size={20} />
-            <span>{label}</span>
-          </button>
-        ))}
-        {/* "More" opens the drawer for remaining items */}
-        <button
-          className={`bottom-nav-item${!isBottomActive ? ' active' : ''}`}
-          onClick={() => setMenuOpen(true)}
-        >
-          <MoreHorizontal size={20} />
-          <span>More</span>
-        </button>
-      </nav>
     </div>
   );
 }
@@ -785,44 +271,44 @@ function Shell({ user, page, setPage, call, logout }) {
 // ══════════════════════════════════════════════════════════════════
 // PAGE ROUTER
 // ══════════════════════════════════════════════════════════════════
-function PageRouter({ page, call, setPage }) {
-  const P = { page, call, setPage };
+function PageRouter({ page, call }) {
+  const P = { page, call };
   if (kind === 'customer') {
     const pages = {
-      dashboard:            <CustDashboard        {...P} />,
-      'available-vehicles': <CustAvailableVehicles {...P} />,
-      vehicles:             <CustVehicles          {...P} />,
-      bookings:             <CustBookings          {...P} />,
-      wallet:               <CustWallet            {...P} />,
-      invoices:             <CustInvoices          {...P} />,
-      complaints:           <CustComplaints        {...P} />,
-      'charging-stations':  <CustChargingStations  {...P} />,
+      dashboard: <CustDashboard {...P} />, vehicles:   <CustVehicles   {...P} />,
+      bookings:  <CustBookings  {...P} />, wallet:     <CustWallet     {...P} />,
+      invoices:  <CustInvoices  {...P} />, complaints: <CustComplaints {...P} />,
     };
-    return <ErrorBoundary key={page}>{pages[page] || pages.dashboard}</ErrorBoundary>;
+    return pages[page] || pages.dashboard;
   }
   if (kind === 'staff') {
     const pages = {
-      dashboard: <StaffDashboard {...P} />, jobs: <StaffJobs {...P} />,
-      inventory: <StaffInventory {...P} />, technicians: <StaffTechnicians {...P} />,
+      dashboard: <StaffDashboard {...P} />, jobs:        <StaffJobs        {...P} />,
+      inventory: <StaffInventory {...P} />, technicians: <StaffTechnicians  {...P} />,
       suppliers: <StaffSuppliers {...P} />,
     };
     return pages[page] || pages.dashboard;
   }
   if (kind === 'franchisee') {
     const pages = {
-      dashboard: <FranDashboard {...P} />, financials: <FranFinancials {...P} />,
-      inventory: <FranInventory {...P} />, staff: <FranStaff {...P} />,
-      jobs: <FranJobs {...P} />,
+      dashboard: <FranDashboard  {...P} />, financials: <FranFinancials {...P} />,
+      inventory: <FranInventory  {...P} />, staff:      <FranStaff     {...P} />,
+      jobs:      <FranJobs       {...P} />,
     };
     return pages[page] || pages.dashboard;
   }
   // command
   const pages = {
-    dashboard: <AdminDashboard {...P} />, hubs: <AdminHubs {...P} />,
-    chargers: <AdminChargers {...P} />,   operations: <AdminOps {...P} />,
-    revenue: <AdminRevenue {...P} />,     anomalies: <AdminAnomalies {...P} />,
-    franchisees: <AdminFranchisees {...P} />, demand: <AdminDemand {...P} />,
-    expansion: <AdminExpansion {...P} />,
+    dashboard:            <AdminDashboard          {...P} />,
+    hubs:                 <AdminHubs               {...P} />,
+    franchisees:          <AdminFranchisees         {...P} />,
+    'vehicle-inventory':  <AdminVehicleInventory    call={call} />,
+    'vehicle-approvals':  <AdminVehicleApprovals    call={call} />,
+    'staff-directory':    <AdminStaffDirectory      call={call} />,
+    customers:            <AdminCustomers           call={call} />,
+    'franchise-ratings':  <AdminFranchiseRatings    call={call} />,
+    'customer-payments':  <AdminCustomerPayments    call={call} />,
+    demand:               <AdminDemand              {...P} />,
   };
   return pages[page] || pages.dashboard;
 }
@@ -832,12 +318,12 @@ function PageRouter({ page, call, setPage }) {
 // ══════════════════════════════════════════════════════════════════
 function PageHeader({ title, sub, actions }) {
   return (
-    <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10}}>
-      <div>
+    <div className="page-header">
+      <div className="ph-left">
         <h1 className="page-title">{title}</h1>
         {sub && <p className="page-sub">{sub}</p>}
       </div>
-      {actions && <div style={{flexShrink:0}}>{actions}</div>}
+      {actions && <div className="ph-actions">{actions}</div>}
     </div>
   );
 }
@@ -860,13 +346,16 @@ function MetricGrid({ metrics }) {
   );
 }
 
-function Card({ title, badge, children }) {
+function Card({ title, badge, children, action }) {
   return (
     <div className="card">
-      {(title || badge) && (
+      {(title || badge || action) && (
         <div className="card-head">
-          {title && <div className="card-title">{title}</div>}
-          {badge && <span className="badge">{badge}</span>}
+          <div className="card-head-left">
+            {title && <div className="card-title">{title}</div>}
+            {badge && <span className="badge">{badge}</span>}
+          </div>
+          {action && <div>{action}</div>}
         </div>
       )}
       {children}
@@ -878,7 +367,7 @@ const STATUS_COLOR = {
   COMPLETED: '#16a34a', ACTIVE: '#2563eb', PENDING: '#d97706',
   CANCELLED: '#dc2626', ASSIGNED: '#7c3aed', HIGH: '#dc2626',
   MEDIUM: '#d97706', LOW: '#16a34a', PAID: '#16a34a', AVAILABLE: '#16a34a',
-  IN_USE: '#2563eb', OFFLINE: '#dc2626',
+  IN_USE: '#2563eb', OFFLINE: '#dc2626', ONLINE: '#16a34a', OPEN: '#d97706',
 };
 
 function DataTable({ rows = [], cols = [] }) {
@@ -924,7 +413,87 @@ function Err({ msg }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// CUSTOMER PAGES
+// FORM / MODAL COMPONENTS
+// ══════════════════════════════════════════════════════════════════
+function Modal({ title, subtitle, onClose, children, footer }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">{title}</div>
+            {subtitle && <div className="modal-subtitle">{subtitle}</div>}
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Toast({ toast }) {
+  if (!toast) return null;
+  return <div className={`toast toast-${toast.type}`}>{toast.msg}</div>;
+}
+
+function Fld({ label, hint, required, children }) {
+  return (
+    <div className="fld">
+      <span className="fld-label">{label}{required && <em className="req"> *</em>}</span>
+      {children}
+      {hint && <span className="fld-hint">{hint}</span>}
+    </div>
+  );
+}
+
+function Inp({ value, onChange, type = 'text', placeholder, disabled }) {
+  const [show, setShow] = useState(false);
+  if (type === 'password') return (
+    <div className="pw-wrap">
+      <input className="fld-input" type={show ? 'text' : 'password'} value={value}
+        onChange={e => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} />
+      <button type="button" className="icon-btn sm" onClick={() => setShow(s => !s)}>
+        {show ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+    </div>
+  );
+  return <input className="fld-input" type={type} value={value}
+    onChange={e => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} />;
+}
+
+function Sel({ value, onChange, opts, placeholder = 'Select…' }) {
+  return (
+    <select className="fld-input" value={value} onChange={e => onChange(e.target.value)}>
+      <option value="">{placeholder}</option>
+      {opts.map(o => <option key={o.v ?? o} value={o.v ?? o}>{o.l ?? o}</option>)}
+    </select>
+  );
+}
+
+function Txt({ value, onChange, placeholder, rows = 3 }) {
+  return <textarea className="fld-input" value={value}
+    onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows} />;
+}
+
+function InfoBanner({ Icon: I = Shield, children }) {
+  return (
+    <div className="info-banner">
+      <I size={15} />
+      <span>{children}</span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// CUSTOMER PAGES  (unchanged)
 // ══════════════════════════════════════════════════════════════════
 function CustDashboard({ call }) {
   const { data: v, loading: lv } = useFetch(call, '/customer/vehicles');
@@ -934,10 +503,10 @@ function CustDashboard({ call }) {
   return <>
     <PageHeader title="My Dashboard" sub="Overview of your vehicles and bookings." />
     <MetricGrid metrics={[
-      { label: 'Vehicles',      value: v?.length ?? 0,      Icon: Car,          color: '#2563eb' },
-      { label: 'Total Bookings',value: b?.length ?? 0,      Icon: ClipboardList,color: '#7c3aed' },
-      { label: 'Active Jobs',   value: active.length,       Icon: Activity,     color: '#d97706' },
-      { label: 'Completed',     value: b?.filter(x => x.status === 'COMPLETED').length ?? 0, Icon: CheckCircle, color: '#16a34a' },
+      { label: 'Vehicles',       value: v?.length ?? 0,                                                    Icon: Car,          color: '#2563eb' },
+      { label: 'Total Bookings', value: b?.length ?? 0,                                                    Icon: ClipboardList,color: '#7c3aed' },
+      { label: 'Active Jobs',    value: active.length,                                                     Icon: Activity,     color: '#d97706' },
+      { label: 'Completed',      value: b?.filter(x => x.status === 'COMPLETED').length ?? 0,              Icon: CheckCircle,  color: '#16a34a' },
     ]} />
     <div className="two-col">
       <Card title="Recent Bookings" badge="Live">
@@ -951,291 +520,27 @@ function CustDashboard({ call }) {
 }
 
 function CustVehicles({ call }) {
-  const { data: owned, loading: lo, error: eo } = useFetch(call, '/customer/vehicles');
-  const [rentals, setRentals]   = useState([]);
-  const [rentLoading, setRL]    = useState(true);
-  const [extendRental, setExtendRental] = useState(null);
-  const { toast, show } = useToast();
-
-  useEffect(() => {
-    call('/customer/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d : []))
-      .catch(() => setRentals([]))
-      .finally(() => setRL(false));
-  }, []);
-
-  if (lo || rentLoading) return <Loader />;
-
-  const activeRentals = rentals.filter(r => r.status === 'ACTIVE'); // Only truly delivered vehicles
-  const pastRentals   = rentals.filter(r => ['COMPLETED','CANCELLED'].includes(r.status));
-
-  return <>
-    <Toast toast={toast}/>
-    <PageHeader title="My Vehicles" sub="Rented and owned EV vehicles." />
-
-    {/* Active Rentals */}
-    {activeRentals.length > 0 && (
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
-          🚗 Active Rentals ({activeRentals.length})
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {activeRentals.map(r => {
-            const vs = r.vehicleSnapshot || {};
-            const sc = r.status === 'ACTIVE' ? '#16a34a' : r.status === 'PAYMENT_DONE' ? '#2563eb' : '#d97706';
-            const statusLabel = {
-              PAYMENT_DONE: '💳 Payment Done — Awaiting Handover',
-              HANDOVER_PENDING: '⏳ Handover Pending',
-              ACTIVE: '✅ Active — Vehicle Delivered',
-            }[r.status] || r.status;
-            return (
-              <div key={r._id} style={{
-                background: '#fff', border: `1.5px solid ${sc}44`, borderRadius: 14,
-                padding: '16px 18px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: 16, color: '#1a1f2e' }}>
-                      {vs.make} {vs.model} ({vs.year})
-                    </div>
-                    <div style={{ fontSize: 13, color: '#64748b' }}>{vs.category} · {vs.color}</div>
-                  </div>
-                  <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '4px 14px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                    {statusLabel}
-                  </span>
-                </div>
-
-                {/* Vehicle images */}
-                {vs.images?.length > 0 && (
-                  <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
-                    {vs.images.map((img, i) => (
-                      <img key={i} src={img.url} alt={img.name}
-                        style={{ width: 100, height: 70, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: '6px 16px' }}>
-                  {[
-                    ['Reg. No.',       vs.registrationNo || '—'],
-                    ['Battery',        vs.batteryCapacityKwh ? `${vs.batteryCapacityKwh} kWh` : '—'],
-                    ['Range',          vs.rangeKm ? `${vs.rangeKm} km` : '—'],
-                    ['Rate',           `₹${r.pricePerDay}/day`],
-                    ['Duration',       `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
-                    ['Start Date',     r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
-                    ['End Date',       r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
-                    ['Total Paid',     `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`],
-                    ['Franchisee Location', [r.pickupLocation?.name || r.franchiseeName, r.pickupLocation?.address].filter(Boolean).join(' · ') || '—'],
-                    ...(r.handoverDate ? [['Handover Date', new Date(r.handoverDate).toLocaleDateString('en-IN')]] : []),
-                    ...(r.returnDate  ? [['Returned Date', new Date(r.returnDate).toLocaleDateString('en-IN')]]   : []),
-                  ].map(([k, v]) => (
-                    <div key={k} style={{ fontSize: 13 }}>
-                      <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
-                      <strong style={{ color: '#1a1f2e' }}>{v}</strong>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="btn-primary" onClick={() => setExtendRental(r)} disabled={r.status !== 'ACTIVE'}>
-                    <Plus size={15}/> Extend Rental
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    )}
-
-    {extendRental && (
-      <ExtendRentalFlow
-        rental={extendRental}
-        call={call}
-        onClose={() => setExtendRental(null)}
-        onSuccess={(updated) => {
-          setRentals(prev => prev.map(x => String(x._id) === String(updated._id) ? updated : x));
-          setExtendRental(null);
-          show('Rental extended successfully.');
-        }}
-      />
-    )}
-
-    {/* Owned Vehicles */}
-    {(owned?.length ?? 0) > 0 && (
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
-          🔑 My Registered Vehicles ({owned.length})
-        </div>
-        <Card>
-          <DataTable rows={owned} cols={['vin', 'model', 'year', 'batterySoc', 'batterySoh', 'status']} />
-        </Card>
-      </div>
-    )}
-
-    {/* Past Rentals */}
-    {pastRentals.length > 0 && (
-      <div>
-        <div style={{ fontWeight: 700, fontSize: 16, color: '#1a1f2e', marginBottom: 10 }}>
-          📋 Past Rentals ({pastRentals.length})
-        </div>
-        <Card>
-          <DataTable
-            rows={pastRentals.map(r => ({
-              ...r,
-              vehicle: `${r.vehicleSnapshot?.make || ''} ${r.vehicleSnapshot?.model || ''}`.trim() || '—',
-              amount:  `₹${(r.totalAmount || 0).toLocaleString('en-IN')}`,
-              start:   r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—',
-              end:     r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—',
-            }))}
-            cols={['vehicle', 'status', 'amount', 'start', 'end']}
-          />
-        </Card>
-      </div>
-    )}
-
-    {(owned?.length ?? 0) === 0 && rentals.length === 0 && (
-      <div className="card">
-        <div className="empty-state">
-          <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
-          <p>No vehicles yet.<br />Browse Available Vehicles to make your first booking!</p>
-        </div>
-      </div>
-    )}
-  </>;
-}
-
-function CustBookings({ call, setPage }) {
-  const [rentals, setRentals] = useState([]);
-  const [pickup, setPickup] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    call('/customer/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d : []))
-      .catch(() => setRentals([]))
-      .finally(() => setLoading(false));
-  }, []);
-
+  const { data, loading, error } = useFetch(call, '/customer/vehicles');
   if (loading) return <Loader />;
-
-  const bookings = rentals.filter(r => !['COMPLETED', 'CANCELLED'].includes(r.status));
-  const statusColor = { BOOKED: '#d97706', PAYMENT_DONE: '#2563eb', HANDOVER_PENDING: '#7c3aed' };
-  const statusLabel = {
-    BOOKED:           '🕐 Booked — Awaiting Payment',
-    PAYMENT_DONE:     '💳 Paid — Awaiting Franchise Handover',
-    HANDOVER_PENDING: '⏳ Handover Pending',
-    ACTIVE:            '✅ Handed Over — Rental Active',
-  };
-
+  if (error)   return <Err msg={error} />;
   return <>
-    <PageHeader title="My Bookings" sub="Your customer location is recorded for the booking; pickup and handover happen only at the selected franchisee." />
-    <MetricGrid metrics={[
-      { label: 'Total Bookings',    value: bookings.length, Icon: ClipboardList, color: '#2563eb' },
-      { label: 'Awaiting Handover', value: bookings.filter(r => r.status === 'PAYMENT_DONE').length, Icon: Car, color: '#7c3aed' },
-    ]} />
-    {bookings.length === 0 ? (
-      <div className="card">
-        <div className="empty-state">
-          <ClipboardList size={40} style={{ opacity: .25, marginBottom: 12 }} />
-          <p>No active bookings.<br />Once you pay for a rental it appears here until the vehicle is handed over.</p>
-          <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setPage('available-vehicles')}>
-            Browse Vehicles
-          </button>
-        </div>
-      </div>
-    ) : (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {bookings.map(r => {
-          const vs = r.vehicleSnapshot || {};
-          const sc = statusColor[r.status] || '#64748b';
-          return (
-            <div key={r._id} style={{
-              background: '#fff', border: `1.5px solid ${sc}33`, borderRadius: 14,
-              padding: '18px 20px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 16, color: '#1a1f2e' }}>{vs.make} {vs.model} ({vs.year})</div>
-                  <div style={{ fontSize: 13, color: '#64748b' }}>{vs.category} · {vs.color} · {vs.registrationNo}</div>
-                </div>
-                <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '4px 14px', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', height: 'fit-content' }}>
-                  {statusLabel[r.status] || r.status}
-                </span>
-              </div>
-              {vs.images?.length > 0 && (
-                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 12 }}>
-                  {vs.images.slice(0,3).map((img, i) => (
-                    <img key={i} src={img.url} alt={img.name}
-                      style={{ width: 90, height: 64, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
-                  ))}
-                </div>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(155px,1fr))', gap: '6px 16px' }}>
-                {[
-                  ['Duration',   `${r.durationDays} day${r.durationDays !== 1 ? 's' : ''}`],
-                  ['Start Date', r.startDate ? new Date(r.startDate).toLocaleDateString('en-IN') : '—'],
-                  ['End Date',   r.endDate   ? new Date(r.endDate).toLocaleDateString('en-IN')   : '—'],
-                  ['Rate',       `\u20b9${r.pricePerDay}/day`],
-                  ['Total Paid', `\u20b9${(r.totalAmount || 0).toLocaleString('en-IN')}`],
-                  ['Customer Location', r.fullAddress || [r.area, r.district, r.state, r.pincode].filter(Boolean).join(', ')],
-                  ['Payment ID', r.razorpayPaymentId || '—'],
-                  ['Booked On',  new Date(r.createdAt).toLocaleDateString('en-IN')],
-                  ['Handover Date', r.handoverDate ? new Date(r.handoverDate).toLocaleDateString('en-IN') : 'Pending'],
-                  ['Pickup Location', [r.pickupLocation?.name || r.franchiseeName, r.pickupLocation?.address].filter(Boolean).join(' · ') || '—'],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ fontSize: 13 }}>
-                    <span style={{ color: '#94a3b8', display: 'block', fontSize: 11 }}>{k}</span>
-                    <strong style={{ color: '#1a1f2e', wordBreak: 'break-all' }}>{v}</strong>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 14, padding: '12px 14px', background: r.handoverDate ? '#f0fdf4' : '#fefce8', border: `1px solid ${r.handoverDate ? '#bbf7d0' : '#fde68a'}`, borderRadius: 8, fontSize: 13, color: r.handoverDate ? '#166534' : '#92400e' }}>
-                {r.handoverDate
-                  ? <>✅ Vehicle handed over on <strong>{new Date(r.handoverDate).toLocaleDateString('en-IN')}</strong>. Rental is active.</>
-                  : <>⏳ Your payment is confirmed. The franchisee will handover your vehicle.</>}
-              </div>
-              {r.pickupLocation && (r.pickupLocation.lat || r.pickupLocation.lng) && (
-                <button className="btn-primary" style={{marginTop:10,display:'inline-flex',alignItems:'center',gap:7}}
-                  onClick={() => setPickup(r.pickupLocation)}>
-                  <MapPin size={15}/> Go to Pickup Location
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    )}
-    {pickup && <PickupLocationMap location={pickup} onClose={()=>setPickup(null)} />}
+    <PageHeader title="My Vehicles" sub="All registered electric vehicles." />
+    <Card title="Vehicle Fleet" badge={`${data?.length ?? 0} vehicles`}>
+      <DataTable rows={data} cols={['vin', 'model', 'year', 'batterySoc', 'batterySoh', 'status']} />
+    </Card>
   </>;
 }
 
-
-function PickupLocationMap({ location, onClose }) {
-  const mapRef = React.useRef(null);
-  React.useEffect(() => {
-    if (!location || !mapRef.current || !window.L) return;
-    const lat = Number(location.lat), lng = Number(location.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    const L = window.L;
-    const map = L.map(mapRef.current).setView([lat,lng], 15);
-    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',{attribution:'© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',maxZoom:20}).addTo(map);
-    const marker = L.marker([lat,lng]).addTo(map);
-    marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
-    return () => map.remove();
-  }, [location]);
-  if (!location) return null;
-  return <div className="modal-overlay" onClick={onClose}>
-    <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(850px,100%)'}}>
-      <div className="modal-head">
-        <div><div className="modal-title">Pickup Location</div><div className="modal-subtitle">{location.name || 'Franchisee'} · {location.address || 'India'}</div></div>
-        <button className="icon-btn" onClick={onClose}>✕</button>
-      </div>
-      <div className="modal-body">
-        <div ref={mapRef} style={{height:450,borderRadius:12,overflow:'hidden',border:'1px solid #e4e7ef'}} />
-        <div style={{marginTop:10,fontSize:12,color:'#64748b'}}>📍 Coordinates: {location.lat}, {location.lng}</div>
-      </div>
-    </div>
-  </div>;
+function CustBookings({ call }) {
+  const { data, loading, error } = useFetch(call, '/customer/bookings');
+  if (loading) return <Loader />;
+  if (error)   return <Err msg={error} />;
+  return <>
+    <PageHeader title="My Bookings" sub="Service history and active jobs." />
+    <Card title="All Bookings" badge={`${data?.length ?? 0}`}>
+      <DataTable rows={data} cols={['serviceType', 'status', 'priority', 'trackingStatus', 'totalAmount']} />
+    </Card>
+  </>;
 }
 
 function CustWallet({ call }) {
@@ -1245,8 +550,8 @@ function CustWallet({ call }) {
   return <>
     <PageHeader title="Wallet" sub="Balance and transactions." />
     <MetricGrid metrics={[
-      { label: 'Balance',       value: `₹${(w?.balance ?? 0).toLocaleString()}`, Icon: Wallet,   color: '#16a34a' },
-      { label: 'Transactions',  value: tx?.length ?? 0,                           Icon: Activity, color: '#2563eb' },
+      { label: 'Balance',      value: `₹${(w?.balance ?? 0).toLocaleString()}`, Icon: Wallet,   color: '#16a34a' },
+      { label: 'Transactions', value: tx?.length ?? 0,                          Icon: Activity, color: '#2563eb' },
     ]} />
     <Card title="Transaction History">
       <DataTable rows={tx} cols={['type', 'amount', 'description', 'createdAt']} />
@@ -1255,826 +560,31 @@ function CustWallet({ call }) {
 }
 
 function CustInvoices({ call }) {
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [downloading, setDL]    = useState(null);
-
-  useEffect(() => {
-    call('/customer/rentals/invoices')
-      .then(d => setInvoices(Array.isArray(d) ? d : []))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleDownload = async (inv) => {
-    setDL(inv._id);
-    try {
-      const token = localStorage.getItem('ev_customer_token');
-      const res = await fetch(`/api/customer/rentals/invoices/${inv._id}/download`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Download failed');
-      const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = `${inv.invoiceNo || 'invoice'}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert('Could not download invoice: ' + e.message);
-    } finally {
-      setDL(null);
-    }
-  };
-
+  const { data, loading, error } = useFetch(call, '/customer/invoices');
   if (loading) return <Loader />;
-
-  const fmt = (n) => `\u20b9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
-  const date = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-
+  if (error)   return <Err msg={error} />;
   return <>
-    <PageHeader title="Invoices" sub="Rental payment invoices. Download as HTML and print/save as PDF from your browser." />
-    <MetricGrid metrics={[
-      { label: 'Total Invoices', value: invoices.length,                                               Icon: FileText, color: '#2563eb' },
-      { label: 'Total Paid',     value: fmt(invoices.reduce((s, i) => s + (i.subtotal || 0), 0)),         Icon: DollarSign, color: '#16a34a' },
-    ]} />
-
-    {invoices.length === 0 ? (
-      <div className="card">
-        <div className="empty-state">
-          <FileText size={40} style={{ opacity: .25, marginBottom: 12 }} />
-          <p>No invoices yet.<br />Invoices are generated automatically after a successful payment.</p>
-        </div>
-      </div>
-    ) : (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {invoices.map(inv => (
-          <div key={inv._id} style={{
-            background: '#fff', border: '1.5px solid #e4e9f7', borderRadius: 14,
-            padding: '16px 20px', boxShadow: '0 2px 8px rgba(0,0,0,.05)',
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12,
-          }}>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15, color: '#1a1f2e', marginBottom: 4 }}>
-                {inv.invoiceNo}
-              </div>
-              <div style={{ fontSize: 13, color: '#64748b' }}>
-                {date(inv.createdAt)} &nbsp;·&nbsp;
-                {inv.items?.[0]?.description || 'Vehicle Rental'}
-              </div>
-              <div style={{ marginTop: 8, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                {[
-                  ['Total', fmt(inv.subtotal)],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ fontSize: 13 }}>
-                    <span style={{ color: '#94a3b8', fontSize: 11, display: 'block' }}>{k}</span>
-                    <strong style={{ color: '#1a1f2e' }}>{v}</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ background: '#d1fae5', color: '#059669', borderRadius: 99, padding: '3px 12px', fontSize: 12, fontWeight: 700 }}>
-                PAID
-              </span>
-              <button
-                onClick={() => handleDownload(inv)}
-                disabled={downloading === inv._id}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  background: '#2563eb', color: '#fff', border: 'none',
-                  borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600,
-                  cursor: downloading === inv._id ? 'not-allowed' : 'pointer',
-                  opacity: downloading === inv._id ? .6 : 1,
-                }}
-              >
-                {downloading === inv._id ? '⏳ Downloading…' : '⬇ Download Invoice'}
-              </button>
-            </div>
-          </div>
-        ))}
-        <div style={{ fontSize: 12, color: '#94a3b8', textAlign: 'center', marginTop: 4 }}>
-          💡 Tip: After downloading, open the HTML file in your browser and press Ctrl+P → Save as PDF for a PDF copy.
-        </div>
-      </div>
-    )}
+    <PageHeader title="Invoices" sub="Payment records and receipts." />
+    <Card title="All Invoices" badge={`${data?.length ?? 0}`}>
+      <DataTable rows={data} cols={['invoiceNumber', 'amount', 'status', 'createdAt']} />
+    </Card>
   </>;
 }
 
 function CustComplaints({ call }) {
-  const { data, loading, error, refresh } = useFetch(call, '/customer/complaints');
-  const { data: options } = useFetch(call, '/customer/complaint-options');
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ vehicleId:'', franchiseeId:'', category:'Service Issue', message:'', subject:'' });
-  const [saving, setSaving] = useState(false);
-  const [feedback, setFeedback] = useState({});
-  const [feedbackBusy, setFeedbackBusy] = useState(null);
-  const { toast, show } = useToast();
-
-  const activeVehicles = options?.activeVehicles || [];
-  const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
-
-  const submit = async () => {
-    if(!form.vehicleId || !form.franchiseeId || !form.message){show('Select an active bike, franchisee and enter the complaint.', 'error');return;}
-    setSaving(true);
-    try{
-      const fr=(options.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId));
-      await call('/customer/complaints',{method:'post',data:{...form,subject:form.subject||form.category,vehicleSnapshot:selectedVehicle?.vehicleSnapshot,paymentDetails:selectedVehicle?.paymentDetails,franchiseeId:form.franchiseeId,franchiseeName:fr?.name||''}});
-      show('Complaint sent to the selected franchisee.'); setOpen(false); setForm({vehicleId:'',franchiseeId:'',category:'Service Issue',message:'',subject:''}); refresh();
-    }catch(e){show(e.response?.data?.message||'Could not register complaint','error');} finally{setSaving(false);}
-  };
-
-  const sendFeedback = async (c) => {
-    const f=feedback[c._id]||{};
-    if(!f.rating){show('Select a rating first','error');return;}
-    setFeedbackBusy(c._id);
-    try{await call(`/customer/complaints/${c._id}/feedback`,{method:'post',data:{rating:Number(f.rating),feedback:f.comment||''}});show('Thank you. Your franchisee rating was saved.');refresh();}
-    catch(e){show(e.response?.data?.message||'Could not save feedback','error');}finally{setFeedbackBusy(null);}
-  };
-
+  const { data, loading, error } = useFetch(call, '/customer/complaints');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
-    <Toast toast={toast}/>
-    <PageHeader title="Support & Complaints" sub="Register a complaint against an active vehicle and track franchisee resolution."
-      actions={<button className="btn-primary" onClick={()=>setOpen(true)} disabled={!activeVehicles.length}><Plus size={15}/> Register Complaint</button>} />
-    {!activeVehicles.length && <InfoBanner Icon={Bell}>You need an active vehicle before you can register a vehicle complaint.</InfoBanner>}
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-          <div><strong>{c.subject || c.category || 'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Franchisee: {c.franchiseeName||'—'} · {new Date(c.createdAt).toLocaleString()}</div></div>
-          <span style={{fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:999,background:c.status==='SOLVED'?'#dcfce7':c.status==='CLOSED'?'#e2e8f0':c.status==='IN_PROGRESS'?'#fef3c7':'#fee2e2',color:c.status==='SOLVED'?'#166534':c.status==='CLOSED'?'#475569':c.status==='IN_PROGRESS'?'#92400e':'#991b1b'}}>{c.status}</span>
-        </div>
-        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
-        {c.resolution && <div style={{marginTop:10,padding:10,borderRadius:8,background:'#f0fdf4',fontSize:12}}><strong>Resolution:</strong> {c.resolution}</div>}
-        {c.replacementVehicleSnapshot && <div style={{marginTop:8,fontSize:12,color:'#166534'}}>🔁 Replacement vehicle: {c.replacementVehicleSnapshot.make} {c.replacementVehicleSnapshot.model}</div>}
-        {c.status==='SOLVED' && !c.feedbackSubmitted && <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid #eef2f7'}}><strong style={{fontSize:13}}>How was the franchisee service?</strong><div style={{display:'flex',gap:6,marginTop:8}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>setFeedback(f=>({...f,[c._id]:{...f[c._id],rating:n}}))} style={{border:'1px solid #dbe3ef',background:(feedback[c._id]?.rating===n)?'#2563eb':'#fff',color:(feedback[c._id]?.rating===n)?'#fff':'#64748b',borderRadius:7,padding:'5px 9px',cursor:'pointer'}}>{n}★</button>)}</div><input style={{marginTop:8,width:'100%',padding:9,border:'1px solid #dbe3ef',borderRadius:7}} placeholder="Feedback (optional)" value={feedback[c._id]?.comment||''} onChange={e=>setFeedback(f=>({...f,[c._id]:{...f[c._id],comment:e.target.value}}))}/><button className="btn-primary" style={{marginTop:8}} onClick={()=>sendFeedback(c)} disabled={feedbackBusy===c._id}>{feedbackBusy===c._id?'Saving…':'Submit Feedback'}</button></div>}
-      </div>)}
-      {!data?.length && <div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25,marginBottom:12}}/><p>No complaints yet.</p></div></div>}
-    </div>
-
-    {open && <div className="modal-overlay" onClick={()=>setOpen(false)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Register a Complaint</div><div className="modal-subtitle">Active bike → auto-filled vehicle & payment details → franchisee</div></div><button className="icon-btn" onClick={()=>setOpen(false)}>✕</button></div><div className="modal-body">
-      <div className="login-form">
-        <label>Active Bike *<select value={form.vehicleId} onChange={e=>{const v=e.target.value;const av=activeVehicles.find(x=>String(x.vehicleId)===v);setForm(f=>({...f,vehicleId:v,franchiseeId:av?.franchiseeId||f.franchiseeId}))}}><option value="">Select active bike…</option>{activeVehicles.map(v=><option key={String(v.vehicleId)} value={String(v.vehicleId)}>{v.vehicleSnapshot?.make||''} {v.vehicleSnapshot?.model||v.vehicleSnapshot?.modelName||'Vehicle'} · {v.vehicleSnapshot?.registrationNo||v.vehicleSnapshot?.vin||String(v.vehicleId).slice(-6)}</option>)}</select></label>
-        {selectedVehicle && <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:12}}><strong style={{fontSize:13}}>Vehicle details (non-editable)</strong>{[['Vehicle',`${selectedVehicle.vehicleSnapshot?.make||''} ${selectedVehicle.vehicleSnapshot?.model||selectedVehicle.vehicleSnapshot?.modelName||'Vehicle'}`],['Registration',selectedVehicle.vehicleSnapshot?.registrationNo||'—'],['Payment Status',selectedVehicle.paymentDetails?.paymentStatus||'—'],['Payment ID',selectedVehicle.paymentDetails?.razorpayPaymentId||'—'],['Amount',selectedVehicle.paymentDetails?.totalAmount?`₹${selectedVehicle.paymentDetails.totalAmount}`:'—']].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:10,fontSize:12,padding:'4px 0'}}><span style={{color:'#64748b'}}>{k}</span><strong>{v}</strong></div>)}</div>}
-        {form.franchiseeId && (() => {
-          const fr=(options?.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId)) || selectedVehicle;
-          const name=fr?.name||selectedVehicle?.franchiseeName||'—';
-          const pin=fr?.address?.pincode||'—';
-          return (
-            <div style={{background:'#f0fdf4',border:'1.5px solid #bbf7d0',borderRadius:10,padding:'10px 14px',fontSize:13}}>
-              <span style={{fontSize:11,fontWeight:700,color:'#166534',display:'block',marginBottom:4}}>FRANCHISEE (auto-filled from rental)</span>
-              <strong style={{color:'#14532d'}}>{name}</strong>
-              {pin!=='—' && <span style={{color:'#16a34a',marginLeft:8,fontSize:12}}>PIN {pin}</span>}
-            </div>
-          );
-        })()}
-        {!form.franchiseeId && <div style={{background:'#fef9c3',border:'1px solid #fde68a',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#92400e'}}>⚠ Select an active bike above to auto-fill franchisee</div>}
-        <label>Issue Category<select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{['Service Issue','Vehicle Fault','Battery Issue','Charging Issue','Accident/Damage','Other'].map(x=><option key={x}>{x}</option>)}</select></label>
-        <label>Complaint *<textarea rows={4} value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} placeholder="Describe the issue clearly…"/></label>
-      </div>
-    </div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving?'Sending…':'Send Complaint'}</button></div></div></div>}
+    <PageHeader title="Support & Complaints" sub="Raise and track support tickets." />
+    <Card title="My Complaints" badge={`${data?.length ?? 0}`}>
+      <DataTable rows={data} cols={['subject', 'status', 'priority', 'createdAt']} />
+    </Card>
   </>;
 }
 
 // ══════════════════════════════════════════════════════════════════
-// CUSTOMER — AVAILABLE VEHICLES (approved by Command Center)
-// ══════════════════════════════════════════════════════════════════
-function CustAvailableVehicles({ call, setPage }) {
-  const [vehicles, setVehicles]   = useState([]);
-  const [selected, setSelected]   = useState(null);
-  const [filterCat, setFilterCat] = useState('all');
-  const [loading, setLoading]     = useState(true);
-  const [bookingVehicle, setBookingVehicle] = useState(null);
-  const [location, setLocation] = useState(null);
-  const [nearbyFranchisees, setNearbyFranchisees] = useState([]);
-  const [selectedFranchiseeId, setSelectedFranchiseeId] = useState('');
-
-  // FIX: Fetch approved vehicles from the API (MongoDB) instead of
-  // localStorage. The Command Center writes approvals to MongoDB via
-  // PUT /api/admin/pending-vehicles/:id/approve — localStorage is
-  // never updated, so the customer portal was always seeing nothing.
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true);
-        const profile = await call('/customer/profile');
-        const pin = profile?.address?.pincode || '';
-        const list = await call(`/customer/available-vehicles${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
-        setVehicles(Array.isArray(list) ? list : []);
-        setLocation(profile?.address || null);
-        const opt = await call(`/customer/complaint-options${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
-        setNearbyFranchisees(opt?.franchisees || []);
-      } catch { setVehicles([]); }
-      finally { setLoading(false); }
-    };
-    load();
-    const interval = setInterval(load, 10000); // refresh every 10 s
-    return () => clearInterval(interval);
-  }, []);
-
-  const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
-  // Only show franchisees that actually have available vehicles, already ordered
-  // by the backend from nearest to farthest for the customer's pincode.
-  const availableFranchisees = nearbyFranchisees.filter(fr =>
-    vehicles.some(v => String(v.franchiseeId || '') === String(fr._id))
-  );
-
-  useEffect(() => {
-    if (!availableFranchisees.length) {
-      setSelectedFranchiseeId('');
-      return;
-    }
-    if (!availableFranchisees.some(fr => String(fr._id) === String(selectedFranchiseeId))) {
-      setSelectedFranchiseeId(String(availableFranchisees[0]._id));
-    }
-  }, [vehicles, nearbyFranchisees, selectedFranchiseeId]);
-
-  const filtered = vehicles
-    .filter(v => filterCat === 'all' || v.category === filterCat)
-    .filter(v => !selectedFranchiseeId || String(v.franchiseeId || '') === String(selectedFranchiseeId));
-
-  const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
-
-  const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
-
-  return <>
-    <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
-
-    {location?.pincode && (
-      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14}}>
-        <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
-        <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
-        {availableFranchisees.length > 0 && (
-          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',width:'100%'}}>
-            <span style={{fontSize:12,color:'#64748b',fontWeight:700}}>Nearest available franchise:</span>
-            {availableFranchisees.map((fr, i) => {
-              const active = String(fr._id) === String(selectedFranchiseeId);
-              return (
-                <button key={fr._id} type="button" onClick={() => setSelectedFranchiseeId(String(fr._id))}
-                  style={{fontSize:12,fontWeight:700,color:active?'#fff':'#1d4ed8',background:active?'#2563eb':'#fff',border:`1px solid ${active?'#2563eb':'#bfdbfe'}`,borderRadius:999,padding:'6px 11px',cursor:'pointer'}}>
-                  {i === 0 ? '📍 ' : '🏪 '}{fr.name}{fr.address?.pincode ? ` · ${fr.address.pincode}` : ''}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {selectedFranchisee && (
-          <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569'}}>
-            <strong>Booking from:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
-            <span style={{marginLeft:6,color:'#64748b'}}>The vehicle will be handed over only by this franchisee.</span>
-          </div>
-        )}
-      </div>
-    )}
-
-    {/* Category filter tabs */}
-    <div className="filter-tabs">
-      {categories.map(c => (
-        <button key={c} className={'filter-tab' + (filterCat === c ? ' active' : '')}
-          onClick={() => setFilterCat(c)}>
-          {c === 'all' ? 'All Vehicles' : `${catEmoji[c]} ${c}`}
-        </button>
-      ))}
-    </div>
-
-    {filtered.length === 0 ? (
-      <div className="card">
-        <div className="empty-state">
-          <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
-          <p>No vehicles available in this category yet.<br />Check back soon — franchisees are adding vehicles regularly.</p>
-        </div>
-      </div>
-    ) : (
-      <div className="vehicle-browse-grid">
-        {filtered.map(v => (
-          <div key={v._id || v.id} className="vehicle-browse-card" onClick={() => setSelected(v)}>
-            <div className="vbc-img">
-              {v.images?.length > 0
-                ? <img src={v.images[0].url} alt={v.make} />
-                : <div className="vbc-no-img">{catEmoji[v.category] || '🚗'}</div>
-              }
-              <span className="vbc-cat-badge">{v.category}</span>
-            </div>
-            <div className="vbc-body">
-              <div className="vbc-name">{v.make} {v.model}</div>
-              <div className="vbc-year">{v.year} · {v.color}</div>
-              <div className="vbc-specs">
-                {v.rangeKm && <span>🔋 {v.rangeKm} km</span>}
-                {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
-                {v.chargingType && <span>🔌 {v.chargingType}</span>}
-              </div>
-              <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:4}}>{v.quantity} unit{Number(v.quantity)===1?'':'s'} available · {v.franchiseeName || 'EV CORE franchise'}</div>
-              <div className="vbc-price">
-                <span className="price-amt">₹{v.pricePerDay}</span>
-                <span className="price-unit">/day</span>
-              </div>
-            </div>
-            <button className="vbc-btn">View Details</button>
-          </div>
-        ))}
-      </div>
-    )}
-
-    {/* Detail modal */}
-    {selected && (
-      <div className="modal-overlay" onClick={() => setSelected(null)}>
-        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(580px,100%)' }}>
-          <div className="modal-head">
-            <div>
-              <div className="modal-title">{selected.make} {selected.model}</div>
-              <div className="modal-subtitle">{selected.category} · {selected.year} · {selected.color}</div>
-            </div>
-            <button className="icon-btn" onClick={() => setSelected(null)}>✕</button>
-          </div>
-          <div className="modal-body">
-            {selected.images?.length > 0 && (
-              <div className="detail-img-gallery">
-                {selected.images.map((img, i) => (
-                  <div key={i} className="detail-img-thumb"><img src={img.url} alt={img.name} /></div>
-                ))}
-              </div>
-            )}
-            <div className="kv-list" style={{ marginTop: 12 }}>
-              {[
-                ['Registration', selected.registrationNo],
-                ['Battery', `${selected.batteryCapacityKwh} kWh`],
-                ['Range', `${selected.rangeKm} km`],
-                ['Charging', selected.chargingType],
-                ['Price/Day', `₹${selected.pricePerDay}`],
-                ['Availability', `${selected.quantity ?? 0} unit(s) available`],
-                ['Franchisee', selected.franchiseeName || 'EV CORE franchise'],
-              ].map(([k, v]) => v && (
-                <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
-              ))}
-            </div>
-            {selected.description && <p style={{ fontSize: 13, color: '#374151', marginTop: 12, lineHeight: 1.6 }}>{selected.description}</p>}
-          </div>
-          <div className="modal-footer">
-            <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
-            <button className="btn-primary" onClick={() => setBookingVehicle(selected)}>Book Now</button>
-          </div>
-        </div>
-      </div>
-    )}
-
-    {/* Booking Flow Modal */}
-    {bookingVehicle && (
-      <BookingFlow
-        vehicle={bookingVehicle}
-        call={call}
-        onClose={() => setBookingVehicle(null)}
-        onSuccess={() => { setBookingVehicle(null); setSelected(null); setPage('bookings'); }}
-      />
-    )}
-  </>;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// EXTEND RENTAL FLOW: select days → Razorpay → verify → extend plan
-// ══════════════════════════════════════════════════════════════════
-function ExtendRentalFlow({ rental, call, onClose, onSuccess }) {
-  const [days, setDays] = useState(1);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState({ type: '', text: '' });
-  const amount = Number(rental.pricePerDay || 0) * Number(days || 0);
-  const currentEnd = rental.endDate ? new Date(rental.endDate) : new Date();
-  const previewEnd = new Date(currentEnd.getTime() + Number(days || 0) * 86400000);
-
-  const payAndExtend = async () => {
-    const extraDays = Number(days);
-    if (!Number.isInteger(extraDays) || extraDays < 1 || extraDays > 30) {
-      setMsg({ type: 'error', text: 'Choose between 1 and 30 additional days.' });
-      return;
-    }
-    if (amount <= 0) { setMsg({ type: 'error', text: 'This rental has no valid daily rate.' }); return; }
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      const order = await call(`/customer/rentals/${rental._id}/extend/create-order`, {
-        method: 'POST', data: { days: extraDays },
-      });
-      if (!window.Razorpay) {
-        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
-        setBusy(false); return;
-      }
-      const options = {
-        key: order.keyId, amount: order.amount, currency: order.currency || 'INR',
-        name: 'EV Core',
-        description: `Extend ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} by ${extraDays} day(s)`,
-        order_id: order.orderId, redirect: false,
-        handler: async (response) => {
-          try {
-            const result = await call(`/customer/rentals/${rental._id}/extend/verify-payment`, {
-              method: 'POST',
-              data: {
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-              },
-            });
-            onSuccess(result.rental);
-          } catch (e) {
-            setMsg({ type: 'error', text: e.response?.data?.message || 'Extension payment verification failed.' });
-            setBusy(false);
-          }
-        },
-        modal: { ondismiss: () => setBusy(false), escape: false, backdropclose: false },
-        theme: { color: '#2563eb' },
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', resp => {
-        setMsg({ type: 'error', text: 'Payment failed: ' + (resp.error?.description || 'Please try again.') });
-        setBusy(false);
-      });
-      rzp.open();
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not create extension payment.' });
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(520px,100%)' }}>
-        <div className="modal-head">
-          <div><div className="modal-title">Extend Rental</div><div className="modal-subtitle">Payment is required before the plan is extended.</div></div>
-          <button className="icon-btn" onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body">
-          <Msg type={msg.type} text={msg.text} />
-          <div style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:14, marginBottom:14 }}>
-            <strong>{rental.vehicleSnapshot?.make} {rental.vehicleSnapshot?.model}</strong>
-            <div style={{ fontSize:12, color:'#64748b', marginTop:4 }}>Current end date: {currentEnd.toLocaleDateString('en-IN')}</div>
-            <div style={{ fontSize:12, color:'#64748b', marginTop:3 }}>Daily rate: ₹{Number(rental.pricePerDay || 0).toLocaleString('en-IN')}</div>
-          </div>
-          <div className="login-form">
-            <label>Additional days *
-              <input type="number" min="1" max="30" value={days} onChange={e => setDays(e.target.value)} />
-            </label>
-          </div>
-          <div style={{ marginTop:14, padding:14, background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13 }}><span>Extension charge</span><strong>₹{amount.toLocaleString('en-IN')}</strong></div>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:13, marginTop:7 }}><span>New end date</span><strong>{previewEnd.toLocaleDateString('en-IN')}</strong></div>
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary" disabled={busy} onClick={payAndExtend}>
-            {busy ? 'Processing…' : `Pay ₹${amount.toLocaleString('en-IN')} & Extend`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// BOOKING FLOW: Pincode → State/District/Area → Razorpay → Success
-// ══════════════════════════════════════════════════════════════════
-function BookingFlow({ vehicle, call, onClose, onSuccess }) {
-  const [step, setStep] = useState('address'); // 'address' | 'dates' | 'payment' | 'success'
-  const [pincode, setPincode]     = useState('');
-  const [addrData, setAddrData]   = useState(null); // { state, district, area }
-  const [pincodeLoading, setPincodeLoading] = useState(false);
-  const [pincodeError, setPincodeError]     = useState('');
-  const [area, setArea]           = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate]     = useState('');
-  const [busy, setBusy]           = useState(false);
-  const [msg, setMsg]             = useState({ type: '', text: '' });
-  const [successData, setSuccessData] = useState(null);
-
-  const today = new Date().toISOString().split('T')[0];
-
-  // Calculate days
-  const durationDays = React.useMemo(() => {
-    if (!startDate || !endDate) return 0;
-    const diff = (new Date(endDate) - new Date(startDate)) / 86400000;
-    return diff > 0 ? Math.ceil(diff) : 0;
-  }, [startDate, endDate]);
-
-  // Lookup pincode via India Post API
-  const lookupPincode = async (pin) => {
-    if (pin.length !== 6) return;
-    setPincodeLoading(true); setPincodeError(''); setAddrData(null);
-    try {
-      const resp = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
-      const json = await resp.json();
-      if (json[0]?.Status === 'Success' && json[0]?.PostOffice?.length > 0) {
-        const po = json[0].PostOffice[0];
-        setAddrData({ state: po.State, district: po.District, area: po.Region || po.Block || '' });
-        setArea(po.Name || '');
-      } else {
-        setPincodeError('Invalid pincode or no data found.');
-      }
-    } catch {
-      setPincodeError('Could not lookup pincode. Please try again.');
-    } finally { setPincodeLoading(false); }
-  };
-
-  const handlePincodeChange = (val) => {
-    const cleaned = val.replace(/\D/g, '').slice(0, 6);
-    setPincode(cleaned);
-    if (cleaned.length === 6) lookupPincode(cleaned);
-    else { setAddrData(null); setPincodeError(''); }
-  };
-
-  const handleAddressNext = () => {
-    if (!pincode || pincode.length !== 6) { setMsg({ type: 'error', text: 'Enter a valid 6-digit pincode.' }); return; }
-    if (!addrData) { setMsg({ type: 'error', text: 'Wait for pincode lookup to complete.' }); return; }
-    setMsg({ type: '', text: '' });
-    setStep('dates');
-  };
-
-  const handleDatesNext = () => {
-    if (!startDate) { setMsg({ type: 'error', text: 'Please select a start date.' }); return; }
-    if (!endDate) { setMsg({ type: 'error', text: 'Please select an end date.' }); return; }
-    if (durationDays <= 0) { setMsg({ type: 'error', text: 'End date must be after start date.' }); return; }
-    setMsg({ type: '', text: '' });
-    setStep('payment');
-  };
-
-  const initiatePayment = async () => {
-    setBusy(true); setMsg({ type: '', text: '' });
-    try {
-      // Create Razorpay order via backend
-      const orderRes = await call('/customer/rentals/create-order', {
-        method: 'POST',
-        data: {
-          vehicleId:   vehicle._id,
-          franchiseeId: vehicle.franchiseeId,
-          pincode,
-          state:       addrData?.state,
-          district:    addrData?.district,
-          area:        area || addrData?.area,
-          fullAddress: `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`,
-          startDate,
-          endDate,
-          durationDays,
-        },
-      });
-
-      const { rentalId, orderId, amount, currency, keyId } = orderRes;
-
-      // Open Razorpay checkout
-      const options = {
-        key:         keyId,
-        amount,
-        currency,
-        name:        'EV Core',
-        description: `${vehicle.make} ${vehicle.model} rental for ${durationDays} day(s)`,
-        order_id:    orderId,
-        handler: async (response) => {
-          // Verify payment on backend
-          try {
-            await call('/customer/rentals/verify-payment', {
-              method: 'POST',
-              data: {
-                rentalId,
-                razorpay_order_id:    response.razorpay_order_id,
-                razorpay_payment_id:  response.razorpay_payment_id,
-                razorpay_signature:   response.razorpay_signature,
-              },
-            });
-            setSuccessData({
-              rentalId,
-              vehicleName: `${vehicle.make} ${vehicle.model}`,
-              amount: (amount / 100).toLocaleString('en-IN'),
-              days: durationDays,
-              startDate, endDate,
-              address: `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`,
-              pickup: [vehicle.franchiseeName, vehicle.franchiseeAddress ? [vehicle.franchiseeAddress.line1, vehicle.franchiseeAddress.line2, vehicle.franchiseeAddress.city, vehicle.franchiseeAddress.district, vehicle.franchiseeAddress.state, vehicle.franchiseeAddress.pincode].filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '),
-              paymentId: response.razorpay_payment_id,
-            });
-            setStep('success');
-          } catch (e) {
-            setMsg({ type: 'error', text: 'Payment verification failed. Contact support with payment ID: ' + response.razorpay_payment_id });
-          }
-        },
-        prefill: {},
-        theme: { color: '#2563eb' },
-        redirect: false,
-        modal: {
-          ondismiss:  () => { setBusy(false); },
-          escape:     false,
-          backdropclose: false,
-        },
-      };
-
-      if (!window.Razorpay) {
-        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
-        setBusy(false);
-        return;
-      }
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', (resp) => {
-        setMsg({ type: 'error', text: 'Payment failed: ' + resp.error.description });
-        setBusy(false);
-      });
-      rzp.open();
-    } catch (e) {
-      setMsg({ type: 'error', text: e.response?.data?.message || 'Could not create booking. Please try again.' });
-    } finally { setBusy(false); }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(560px,100%)' }}>
-        <div className="modal-head">
-          <div>
-            <div className="modal-title">
-              {step === 'success' ? '🎉 Booking Confirmed!' : `Book — ${vehicle.make} ${vehicle.model}`}
-            </div>
-            <div className="modal-subtitle">
-              {step === 'address' && 'Step 1 of 3 — Customer Location'}
-              {step === 'dates'   && 'Step 2 of 3 — Rental Duration'}
-              {step === 'payment' && 'Step 3 of 3 — Payment'}
-              {step === 'success' && 'Your booking is live!'}
-            </div>
-          </div>
-          {step !== 'success' && <button className="icon-btn" onClick={onClose}>✕</button>}
-        </div>
-
-        <div className="modal-body">
-          <Msg type={msg.type} text={msg.text} />
-
-          {/* ── STEP 1: Address ── */}
-          {step === 'address' && (
-            <div className="login-form">
-              <label>Pincode *
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text" inputMode="numeric" maxLength={6}
-                    value={pincode} onChange={e => handlePincodeChange(e.target.value)}
-                    placeholder="6-digit pincode"
-                    style={{ paddingRight: 36 }}
-                  />
-                  {pincodeLoading && (
-                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>⏳</span>
-                  )}
-                  {addrData && !pincodeLoading && (
-                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>✅</span>
-                  )}
-                </div>
-                {pincodeError && <span style={{ color: '#dc2626', fontSize: 12 }}>{pincodeError}</span>}
-              </label>
-              {addrData && (
-                <>
-                  <label>State
-                    <input type="text" value={addrData.state} readOnly
-                      style={{ background: '#f8fafc', cursor: 'not-allowed' }} />
-                  </label>
-                  <label>District
-                    <input type="text" value={addrData.district} readOnly
-                      style={{ background: '#f8fafc', cursor: 'not-allowed' }} />
-                  </label>
-                  <label>Area / Locality
-                    <input type="text" value={area} onChange={e => setArea(e.target.value)}
-                      placeholder="Enter your area or locality" />
-                  </label>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* ── STEP 2: Dates ── */}
-          {step === 'dates' && (
-            <div className="login-form">
-              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
-                <div style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 700 }}>
-                  📍 Pickup: {vehicle.franchiseeName || 'Selected Franchisee'}
-                </div>
-                {vehicle.franchiseeAddress && <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>
-                  {[vehicle.franchiseeAddress.line1, vehicle.franchiseeAddress.line2, vehicle.franchiseeAddress.city, vehicle.franchiseeAddress.district, vehicle.franchiseeAddress.state, vehicle.franchiseeAddress.pincode].filter(Boolean).join(', ')}
-                </div>}
-              </div>
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
-                <div style={{ fontSize: 13, color: '#15803d', fontWeight: 600 }}>
-                  📍 Customer Location: {area || addrData?.area}, {addrData?.district}, {addrData?.state} - {pincode}
-                </div>
-              </div>
-              <label>Start Date *
-                <input type="date" value={startDate} min={today}
-                  onChange={e => { setStartDate(e.target.value); if (endDate && e.target.value >= endDate) setEndDate(''); }} />
-              </label>
-              <label>End Date *
-                <input type="date" value={endDate} min={startDate || today}
-                  onChange={e => setEndDate(e.target.value)} />
-              </label>
-              {durationDays > 0 && (
-                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px' }}>
-                  <div style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 600 }}>
-                    📅 {durationDays} day{durationDays !== 1 ? 's' : ''} rental
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: '#1a1f2e', marginTop: 4 }}>
-                    ₹{(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#64748b' }}>₹{vehicle.pricePerDay}/day × {durationDays} days</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── STEP 3: Payment summary ── */}
-          {step === 'payment' && (
-            <div>
-              <div style={{ background: '#f8fafc', border: '1px solid #e4e7ef', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e', marginBottom: 12 }}>Booking Summary</div>
-                {[
-                  ['Vehicle',  `${vehicle.make} ${vehicle.model} (${vehicle.year})`],
-                  ['Category', vehicle.category],
-                  ['Duration', `${durationDays} day${durationDays !== 1 ? 's' : ''} (${startDate} → ${endDate})`],
-                  ['Customer Location', `${area || addrData?.area}, ${addrData?.district}, ${addrData?.state} - ${pincode}`],
-                  ['Rate',     `₹${vehicle.pricePerDay}/day`],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f1f5f9' }}>
-                    <span style={{ color: '#64748b' }}>{k}</span>
-                    <strong style={{ color: '#1a1f2e', textAlign: 'right', maxWidth: '60%' }}>{v}</strong>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontSize: 16, fontWeight: 800, color: '#1a1f2e', marginTop: 4 }}>
-                  <span>Total</span>
-                  <span style={{ color: '#2563eb' }}>₹{(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}</span>
-                </div>
-              </div>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                🔒 Secure payment powered by Razorpay
-              </div>
-            </div>
-          )}
-
-          {/* ── SUCCESS ── */}
-          {step === 'success' && successData && (
-            <div style={{ textAlign: 'center', padding: '16px 0' }}>
-              <div style={{ fontSize: 56, marginBottom: 12 }}>🎉</div>
-              <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e', marginBottom: 6 }}>
-                Booking Confirmed!
-              </div>
-              <div style={{ color: '#16a34a', fontWeight: 700, fontSize: 15, marginBottom: 16 }}>
-                ✅ Payment of ₹{successData.amount} received
-              </div>
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 12, padding: '14px 18px', textAlign: 'left', marginBottom: 16 }}>
-                {[
-                  ['Vehicle',    successData.vehicleName],
-                  ['Duration',   `${successData.days} day${successData.days !== 1 ? 's' : ''}`],
-                  ['Dates',      `${successData.startDate} → ${successData.endDate}`],
-                  ['Customer Location', successData.address],
-                  ['Pickup Location', successData.pickup || vehicle.franchiseeName || '—'],
-                  ['Payment ID', successData.paymentId],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', fontSize: 13, borderBottom: '1px solid #d1fae5' }}>
-                    <span style={{ color: '#64748b' }}>{k}</span>
-                    <strong style={{ color: '#1a1f2e', textAlign: 'right', maxWidth: '65%', wordBreak: 'break-all' }}>{v}</strong>
-                  </div>
-                ))}
-              </div>
-              <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.6 }}>
-                Payment is confirmed. Go to the selected franchisee pickup location for vehicle handover. The selected franchisee alone can mark the handover.<br />
-                You can track the handover date in <strong>My Bookings</strong> and the active rental in <strong>My Vehicles</strong>.
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="modal-footer">
-          {step === 'address' && (
-            <>
-              <button className="btn-ghost" onClick={onClose}>Cancel</button>
-              <button className="btn-primary" onClick={handleAddressNext} disabled={!addrData || pincodeLoading}>
-                Continue →
-              </button>
-            </>
-          )}
-          {step === 'dates' && (
-            <>
-              <button className="btn-ghost" onClick={() => setStep('address')}>← Back</button>
-              <button className="btn-primary" onClick={handleDatesNext} disabled={durationDays <= 0}>
-                Review Booking →
-              </button>
-            </>
-          )}
-          {step === 'payment' && (
-            <>
-              <button className="btn-ghost" onClick={() => setStep('dates')}>← Back</button>
-              <button className="btn-primary" onClick={initiatePayment} disabled={busy}>
-                {busy ? 'Processing…' : `Pay ₹${(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}`}
-              </button>
-            </>
-          )}
-          {step === 'success' && (
-            <button className="btn-primary" style={{ width: '100%' }} onClick={onSuccess}>
-              View My Bookings →
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════
-// STAFF PAGES
+// STAFF PAGES  (unchanged)
 // ══════════════════════════════════════════════════════════════════
 function StaffDashboard({ call }) {
   const { data: jobs, loading: lj } = useFetch(call, '/staff/jobs');
@@ -2104,14 +614,14 @@ function StaffDashboard({ call }) {
 function StaffJobs({ call }) {
   const { data, loading, error } = useFetch(call, '/staff/jobs');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Job Queue" sub="All service jobs across the network." />
     <MetricGrid metrics={[
-      { label: 'Total',     value: data?.length ?? 0,                                         Icon: ClipboardList, color: '#2563eb' },
-      { label: 'Pending',   value: data?.filter(j => j.status === 'PENDING').length ?? 0,     Icon: Activity,      color: '#d97706' },
-      { label: 'Assigned',  value: data?.filter(j => j.status === 'ASSIGNED').length ?? 0,    Icon: Users,         color: '#7c3aed' },
-      { label: 'Completed', value: data?.filter(j => j.status === 'COMPLETED').length ?? 0,   Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Total',     value: data?.length ?? 0,                                        Icon: ClipboardList, color: '#2563eb' },
+      { label: 'Pending',   value: data?.filter(j => j.status === 'PENDING').length ?? 0,   Icon: Activity,      color: '#d97706' },
+      { label: 'Assigned',  value: data?.filter(j => j.status === 'ASSIGNED').length ?? 0,  Icon: Users,         color: '#7c3aed' },
+      { label: 'Completed', value: data?.filter(j => j.status === 'COMPLETED').length ?? 0, Icon: CheckCircle,   color: '#16a34a' },
     ]} />
     <Card title="All Jobs" badge={`${data?.length ?? 0}`}>
       <DataTable rows={data} cols={['serviceType', 'status', 'priority', 'trackingStatus', 'createdAt']} />
@@ -2122,12 +632,12 @@ function StaffJobs({ call }) {
 function StaffInventory({ call }) {
   const { data, loading, error } = useFetch(call, '/staff/inventory');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Inventory" sub="Spare parts and stock management." />
     <MetricGrid metrics={[
-      { label: 'Total SKUs',   value: data?.length ?? 0,                                         Icon: Package,       color: '#2563eb' },
-      { label: 'Low Stock',    value: data?.filter(i => i.quantity <= i.reorderLevel).length ?? 0, Icon: AlertTriangle, color: '#d97706' },
+      { label: 'Total SKUs',   value: data?.length ?? 0,                                          Icon: Package,       color: '#2563eb' },
+      { label: 'Low Stock',    value: data?.filter(i => i.quantity <= i.reorderLevel).length ?? 0,Icon: AlertTriangle, color: '#d97706' },
       { label: 'Out of Stock', value: data?.filter(i => i.quantity === 0).length ?? 0,            Icon: AlertTriangle, color: '#dc2626' },
     ]} />
     <Card title="All Inventory" badge={`${data?.length ?? 0} SKUs`}>
@@ -2139,7 +649,7 @@ function StaffInventory({ call }) {
 function StaffTechnicians({ call }) {
   const { data, loading, error } = useFetch(call, '/staff/technicians');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Technicians" sub="Active field technicians." />
     <Card title="Technician Directory" badge={`${data?.length ?? 0} active`}>
@@ -2151,7 +661,7 @@ function StaffTechnicians({ call }) {
 function StaffSuppliers({ call }) {
   const { data, loading, error } = useFetch(call, '/staff/suppliers');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Suppliers" sub="Approved parts suppliers." />
     <Card title="Supplier List" badge={`${data?.length ?? 0}`}>
@@ -2161,7 +671,7 @@ function StaffSuppliers({ call }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// FRANCHISEE PAGES
+// FRANCHISEE PAGES  (unchanged)
 // ══════════════════════════════════════════════════════════════════
 function FranDashboard({ call }) {
   const { data: d, loading: ld } = useFetch(call, '/franchise/dashboard');
@@ -2170,10 +680,10 @@ function FranDashboard({ call }) {
   return <>
     <PageHeader title="Franchise Dashboard" sub="Revenue, jobs and performance." />
     <MetricGrid metrics={[
-      { label: 'Revenue',    value: `₹${(d?.revenue ?? 0).toLocaleString()}`, Icon: DollarSign, color: '#16a34a' },
-      { label: 'Total Jobs', value: d?.jobs ?? 0,                              Icon: ClipboardList, color: '#2563eb' },
-      { label: 'ROI',        value: `${d?.roi ?? 0}%`,                         Icon: TrendingUp, color: '#7c3aed' },
-      { label: 'Payback',    value: `${f?.paybackMonths ?? 0} mo`,             Icon: Gauge,      color: '#d97706' },
+      { label: 'Revenue',    value: `₹${(d?.revenue ?? 0).toLocaleString()}`, Icon: DollarSign,   color: '#16a34a' },
+      { label: 'Total Jobs', value: d?.jobs ?? 0,                             Icon: ClipboardList, color: '#2563eb' },
+      { label: 'ROI',        value: `${d?.roi ?? 0}%`,                        Icon: TrendingUp,    color: '#7c3aed' },
+      { label: 'Payback',    value: `${f?.paybackMonths ?? 0} mo`,            Icon: Gauge,         color: '#d97706' },
     ]} />
     <div className="two-col">
       <Card title="Financial Summary">
@@ -2191,7 +701,7 @@ function FranDashboard({ call }) {
 function FranFinancials({ call }) {
   const { data, loading, error } = useFetch(call, '/franchise/financials');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Financials" sub="Revenue, costs and ROI." />
     <MetricGrid metrics={[
@@ -2209,7 +719,7 @@ function FranFinancials({ call }) {
 function FranInventory({ call }) {
   const { data, loading, error } = useFetch(call, '/franchise/inventory');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Inventory" sub="Hub parts and stock levels." />
     <Card title="Inventory" badge={`${data?.length ?? 0} SKUs`}>
@@ -2221,7 +731,7 @@ function FranInventory({ call }) {
 function FranStaff({ call }) {
   const { data, loading, error } = useFetch(call, '/franchise/staff');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Staff" sub="Hub staff and technicians." />
     <Card title="Staff Directory" badge={`${data?.length ?? 0}`}>
@@ -2233,7 +743,7 @@ function FranStaff({ call }) {
 function FranJobs({ call }) {
   const { data, loading, error } = useFetch(call, '/franchise/jobs');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
     <PageHeader title="Jobs" sub="Total jobs count." />
     <MetricGrid metrics={[
@@ -2243,29 +753,39 @@ function FranJobs({ call }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// ADMIN / COMMAND-CENTER PAGES
+// ADMIN / COMMAND-CENTER PAGES  — ALL WITH FULL CRUD FORMS
 // ══════════════════════════════════════════════════════════════════
+
+// ── Dashboard ────────────────────────────────────────────────────
 function AdminDashboard({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/dashboard');
+  const { data, loading, error, refresh } = useFetch(call, '/admin/dashboard');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
-    <PageHeader title="Enterprise Command Center" sub="Full network overview — hubs, revenue and live operations." />
+    <PageHeader
+      title="Enterprise Command Center"
+      sub="Full network overview — hubs, revenue and live operations."
+      actions={
+        <button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Refresh</button>
+      }
+    />
     <MetricGrid metrics={[
-      { label: 'Hubs',      value: data?.hubs ?? 0,                               Icon: Factory,      color: '#2563eb' },
-      { label: 'Chargers',  value: data?.chargers ?? 0,                            Icon: Zap,          color: '#7c3aed' },
-      { label: 'Open Jobs', value: data?.openJobs ?? 0,                            Icon: ClipboardList,color: '#d97706' },
-      { label: 'Revenue',   value: `₹${(data?.revenue ?? 0).toLocaleString()}`,    Icon: DollarSign,   color: '#16a34a' },
+      { label: 'Hubs',      value: data?.hubs ?? 0,                            Icon: Factory,       color: '#2563eb' },
+      { label: 'Chargers',  value: data?.chargers ?? 0,                         Icon: Zap,           color: '#7c3aed' },
+      { label: 'Open Jobs', value: data?.openJobs ?? 0,                         Icon: ClipboardList, color: '#d97706' },
+      { label: 'Revenue',   value: `₹${(data?.revenue ?? 0).toLocaleString()}`, Icon: DollarSign,    color: '#16a34a' },
     ]} />
+    <AdminPendingBanner call={call} />
+    <InfoBanner Icon={Activity}>
+      Use the sidebar to manage Hubs, Chargers, Franchisees and more. All sections have entry forms.
+    </InfoBanner>
   </>;
 }
 
-// ══════════════════════════════════════════════════════════════════
-// CUSTOMER — CHARGING STATIONS  (nearest first, with map)
-// ══════════════════════════════════════════════════════════════════
+// ── Hubs ─────────────────────────────────────────────────────────
+const EMPTY_HUB = { name: '', code: '', city: '', address: '', lat: '', lng: '', status: 'ONLINE', chargerCount: '' };
 
-// City fallback coords (same table as command center)
-const CUST_CITY_COORDS = {
+const CITY_COORDS = {
   'hyderabad':  [17.3850,  78.4867], 'bangalore':  [12.9716,  77.5946],
   'bengaluru':  [12.9716,  77.5946], 'mumbai':     [19.0760,  72.8777],
   'delhi':      [28.6139,  77.2090], 'new delhi':  [28.6139,  77.2090],
@@ -2288,66 +808,58 @@ const CUST_CITY_COORDS = {
   'jodhpur':    [26.2389,  73.0243], 'guwahati':   [26.1445,  91.7362],
   'agra':       [27.1767,  78.0081], 'varanasi':   [25.3176,  82.9739],
 };
-
-function custGetCoords(hub) {
+function getHubCoords(hub) {
   if (hub.lat && hub.lng) return [hub.lat, hub.lng];
-  const key = (hub.city || '').toLowerCase().trim();
-  return CUST_CITY_COORDS[key] || null;
+  return CITY_COORDS[(hub.city || '').toLowerCase().trim()] || null;
 }
+const HUB_STATUS_COLOR = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
 
-// Haversine formula — returns km
-function haversineKm([lat1, lon1], [lat2, lon2]) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-const HUB_SC = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
-
-function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
-  const mapRef          = React.useRef(null);
-  const leafRef         = React.useRef(null);
+function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
+  const mapRef          = React.useRef(null);  // <div> element
+  const leafRef         = React.useRef(null);  // L.map instance
   const markersRef      = React.useRef([]);
-  const userMarkerRef   = React.useRef(null);
   const tooltipTimerRef = React.useRef(null);
   const [tooltip, setTooltip] = React.useState(null);
 
-  // ── init map once — L already on window from index.html ─────
+  // ── init map once — L is already on window from index.html ────
   React.useEffect(() => {
     if (leafRef.current || !mapRef.current || !window.L) return;
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 20,
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
-    drawHubMarkers(map, hubs);   // instant — no waiting
+    drawMarkers(map, hubs);   // draw immediately — no waiting
   }, []);
 
-  // ── redraw markers when hubs change ─────────────────────────
+  // ── invalidate size when panel re-appears (view toggle fix) ───
+  React.useEffect(() => {
+    if (!visible || !leafRef.current) return;
+    const t = setTimeout(() => leafRef.current.invalidateSize(), 50);
+    return () => clearTimeout(t);
+  }, [visible]);
+
+  // ── redraw markers whenever hub list changes ───────────────────
   React.useEffect(() => {
     if (!leafRef.current) return;
-    drawHubMarkers(leafRef.current, hubs);
+    drawMarkers(leafRef.current, hubs);
   }, [hubs]);
 
-  function drawHubMarkers(map, hubList) {
+  function drawMarkers(map, hubList) {
     markersRef.current.forEach(m => map.removeLayer(m));
     markersRef.current = [];
     hubList.forEach(hub => {
-      const coords = custGetCoords(hub);
+      const coords = getHubCoords(hub);
       if (!coords) return;
-      const color = HUB_SC[hub.status] || '#2563eb';
-      const rank  = hub._rank != null ? hub._rank + 1 : null;
+      const color = HUB_STATUS_COLOR[hub.status] || '#2563eb';
       const icon = window.L.divIcon({
         className: '',
-        html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;">${rank ?? ''}</div>`,
-        iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:pointer;"></div>`,
+        iconSize: [18, 18], iconAnchor: [9, 9],
       });
       const marker = window.L.marker(coords, { icon }).addTo(map);
       marker.on('mouseover', e => {
@@ -2361,43 +873,20 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     });
   }
 
-  // Draw / update user location marker
-  React.useEffect(() => {
-    if (!userCoords || !window.L) return;
-    const L   = window.L;
-    const map = leafRef.current;
-    if (!map) return;
-    if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
-    const icon = L.divIcon({
-      className: '',
-      html: `<div style="
-        width:24px;height:24px;border-radius:50%;
-        background:#2563eb;border:4px solid #fff;
-        box-shadow:0 0 0 3px #2563eb66;
-        cursor:default;
-      "></div>`,
-      iconSize: [24, 24], iconAnchor: [12, 12],
-    });
-    userMarkerRef.current = L.marker(userCoords, { icon })
-      .bindPopup('<b>📍 Your Location</b>')
-      .addTo(map);
-    map.setView(userCoords, 8, { animate: true });
-  }, [userCoords]);
-
-  // Pan to selected
+  // ── pan to selected hub ────────────────────────────────────────
   React.useEffect(() => {
     if (!selectedHub || !leafRef.current) return;
-    const c = custGetCoords(selectedHub);
+    const c = getHubCoords(selectedHub);
     if (c) leafRef.current.setView(c, 10, { animate: true });
   }, [selectedHub]);
 
-  const sc = tooltip ? (HUB_SC[tooltip.hub.status] || '#2563eb') : '#16a34a';
+  const sc = tooltip ? (HUB_STATUS_COLOR[tooltip.hub.status] || '#2563eb') : '#16a34a';
+
   return (
-    <div style={{ position: 'relative', height: 500, borderRadius: 14, overflow: 'hidden',
-                  border: '1px solid #e4e7ef', boxShadow: '0 2px 12px rgba(0,0,0,.07)' }}>
-      <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+    <div className="hub-map-container" style={{ position: 'relative' }}>
+      <div ref={mapRef} id="india-hub-map" />
       {tooltip && (() => {
-        const coords  = custGetCoords(tooltip.hub);
+        const coords  = getHubCoords(tooltip.hub);
         const mapsUrl = coords
           ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
           : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((tooltip.hub.address ? tooltip.hub.address + ', ' : '') + (tooltip.hub.city || ''))}`;
@@ -2415,318 +904,399 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
                 <MapPin size={16} />
               </a>
             </div>
-            {tooltip.hub._dist != null && (
-              <div className="map-tooltip-row" style={{ color: '#2563eb', fontWeight: 700 }}>
-                📏 {tooltip.hub._dist.toFixed(1)} km away
-              </div>
-            )}
             <div className="map-tooltip-row"><span>📍</span><strong>{tooltip.hub.city}</strong></div>
             {tooltip.hub.address && <div className="map-tooltip-row" style={{ fontSize: 11 }}>{tooltip.hub.address}</div>}
-            <div className="map-tooltip-row"><span>⚡</span><strong>{tooltip.hub.chargerCount ?? 0} chargers</strong></div>
-            <div style={{ marginTop: 6 }}>
-              <span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>
-                ● {tooltip.hub.status}
-              </span>
-            </div>
+            <div className="map-tooltip-row"><span>⚡ Chargers:</span><strong>{tooltip.hub.chargerCount ?? 0}</strong></div>
+            {tooltip.hub.code && <div className="map-tooltip-row"><span>🔖 Code:</span><strong>{tooltip.hub.code}</strong></div>}
+            <div><span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>● {tooltip.hub.status}</span></div>
           </div>
         );
       })()}
       <div className="map-legend">
-        <div style={{ fontWeight: 700, fontSize: 11, color: '#374151', marginBottom: 3 }}>Status</div>
-        {Object.entries(HUB_SC).map(([s, c]) => (
+        {Object.entries(HUB_STATUS_COLOR).map(([s, c]) => (
           <div key={s} className="legend-item">
             <div className="legend-dot" style={{ background: c }} />
-            <span style={{ fontSize: 11 }}>{s}</span>
+            <span style={{ fontSize: 11, color: '#374151' }}>{s}</span>
           </div>
         ))}
-        {userCoords && (
-          <div className="legend-item" style={{ marginTop: 4 }}>
-            <div className="legend-dot" style={{ background: '#2563eb', outline: '2px solid #2563eb66', outlineOffset: 2 }} />
-            <span style={{ fontSize: 11 }}>You</span>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-function CustChargingStations({ call }) {
-  const { data: rawHubs, loading, error } = useFetch(call, '/customer/hubs');
-  const [userCoords,   setUserCoords]   = useState(null);
-  const [locStatus,    setLocStatus]    = useState('idle'); // idle | getting | done | denied
-  const [selectedHub,  setSelectedHub]  = useState(null);
-  const [statusFilter, setStatusFilter] = useState('ALL');
+function AdminHubs({ call }) {
+  const { data: initial, loading, error } = useFetch(call, '/admin/hubs');
+  const [hubs,        setHubs]        = useState([]);
+  const [open,        setOpen]        = useState(false);   // add modal
+  const [editHub,     setEditHub]     = useState(null);    // hub being edited
+  const [delHub,      setDelHub]      = useState(null);    // hub awaiting delete confirm
+  const [saving,      setSaving]      = useState(false);
+  const [form,        setForm]        = useState(EMPTY_HUB);
+  const [selectedHub, setSelectedHub] = useState(null);
+  const [view,        setView]        = useState('map');
+  const { toast, show } = useToast();
 
-  // Sort hubs by distance from user if we have location
-  const hubs = React.useMemo(() => {
-    if (!rawHubs) return [];
-    let list = rawHubs.map((h, i) => {
-      const coords = custGetCoords(h);
-      const dist   = (userCoords && coords)
-        ? haversineKm(userCoords, coords)
-        : null;
-      return { ...h, _coords: coords, _dist: dist, _rank: null };
-    });
+  useEffect(() => { if (initial) setHubs(initial); }, [initial]);
 
-    if (statusFilter !== 'ALL') {
-      list = list.filter(h => h.status === statusFilter);
-    }
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
 
-    if (userCoords) {
-      // hubs without coords go to bottom
-      list.sort((a, b) => {
-        if (a._dist == null && b._dist == null) return 0;
-        if (a._dist == null) return 1;
-        if (b._dist == null) return -1;
-        return a._dist - b._dist;
-      });
-    }
+  // ── Add hub ──────────────────────────────────────────────────
+  const submit = async () => {
+    if (!form.name || !form.code || !form.city) { show('Hub Name, Code and City are required', 'error'); return; }
+    setSaving(true);
+    try {
+      const payload = { ...form, lat: form.lat ? +form.lat : undefined, lng: form.lng ? +form.lng : undefined, chargerCount: form.chargerCount ? +form.chargerCount : undefined };
+      const hub = await call('/admin/hubs', { method: 'post', data: payload });
+      setHubs(h => [...h, hub]);
+      setOpen(false); setForm(EMPTY_HUB);
+      show('✓ Hub created!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to create hub', 'error'); }
+    finally { setSaving(false); }
+  };
 
-    return list.map((h, i) => ({ ...h, _rank: i }));
-  }, [rawHubs, userCoords, statusFilter]);
+  // ── Edit hub ─────────────────────────────────────────────────
+  const openEdit = hub => { setEditHub(hub); setForm({ name: hub.name, code: hub.code, city: hub.city || '', address: hub.address || '', lat: hub.lat || '', lng: hub.lng || '', status: hub.status, chargerCount: hub.chargerCount || '' }); };
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const payload = { ...form, lat: form.lat ? +form.lat : undefined, lng: form.lng ? +form.lng : undefined, chargerCount: form.chargerCount ? +form.chargerCount : undefined };
+      const updated = await call(`/admin/hubs/${editHub._id}`, { method: 'put', data: payload });
+      setHubs(h => h.map(x => x._id === editHub._id ? updated : x));
+      setEditHub(null); setForm(EMPTY_HUB);
+      show('✓ Hub updated!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to update hub', 'error'); }
+    finally { setSaving(false); }
+  };
 
-  const getLocation = () => {
-    if (!navigator.geolocation) {
-      setLocStatus('denied');
-      return;
-    }
-    setLocStatus('getting');
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setUserCoords([pos.coords.latitude, pos.coords.longitude]);
-        setLocStatus('done');
-      },
-      () => setLocStatus('denied'),
-      { timeout: 10000 }
-    );
+  // ── Delete hub ───────────────────────────────────────────────
+  const confirmDelete = async () => {
+    try {
+      await call(`/admin/hubs/${delHub._id}`, { method: 'delete' });
+      setHubs(h => h.filter(x => x._id !== delHub._id));
+      if (selectedHub?._id === delHub._id) setSelectedHub(null);
+      setDelHub(null);
+      show('Hub deleted.');
+    } catch (e) { show('Failed to delete hub', 'error'); }
   };
 
   if (loading) return <Loader />;
   if (error)   return <Err msg={error} />;
 
-  const onlineCount = (rawHubs || []).filter(h => h.status === 'ONLINE').length;
+  const hubsWithCoords = hubs.filter(h => getHubCoords(h));
+  const isMapView = view === 'map';
+
+  // ── Hub form fields (reused in Add + Edit modals) ────────────
+  const HubFields = () => <>
+    <Fld label="Hub Name" required><Inp value={form.name} onChange={ff('name')} placeholder="e.g. Main Hub Hyderabad" /></Fld>
+    <Fld label="Hub Code" required hint="Unique code used across the network"><Inp value={form.code} onChange={ff('code')} placeholder="e.g. HUB-HYD-01" /></Fld>
+    <Fld label="City" required><Inp value={form.city} onChange={ff('city')} placeholder="e.g. Hyderabad" /></Fld>
+    <Fld label="Address"><Txt value={form.address} onChange={ff('address')} placeholder="Full address including area and state" rows={2} /></Fld>
+    <div className="row-2">
+      <Fld label="Latitude" hint="For map pin"><Inp value={form.lat} onChange={ff('lat')} type="number" placeholder="17.3850" /></Fld>
+      <Fld label="Longitude"><Inp value={form.lng} onChange={ff('lng')} type="number" placeholder="78.4867" /></Fld>
+    </div>
+    <Fld label="Charger Capacity"><Inp value={form.chargerCount} onChange={ff('chargerCount')} type="number" placeholder="e.g. 10" /></Fld>
+    <Fld label="Status">
+      <Sel value={form.status} onChange={ff('status')} opts={[{ v: 'ONLINE', l: 'Online' }, { v: 'OFFLINE', l: 'Offline' }, { v: 'MAINTENANCE', l: 'Under Maintenance' }]} />
+    </Fld>
+  </>;
 
   return <>
+    <Toast toast={toast} />
     <PageHeader
-      title="Charging Stations"
-      sub="All EV charging hubs — sorted by distance from your location."
+      title="Charging Hubs"
+      sub="India-wide hub network — hover a pin to see hub details."
+      actions={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className={isMapView ? 'btn-primary' : 'btn-ghost'} onClick={() => setView('map')} style={{ fontSize: 13 }}>🗺 Map View</button>
+          <button className={!isMapView ? 'btn-primary' : 'btn-ghost'} onClick={() => setView('table')} style={{ fontSize: 13 }}>📋 Table View</button>
+          <button className="btn-primary" onClick={() => { setOpen(true); setForm(EMPTY_HUB); }}><Plus size={15} /> Add Hub</button>
+        </div>
+      }
     />
 
-    {/* Location banner */}
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      background: '#fff', border: '1px solid #e4e7ef', borderRadius: 12,
-      padding: '14px 18px', marginBottom: 16,
-      boxShadow: '0 1px 4px rgba(0,0,0,.05)',
-    }}>
-      <div style={{ flex: 1, minWidth: 200 }}>
-        {locStatus === 'idle' && (
-          <>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#1a1f2e' }}>📍 Find Nearest Stations</div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              Share your location to see charging hubs sorted by distance
-            </div>
-          </>
-        )}
-        {locStatus === 'getting' && (
-          <div style={{ fontWeight: 600, fontSize: 13, color: '#2563eb' }}>⏳ Getting your location…</div>
-        )}
-        {locStatus === 'done' && (
-          <div style={{ fontWeight: 600, fontSize: 13, color: '#16a34a' }}>
-            ✅ Location found — showing nearest stations first
-          </div>
-        )}
-        {locStatus === 'denied' && (
-          <div style={{ fontWeight: 600, fontSize: 13, color: '#dc2626' }}>
-            ❌ Location access denied — showing all stations
-          </div>
-        )}
-      </div>
-      {locStatus !== 'done' && (
-        <button
-          className="btn-primary"
-          onClick={getLocation}
-          disabled={locStatus === 'getting'}
-          style={{ fontSize: 13 }}
-        >
-          {locStatus === 'getting' ? 'Locating…' : '📍 Use My Location'}
-        </button>
-      )}
-      {locStatus === 'done' && (
-        <button className="btn-ghost" onClick={() => { setUserCoords(null); setLocStatus('idle'); }}
-          style={{ fontSize: 12 }}>
-          Clear Location
-        </button>
-      )}
-    </div>
-
-    {/* Stats */}
-    <MetricGrid metrics={[
-      { label: 'Total Hubs',    value: (rawHubs || []).length,  Icon: Factory,      color: '#2563eb' },
-      { label: 'Online Now',    value: onlineCount,              Icon: Zap,          color: '#16a34a' },
-      { label: 'Offline',       value: (rawHubs || []).filter(h => h.status === 'OFFLINE').length, Icon: AlertTriangle, color: '#dc2626' },
-      { label: 'Maintenance',   value: (rawHubs || []).filter(h => h.status === 'MAINTENANCE').length, Icon: Activity, color: '#d97706' },
-    ]} />
-
-    {/* Map */}
-    <div style={{ marginBottom: 16 }}>
-      <CustStationsMap
+    {/* ── Map panel — always rendered, hidden via CSS so Leaflet keeps its instance ── */}
+    <div style={{ display: isMapView ? 'grid' : 'none' }} className="hub-map-wrap">
+      <IndiaHubMap
         hubs={hubs}
-        userCoords={userCoords}
         selectedHub={selectedHub}
         onSelectHub={h => setSelectedHub(s => s?._id === h._id ? null : h)}
+        visible={isMapView}
       />
-    </div>
-
-    {/* Filter tabs */}
-    <div className="filter-tabs" style={{ marginBottom: 12 }}>
-      {['ALL', 'ONLINE', 'OFFLINE', 'MAINTENANCE'].map(s => (
-        <button
-          key={s}
-          className={'filter-tab' + (statusFilter === s ? ' active' : '')}
-          onClick={() => setStatusFilter(s)}
-        >
-          {s === 'ALL' ? `All Stations (${(rawHubs || []).length})` : s}
-        </button>
-      ))}
-    </div>
-
-    {/* Hub list — sorted nearest first */}
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {hubs.map((hub, i) => {
-        const sc    = HUB_SC[hub.status] || '#2563eb';
-        const isSelected = selectedHub?._id === hub._id;
-        return (
-          <div
-            key={hub._id}
-            onClick={() => setSelectedHub(s => s?._id === hub._id ? null : hub)}
-            style={{
-              background: '#fff',
-              border: `1.5px solid ${isSelected ? '#2563eb' : '#e4e7ef'}`,
-              borderRadius: 12,
-              padding: '14px 16px',
-              cursor: 'pointer',
-              boxShadow: isSelected ? '0 0 0 3px #2563eb18' : '0 1px 4px rgba(0,0,0,.04)',
-              display: 'flex',
-              gap: 14,
-              alignItems: 'flex-start',
-              transition: 'border-color .15s, box-shadow .15s',
-            }}
-          >
-            {/* Rank badge */}
-            <div style={{
-              width: 36, height: 36, borderRadius: 10,
-              background: userCoords ? (i === 0 ? '#2563eb' : '#f3f4f6') : '#f3f4f6',
-              color: userCoords ? (i === 0 ? '#fff' : '#6b7280') : '#6b7280',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 800, fontSize: 14, flexShrink: 0,
-            }}>
-              #{i + 1}
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e' }}>{hub.name}</div>
-                <div style={{ display: 'flex', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-                  {hub._dist != null && (
-                    <span style={{
-                      background: '#eff6ff', color: '#2563eb',
-                      borderRadius: 99, padding: '2px 10px', fontSize: 12, fontWeight: 700,
-                    }}>
-                      📏 {hub._dist < 1 ? `${(hub._dist * 1000).toFixed(0)} m` : `${hub._dist.toFixed(1)} km`}
-                    </span>
-                  )}
-                  {(() => {
-                    const coords = custGetCoords(hub);
-                    const mapsUrl = coords
-                      ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
-                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((hub.address ? hub.address + ', ' : '') + (hub.city || ''))}`;
-                    return (
-                      <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-                         title="Open in Google Maps"
-                         onClick={e => e.stopPropagation()}
-                         style={{
-                           display: 'flex', alignItems: 'center', gap: 4,
-                           background: '#eff6ff', color: '#2563eb',
-                           borderRadius: 99, padding: '3px 10px', fontSize: 12, fontWeight: 600,
-                           textDecoration: 'none', border: '1px solid #bfdbfe',
-                         }}>
-                        <MapPin size={12} /> Maps
-                      </a>
-                    );
-                  })()}
-                  <span style={{
-                    background: sc + '18', color: sc,
-                    borderRadius: 99, padding: '2px 10px', fontSize: 11, fontWeight: 700,
-                  }}>
-                    ● {hub.status}
-                  </span>
+      <div>
+        <div style={{ fontWeight: 700, fontSize: 13, color: '#374151', marginBottom: 8 }}>
+          🏭 {hubs.length} Hubs · {hubsWithCoords.length} on map
+        </div>
+        <div className="hub-list-panel">
+          {hubs.map(hub => {
+            const color     = HUB_STATUS_COLOR[hub.status] || '#2563eb';
+            const hasCoords = !!getHubCoords(hub);
+            return (
+              <div key={hub._id}
+                className={'hub-list-item' + (selectedHub?._id === hub._id ? ' selected' : '')}
+                style={{ opacity: hasCoords ? 1 : 0.65 }}
+              >
+                <div
+                  onClick={() => { if (hasCoords) setSelectedHub(s => s?._id === hub._id ? null : hub); }}
+                  style={{ cursor: hasCoords ? 'pointer' : 'default' }}
+                >
+                  <div className="hub-list-name">{hub.name}</div>
+                  <div className="hub-list-city">📍 {hub.city}{hub.address ? ` · ${hub.address.substring(0, 32)}…` : ''}</div>
+                  <div className="hub-list-meta">
+                    <div className="hub-pin-dot" style={{ background: color }} />
+                    <span style={{ fontSize: 11, color, fontWeight: 600 }}>{hub.status}</span>
+                    <span style={{ fontSize: 11, color: '#9ca3af' }}>· ⚡ {hub.chargerCount ?? 0}</span>
+                    {!hasCoords && <span style={{ fontSize: 10, color: '#d97706' }}>no coords</span>}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                  <button
+                    style={{ flex: 1, fontSize: 11, padding: '4px 0', borderRadius: 6, border: '1px solid #e4e7ef', background: '#f9fafb', color: '#374151', cursor: 'pointer' }}
+                    onClick={e => { e.stopPropagation(); openEdit(hub); }}
+                  >✏ Edit</button>
+                  <button
+                    style={{ flex: 1, fontSize: 11, padding: '4px 0', borderRadius: 6, border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', cursor: 'pointer' }}
+                    onClick={e => { e.stopPropagation(); setDelHub(hub); }}
+                  >🗑 Delete</button>
                 </div>
               </div>
-              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 3 }}>
-                📍 {hub.city}{hub.address ? ` · ${hub.address}` : ''}
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, color: '#374151' }}>
-                  ⚡ <strong>{hub.chargerCount ?? 0}</strong> charger slots
-                </span>
-                {hub.code && (
-                  <span style={{ fontSize: 12, color: '#6b7280' }}>🔖 {hub.code}</span>
-                )}
-                {!hub._coords && (
-                  <span style={{ fontSize: 11, color: '#d97706' }}>⚠ No map coords</span>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })}
-      {hubs.length === 0 && (
-        <div className="empty">No charging stations found for this filter.</div>
-      )}
+            );
+          })}
+        </div>
+      </div>
     </div>
-  </>;
-}
 
-function AdminHubs({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/hubs');
-  if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
-  return <>
-    <PageHeader title="Charging Hubs" sub="All hub locations across the network." />
-    <Card title="Hub Network" badge={`${data?.length ?? 0} hubs`}>
-      <DataTable rows={data} cols={['name', 'city', 'state', 'pincode', 'capacity', 'status']} />
-    </Card>
+    {/* ── Table view ── */}
+    {!isMapView && (
+      <Card title="Hub Network" badge={`${hubs.length} hubs`}>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr><th>Name</th><th>Code</th><th>City</th><th>Address</th><th>Chargers</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {hubs.map(hub => {
+                const sc = HUB_STATUS_COLOR[hub.status] || '#6b7280';
+                return (
+                  <tr key={hub._id}>
+                    <td style={{ fontWeight: 600 }}>{hub.name}</td>
+                    <td>{hub.code}</td>
+                    <td>{hub.city}</td>
+                    <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hub.address || '—'}</td>
+                    <td>{hub.chargerCount ?? 0}</td>
+                    <td><span className="status-pill" style={{ background: sc + '18', color: sc }}>● {hub.status}</span></td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {(() => {
+                          const coords = getHubCoords(hub);
+                          const mapsUrl = coords
+                            ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((hub.address ? hub.address + ', ' : '') + (hub.city || ''))}`;
+                          return (
+                            <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Open in Google Maps"
+                               style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#eff6ff', color: '#2563eb', cursor: 'pointer', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <MapPin size={11} /> Maps
+                            </a>
+                          );
+                        })()}
+                        <button style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid #e4e7ef', background: '#f9fafb', color: '#374151', cursor: 'pointer' }} onClick={() => openEdit(hub)}>✏ Edit</button>
+                        <button style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', cursor: 'pointer' }} onClick={() => setDelHub(hub)}>🗑</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    )}
+
+    {/* ── Add Hub Modal ── */}
+    {open && (
+      <Modal title="Add New Hub" subtitle="Create a new charging hub location" onClose={() => setOpen(false)}
+        footer={<><button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving ? 'Creating…' : <><Save size={14} /> Create Hub</>}</button></>}>
+        {HubFields()}
+      </Modal>
+    )}
+
+    {/* ── Edit Hub Modal ── */}
+    {editHub && (
+      <Modal title="Edit Hub" subtitle={`Editing: ${editHub.name}`} onClose={() => setEditHub(null)}
+        footer={<><button className="btn-ghost" onClick={() => setEditHub(null)}>Cancel</button><button className="btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Saving…' : <><Save size={14} /> Save Changes</>}</button></>}>
+        {HubFields()}
+      </Modal>
+    )}
+
+    {/* ── Delete Confirm Modal ── */}
+    {delHub && (
+      <Modal title="Delete Hub" subtitle="This action cannot be undone." onClose={() => setDelHub(null)}
+        footer={<><button className="btn-ghost" onClick={() => setDelHub(null)}>Cancel</button><button style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 700, cursor: 'pointer' }} onClick={confirmDelete}>Delete</button></>}>
+        <p style={{ fontSize: 14, color: '#374151' }}>Are you sure you want to delete <strong>{delHub.name}</strong> ({delHub.city})?</p>
+        <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>⚠ All chargers associated with this hub may be orphaned.</p>
+      </Modal>
+    )}
   </>;
 }
+// ── Chargers ─────────────────────────────────────────────────────
+const EMPTY_CHR = { hubId: '', code: '', powerKw: '7.2', connectorType: 'AC', pricePerKwh: '12', status: 'AVAILABLE' };
 
 function AdminChargers({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/chargers');
+  const { data: initial, loading, error } = useFetch(call, '/admin/chargers');
+  const { data: hubs }                   = useFetch(call, '/admin/hubs');
+  const [chargers, setChargers] = useState([]);
+  const [open,     setOpen]     = useState(false);
+  const [editChr,  setEditChr]  = useState(null);
+  const [delChr,   setDelChr]   = useState(null);
+  const [saving,   setSaving]   = useState(false);
+  const [form,     setForm]     = useState(EMPTY_CHR);
+  const { toast, show } = useToast();
+
+  useEffect(() => { if (initial) setChargers(initial); }, [initial]);
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.hubId || !form.code) { show('Hub and Charger Code are required', 'error'); return; }
+    setSaving(true);
+    try {
+      const payload = { ...form, powerKw: +form.powerKw, pricePerKwh: +form.pricePerKwh };
+      const ch = await call('/admin/chargers', { method: 'post', data: payload });
+      setChargers(c => [...c, ch]);
+      setOpen(false); setForm(EMPTY_CHR);
+      show('✓ Charger added!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to create charger', 'error'); }
+    finally { setSaving(false); }
+  };
+
+  const openEdit = ch => {
+    setEditChr(ch);
+    setForm({ hubId: ch.hubId?._id || ch.hubId || '', code: ch.code, powerKw: ch.powerKw, connectorType: ch.connectorType, pricePerKwh: ch.pricePerKwh, status: ch.status });
+  };
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const payload = { ...form, powerKw: +form.powerKw, pricePerKwh: +form.pricePerKwh };
+      const updated = await call(`/admin/chargers/${editChr._id}`, { method: 'put', data: payload });
+      setChargers(c => c.map(x => x._id === editChr._id ? updated : x));
+      setEditChr(null); setForm(EMPTY_CHR);
+      show('✓ Charger updated!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to update', 'error'); }
+    finally { setSaving(false); }
+  };
+  const confirmDelChr = async () => {
+    try {
+      await call(`/admin/chargers/${delChr._id}`, { method: 'delete' });
+      setChargers(c => c.filter(x => x._id !== delChr._id));
+      setDelChr(null); show('Charger deleted.');
+    } catch (e) { show('Failed to delete charger', 'error'); }
+  };
+
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
+
+  const ChrFields = () => <>
+    <Fld label="Hub" required hint="Which hub does this charger belong to?">
+      <Sel value={form.hubId} onChange={ff('hubId')} placeholder="Select a hub…"
+        opts={(hubs || []).map(h => ({ v: h._id, l: `${h.name} — ${h.city}` }))} />
+    </Fld>
+    <Fld label="Charger Code" required hint="Unique identifier printed on the unit">
+      <Inp value={form.code} onChange={ff('code')} placeholder="e.g. CHR-HYD-01-A" />
+    </Fld>
+    <div className="row-2">
+      <Fld label="Power (kW)"><Inp value={form.powerKw} onChange={ff('powerKw')} type="number" placeholder="7.2" /></Fld>
+      <Fld label="Price per kWh (₹)"><Inp value={form.pricePerKwh} onChange={ff('pricePerKwh')} type="number" placeholder="12" /></Fld>
+    </div>
+    <Fld label="Connector Type">
+      <Sel value={form.connectorType} onChange={ff('connectorType')} opts={['AC', 'DC', 'CCS1', 'CCS2', 'CHAdeMO', 'Type2']} />
+    </Fld>
+    <Fld label="Status">
+      <Sel value={form.status} onChange={ff('status')} opts={[
+        { v: 'AVAILABLE', l: 'Available' }, { v: 'IN_USE', l: 'In Use' }, { v: 'OFFLINE', l: 'Offline' },
+      ]} />
+    </Fld>
+  </>;
+
   return <>
-    <PageHeader title="Chargers" sub="All charging units across hubs." />
+    <Toast toast={toast} />
+    <PageHeader title="Chargers" sub="All charging units across hubs."
+      actions={<button className="btn-primary" onClick={() => { setOpen(true); setForm(EMPTY_CHR); }}><Plus size={15} /> Add Charger</button>}
+    />
     <MetricGrid metrics={[
-      { label: 'Total',     value: data?.length ?? 0,                                          Icon: Zap,          color: '#2563eb' },
-      { label: 'Available', value: data?.filter(c => c.status === 'AVAILABLE').length ?? 0,   Icon: CheckCircle,  color: '#16a34a' },
-      { label: 'In Use',    value: data?.filter(c => c.status === 'IN_USE').length ?? 0,      Icon: Activity,     color: '#7c3aed' },
-      { label: 'Offline',   value: data?.filter(c => c.status === 'OFFLINE').length ?? 0,     Icon: AlertTriangle,color: '#dc2626' },
+      { label: 'Total',     value: chargers.length,                                       Icon: Zap,           color: '#2563eb' },
+      { label: 'Available', value: chargers.filter(c => c.status === 'AVAILABLE').length, Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'In Use',    value: chargers.filter(c => c.status === 'IN_USE').length,    Icon: Activity,      color: '#7c3aed' },
+      { label: 'Offline',   value: chargers.filter(c => c.status === 'OFFLINE').length,   Icon: AlertTriangle, color: '#dc2626' },
     ]} />
     <Card title="All Chargers">
-      <DataTable rows={data} cols={['serialNo', 'type', 'powerKw', 'status', 'lastHeartbeat']} />
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Code</th><th>Hub</th><th>Type</th><th>Power (kW)</th><th>₹/kWh</th><th>Status</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            {chargers.map(ch => {
+              const sc = { AVAILABLE: '#16a34a', IN_USE: '#2563eb', OFFLINE: '#dc2626' }[ch.status] || '#6b7280';
+              const hubName = ch.hubId?.name || ch.hubId || '—';
+              return (
+                <tr key={ch._id}>
+                  <td style={{ fontWeight: 600 }}>{ch.code}</td>
+                  <td>{hubName}</td>
+                  <td>{ch.connectorType}</td>
+                  <td>{ch.powerKw}</td>
+                  <td>{ch.pricePerKwh}</td>
+                  <td><span className="status-pill" style={{ background: sc + '18', color: sc }}>● {ch.status}</span></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid #e4e7ef', background: '#f9fafb', color: '#374151', cursor: 'pointer' }} onClick={() => openEdit(ch)}>✏ Edit</button>
+                      <button style={{ fontSize: 11, padding: '3px 10px', borderRadius: 6, border: '1px solid #fecaca', background: '#fff5f5', color: '#dc2626', cursor: 'pointer' }} onClick={() => setDelChr(ch)}>🗑</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </Card>
+
+    {open && (
+      <Modal title="Add New Charger" subtitle="Register a charging unit to an existing hub" onClose={() => setOpen(false)}
+        footer={<><button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving ? 'Adding…' : <><Save size={14} /> Add Charger</>}</button></>}>
+        <ChrFields />
+      </Modal>
+    )}
+
+    {editChr && (
+      <Modal title="Edit Charger" subtitle={`Editing: ${editChr.code}`} onClose={() => setEditChr(null)}
+        footer={<><button className="btn-ghost" onClick={() => setEditChr(null)}>Cancel</button><button className="btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Saving…' : <><Save size={14} /> Save Changes</>}</button></>}>
+        <ChrFields />
+      </Modal>
+    )}
+
+    {delChr && (
+      <Modal title="Delete Charger" subtitle="This cannot be undone." onClose={() => setDelChr(null)}
+        footer={<><button className="btn-ghost" onClick={() => setDelChr(null)}>Cancel</button><button style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 700, cursor: 'pointer' }} onClick={confirmDelChr}>Delete</button></>}>
+        <p style={{ fontSize: 14, color: '#374151' }}>Delete charger <strong>{delChr.code}</strong>?</p>
+      </Modal>
+    )}
   </>;
 }
-
+// ── Live Operations ───────────────────────────────────────────────
 function AdminOps({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/live-operations');
+  const { data, loading, error, refresh } = useFetch(call, '/admin/live-operations');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
-    <PageHeader title="Live Operations" sub="Real-time service jobs across all hubs." />
+    <PageHeader
+      title="Live Operations"
+      sub="Real-time service jobs across all hubs."
+      actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Refresh</button>}
+    />
     <MetricGrid metrics={[
-      { label: 'Active Jobs',   value: data?.length ?? 0,                                   Icon: Activity,     color: '#2563eb' },
+      { label: 'Active Jobs',   value: data?.length ?? 0,                                    Icon: Activity,     color: '#2563eb' },
       { label: 'High Priority', value: data?.filter(j => j.priority === 'HIGH').length ?? 0, Icon: AlertTriangle,color: '#dc2626' },
+      { label: 'En Route',      value: data?.filter(j => j.status === 'EN_ROUTE').length ?? 0, Icon: Truck,      color: '#7c3aed' },
+      { label: 'In Progress',   value: data?.filter(j => j.status === 'IN_PROGRESS').length ?? 0, Icon: CheckCircle, color: '#16a34a' },
     ]} />
     <Card title="Live Job Stream" badge="Real-time">
       <DataTable rows={data} cols={['serviceType', 'status', 'priority', 'trackingStatus', 'createdAt']} />
@@ -2734,16 +1304,17 @@ function AdminOps({ call }) {
   </>;
 }
 
+// ── Revenue ───────────────────────────────────────────────────────
 function AdminRevenue({ call }) {
   const { data, loading, error } = useFetch(call, '/admin/revenue');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   const rev = Array.isArray(data) ? data[0] : data;
   return <>
     <PageHeader title="Revenue" sub="Network-wide payment and revenue summary." />
     <MetricGrid metrics={[
       { label: 'Total Revenue', value: `₹${(rev?.total ?? 0).toLocaleString()}`, Icon: DollarSign, color: '#16a34a' },
-      { label: 'Transactions',  value: rev?.transactions ?? 0,                    Icon: Activity,   color: '#2563eb' },
+      { label: 'Transactions',  value: rev?.transactions ?? 0,                   Icon: Activity,   color: '#2563eb' },
     ]} />
     <Card title="Revenue Summary">
       <DataTable rows={[rev]} cols={['total', 'transactions']} />
@@ -2751,15 +1322,22 @@ function AdminRevenue({ call }) {
   </>;
 }
 
+// ── Anomalies ─────────────────────────────────────────────────────
 function AdminAnomalies({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/anomalies');
+  const { data, loading, error, refresh } = useFetch(call, '/admin/anomalies');
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
   return <>
-    <PageHeader title="Anomaly Detection" sub="Rule-based fraud and anomaly alerts." />
+    <PageHeader
+      title="Anomaly Detection"
+      sub="Rule-based fraud and anomaly alerts."
+      actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Run Check</button>}
+    />
     <MetricGrid metrics={[
-      { label: 'Total Alerts',  value: data?.length ?? 0,                                        Icon: AlertTriangle, color: '#d97706' },
-      { label: 'High Severity', value: data?.filter(a => a.severity === 'HIGH').length ?? 0,     Icon: Shield,        color: '#dc2626' },
+      { label: 'Total Alerts',  value: data?.length ?? 0,                                     Icon: AlertTriangle, color: '#d97706' },
+      { label: 'High Severity', value: data?.filter(a => a.severity === 'HIGH').length ?? 0,  Icon: Shield,        color: '#dc2626' },
+      { label: 'Medium',        value: data?.filter(a => a.severity === 'MEDIUM').length ?? 0,Icon: AlertTriangle, color: '#d97706' },
+      { label: 'Resolved',      value: 0,                                                       Icon: CheckCircle,   color: '#16a34a' },
     ]} />
     <Card title="Anomalies" badge={`${data?.length ?? 0} alerts`}>
       <DataTable rows={data} cols={['type', 'severity', 'reason', 'customerId']} />
@@ -2767,53 +1345,2102 @@ function AdminAnomalies({ call }) {
   </>;
 }
 
+// ── Franchisees ───────────────────────────────────────────────────
+const EMPTY_FR = {
+  // Account
+  name: '', email: '', phone: '', password: '', confirm: '',
+  // Manager
+  managerName: '', managerPhone: '', managerEmail: '',
+  // Address
+  addressLine1: '', addressLine2: '', city: '', district: '', state: '', pincode: '',
+  // Business
+  businessName: '', gstNumber: '', panNumber: '',
+  // Location
+  latitude: '', longitude: '',
+  // Extra
+  notes: '',
+};
+
+
+function FranchiseeMap({ franchisees = [] }) {
+  const mapRef = React.useRef(null);
+  const leafRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+
+  React.useEffect(() => {
+    if (!mapRef.current || !window.L || leafRef.current) return;
+    const L = window.L;
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+      .setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(map);
+    leafRef.current = map;
+    return () => { markersRef.current.forEach(m => map.removeLayer(m)); map.remove(); leafRef.current = null; };
+  }, []);
+
+  React.useEffect(() => {
+    const map = leafRef.current;
+    if (!map || !window.L) return;
+    const L = window.L;
+    markersRef.current.forEach(m => map.removeLayer(m));
+    markersRef.current = [];
+    const mapped = franchisees.filter(f => {
+      const lat = Number(f.address?.latitude ?? f.address?.lat);
+      const lng = Number(f.address?.longitude ?? f.address?.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    });
+    mapped.forEach(f => {
+      const lat = Number(f.address.latitude ?? f.address.lat);
+      const lng = Number(f.address.longitude ?? f.address.lng);
+      const a = f.address || {};
+      const basic = `<strong>${f.name || 'Franchisee'}</strong><br/>${a.city || a.district || a.state || 'India'}<br/>📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      const complete = `<div style="min-width:220px"><strong>${f.name || 'Franchisee'}</strong><hr style="border:0;border-top:1px solid #eee;margin:6px 0"/>` +
+        `<div><b>Business:</b> ${a.businessName || '—'}</div><div><b>Manager:</b> ${a.managerName || '—'}</div>` +
+        `<div><b>Phone:</b> ${f.phone || a.managerPhone || '—'}</div><div><b>Email:</b> ${f.email || a.managerEmail || '—'}</div>` +
+        `<div><b>Address:</b> ${[a.line1,a.line2,a.city,a.district,a.state,a.pincode].filter(Boolean).join(', ') || '—'}</div>` +
+        `<div><b>GST:</b> ${a.gstNumber || '—'}</div><div><b>PAN:</b> ${a.panNumber || '—'}</div>` +
+        `<div><b>Latitude:</b> ${lat}</div><div><b>Longitude:</b> ${lng}</div></div>`;
+      const marker = L.circleMarker([lat,lng], { radius: 9, weight: 3, fillOpacity: .9 });
+      marker.addTo(map);
+      marker.bindTooltip(basic, { direction:'top', offset:[0,-8], sticky:true });
+      marker.bindPopup(complete, { maxWidth: 340 });
+      markersRef.current.push(marker);
+    });
+    if (mapped.length > 1) {
+      map.fitBounds(L.latLngBounds(mapped.map(f => [Number(f.address.latitude ?? f.address.lat), Number(f.address.longitude ?? f.address.lng)])), { padding:[30,30], maxZoom: 10 });
+    } else if (mapped.length === 1) {
+      map.setView([Number(mapped[0].address.latitude ?? mapped[0].address.lat), Number(mapped[0].address.longitude ?? mapped[0].address.lng)], 10);
+    }
+  }, [franchisees]);
+
+  return <div className="hub-map-container" style={{position:'relative'}}>
+    <div ref={mapRef} id="india-franchise-map" />
+    {!franchisees.some(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))) &&
+      <div style={{padding:14,color:'#64748b',fontSize:12}}>No franchisee locations mapped yet. Add latitude and longitude when creating a franchisee.</div>}
+  </div>;
+}
+
 function AdminFranchisees({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/franchisees');
-  if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
-  return <>
-    <PageHeader title="Franchisees" sub="All franchise partners." />
-    <Card title="Franchisee Directory" badge={`${data?.length ?? 0}`}>
-      <DataTable rows={data} cols={['name', 'email', 'phone']} />
-    </Card>
-  </>;
-}
+  const { data: initial, loading, error } = useFetch(call, '/admin/franchisees');
+  const { data: statsData } = useFetch(call, '/admin/franchisee-stats');
+  const [list,    setList]    = useState([]);
+  const [open,    setOpen]    = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [form,    setForm]    = useState(EMPTY_FR);
+  const [created, setCreated] = useState(null);
+  const { toast, show }       = useToast();
 
-function AdminDemand({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/demand');
-  if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
-  return <>
-    <PageHeader title="Demand Analysis" sub="City-wise EV demand and capacity gaps." />
-    <Card title="Demand by City" badge="AI Scored">
-      <DataTable rows={data} cols={['city', 'demandScore', 'capacityGap']} />
-    </Card>
-  </>;
-}
+  useEffect(() => { if (initial) setList(initial); }, [initial]);
 
-function AdminExpansion({ call }) {
-  const { data, loading, error } = useFetch(call, '/admin/expansion');
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
+
+  const openForm = () => { setCreated(null); setForm(EMPTY_FR); setOpen(true); };
+
+  const submit = async () => {
+    if (!form.name || !form.email || !form.password) { show('Full Name, Email and Password are required', 'error'); return; }
+    if (form.password !== form.confirm)               { show('Passwords do not match', 'error'); return; }
+    if (form.password.length < 8)                     { show('Password must be at least 8 characters', 'error'); return; }
+    if (form.pincode && !/^\d{6}$/.test(form.pincode)){ show('Pincode must be exactly 6 digits', 'error'); return; }
+    if (form.latitude === '' || form.longitude === '') { show('Latitude and Longitude are required', 'error'); return; }
+    if (Number.isNaN(Number(form.latitude)) || Number(form.latitude) < -90 || Number(form.latitude) > 90) { show('Latitude must be between -90 and 90', 'error'); return; }
+    if (Number.isNaN(Number(form.longitude)) || Number(form.longitude) < -180 || Number(form.longitude) > 180) { show('Longitude must be between -180 and 180', 'error'); return; }
+
+    setSaving(true);
+    try {
+      // FIX: use call() so the Authorization header is included automatically
+      const newFr = await call('/admin/franchisees', {
+        method: 'post',
+        data: {
+          name:         form.name,
+          email:        form.email,
+          phone:        form.phone        || undefined,
+          password:     form.password,
+          managerName:  form.managerName  || undefined,
+          managerPhone: form.managerPhone || undefined,
+          managerEmail: form.managerEmail || undefined,
+          addressLine1: form.addressLine1 || undefined,
+          addressLine2: form.addressLine2 || undefined,
+          city:         form.city         || undefined,
+          district:     form.district     || undefined,
+          state:        form.state        || undefined,
+          pincode:      form.pincode      || undefined,
+          latitude:     form.latitude     || undefined,
+          longitude:    form.longitude    || undefined,
+          businessName: form.businessName || undefined,
+          gstNumber:    form.gstNumber    || undefined,
+          panNumber:    form.panNumber    || undefined,
+          notes:        form.notes        || undefined,
+        },
+      });
+      setList(l => [...l, newFr]);
+      setCreated({ name: form.name, email: form.email, password: form.password, businessName: form.businessName, managerName: form.managerName, latitude: form.latitude, longitude: form.longitude });
+      show('✓ Franchisee account created!');
+    } catch (e) {
+      show(e.response?.data?.message || e.message || 'Failed to create franchisee', 'error');
+    } finally { setSaving(false); }
+  };
+
   if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
+  if (error)   return <Err msg={error} />;
+
+  // Build a quick lookup: franchiseeId → vehicle stats
+  const statsMap = new Map((statsData?.franchisees || []).map(s => [s.franchiseeId, s]));
+  const inv = statsData?.inventory || { totalSkus: 0, totalQty: 0, totalValue: 0 };
+  const totalVehiclesAll = (statsData?.franchisees || []).reduce((s, f) => s + f.totalVehicles, 0);
+  const totalApprovedAll = (statsData?.franchisees || []).reduce((s, f) => s + f.approvedVehicles, 0);
+  const totalPendingAll  = (statsData?.franchisees || []).reduce((s, f) => s + f.pendingVehicles, 0);
+
   return <>
-    <PageHeader title="Expansion Engine" sub="AI-powered site viability analysis." />
+    <Toast toast={toast} />
+    <PageHeader
+      title="Franchisees"
+      sub="All franchise partners across the network."
+      actions={<button className="btn-primary" onClick={openForm}><UserPlus size={15} /> Add Franchisee</button>}
+    />
     <MetricGrid metrics={[
-      { label: 'Demand Score',  value: data?.demandScore,                                          Icon: TrendingUp, color: '#2563eb' },
-      { label: 'Monthly Rev',  value: `₹${(data?.expectedRevenueMonthly ?? 0).toLocaleString()}`,  Icon: DollarSign, color: '#16a34a' },
-      { label: 'Expected Cost',value: `₹${(data?.expectedCost ?? 0).toLocaleString()}`,            Icon: Factory,    color: '#d97706' },
-      { label: 'ROI',          value: `${data?.roi ?? 0}%`,                                        Icon: Gauge,      color: '#7c3aed' },
+      { label: 'Total Partners',      value: list.length,      Icon: Users,         color: '#2563eb' },
+      { label: 'Total Vehicles',      value: totalVehiclesAll, Icon: Car,           color: '#7c3aed' },
+      { label: 'Approved & Live',     value: totalApprovedAll, Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Pending Approval',    value: totalPendingAll,  Icon: Clock,         color: '#d97706' },
+      { label: 'Parts SKUs (Total)',  value: inv.totalSkus,    Icon: Package,       color: '#0891b2' },
+      { label: 'Parts Stock (Units)', value: inv.totalQty,     Icon: Layers,        color: '#4f46e5' },
     ]} />
-    <Card title="Full Analysis">
-      <div className="kv-list">
-        {data && Object.entries(data).map(([k, v]) => (
-          <div className="kv-row" key={k}>
-            <span>{k.replace(/([A-Z])/g, ' $1').trim()}</span>
-            <strong style={k === 'recommendation' ? { color: '#16a34a', fontWeight: 700 } : {}}>
-              {String(v)}
-            </strong>
+
+    {/* ── Per-Franchisee Vehicle & Inventory Breakdown ── */}
+    <Card title="Vehicle & Inventory by Franchisee" badge={`${list.length} partners`}>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Franchisee</th>
+              <th>Email</th>
+              <th style={{ textAlign:'center' }}>Total Vehicles</th>
+              <th style={{ textAlign:'center' }}>Approved</th>
+              <th style={{ textAlign:'center' }}>Pending</th>
+              <th style={{ textAlign:'center' }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(f => {
+              const s = statsMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+              return (
+                <tr key={String(f._id)}>
+                  <td style={{ fontWeight: 600 }}>{f.name || '—'}</td>
+                  <td style={{ color: '#6b7280', fontSize: 12 }}>{f.email}</td>
+                  <td style={{ textAlign:'center', fontWeight: 700 }}>{s.totalVehicles}</td>
+                  <td style={{ textAlign:'center' }}>
+                    <span style={{ background:'#dcfce7', color:'#166534', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>
+                      {s.approvedVehicles}
+                    </span>
+                  </td>
+                  <td style={{ textAlign:'center' }}>
+                    {s.pendingVehicles > 0 ? (
+                      <span style={{ background:'#fef3c7', color:'#92400e', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>
+                        {s.pendingVehicles}
+                      </span>
+                    ) : <span style={{ color:'#9ca3af', fontSize:12 }}>—</span>}
+                  </td>
+                  <td style={{ textAlign:'center' }}>
+                    <span style={{
+                      background: f.active ? '#dcfce7' : '#fee2e2',
+                      color:      f.active ? '#166534' : '#991b1b',
+                      padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700
+                    }}>
+                      {f.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {list.length === 0 && (
+              <tr><td colSpan={6} style={{ textAlign:'center', padding:32, color:'#9ca3af' }}>No franchisees yet.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+
+    {/* ── Parts Inventory Summary ── */}
+    <Card title="Parts Inventory Summary (Network-wide)">
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16 }}>
+        {[
+          { label:'Total SKUs', value: inv.totalSkus,                                           color:'#2563eb' },
+          { label:'Total Units in Stock', value: inv.totalQty,                                  color:'#16a34a' },
+          { label:'Total Inventory Value', value:`₹${Number(inv.totalValue||0).toLocaleString('en-IN')}`, color:'#7c3aed' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ background:'#f9fafb', borderRadius:12, padding:'18px 20px', textAlign:'center', border:'1.5px solid #e5e7eb' }}>
+            <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:6 }}>{label}</div>
+            <div style={{ fontSize:26, fontWeight:900, color }}>{value ?? 0}</div>
           </div>
         ))}
       </div>
     </Card>
+
+    <Card title="Franchisee Locations" badge={`${list.filter(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))).length} mapped`}>
+      <FranchiseeMap franchisees={list} />
+    </Card>
+    <Card title="Franchisee Directory" badge={`${list.length} partners`}>
+      <DataTable rows={list} cols={['name', 'email', 'phone', 'active', 'createdAt']} />
+    </Card>
+
+    {open && (
+      <Modal
+        title={created ? 'Franchisee Created!' : 'Add New Franchisee'}
+        subtitle={created ? 'Share credentials with the franchisee' : 'Creates a login for the Franchisee Portal'}
+        onClose={() => setOpen(false)}
+        footer={
+          created
+            ? <button className="btn-primary" onClick={() => setOpen(false)}>Done</button>
+            : <>
+                <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+                <button className="btn-primary" onClick={submit} disabled={saving}>
+                  {saving ? 'Creating Account…' : <><UserPlus size={14} /> Create Franchisee</>}
+                </button>
+              </>
+        }
+      >
+        {created ? (
+          <div className="success-card">
+            <div className="success-icon"><CheckCircle size={32} /></div>
+            <h3>Account Created Successfully</h3>
+            <p>The franchisee can now login at the Franchisee Portal with these credentials:</p>
+            <div className="cred-box">
+              <div className="cred-row"><span>Portal URL</span><code>localhost:5000/franchisee</code></div>
+              <div className="cred-row"><span>Name</span><code>{created.name}</code></div>
+              {created.businessName && <div className="cred-row"><span>Business</span><code>{created.businessName}</code></div>}
+              {created.managerName  && <div className="cred-row"><span>Manager</span><code>{created.managerName}</code></div>}
+              <div className="cred-row"><span>Email</span><code>{created.email}</code></div>
+              <div className="cred-row"><span>Password</span><code>{created.password}</code></div>
+            </div>
+            <div className="cred-warn">⚠ Save these credentials securely. Password shown only once.</div>
+          </div>
+        ) : (
+          <>
+            <InfoBanner Icon={Shield}>
+              This creates a dedicated login account for the Franchisee Portal. The franchisee will have access to their
+              own dashboard, financials, inventory and staff.
+            </InfoBanner>
+
+            {/* ── Section: Account ── */}
+            <div className="form-section-label">Account Details</div>
+            <Fld label="Full Name" required>
+              <Inp value={form.name} onChange={ff('name')} placeholder="e.g. Raj Kumar" />
+            </Fld>
+            <Fld label="Email Address" required hint="Used to login to the Franchisee Portal">
+              <Inp value={form.email} onChange={ff('email')} type="email" placeholder="raj@example.com" />
+            </Fld>
+            <div className="row-2">
+              <Fld label="Password" required hint="Min 8 characters">
+                <Inp value={form.password} onChange={ff('password')} type="password" placeholder="Strong password" />
+              </Fld>
+              <Fld label="Confirm Password" required>
+                <Inp value={form.confirm} onChange={ff('confirm')} type="password" placeholder="Repeat password" />
+              </Fld>
+            </div>
+
+            {/* ── Section: Business ── */}
+            <div className="form-section-label">Business Details</div>
+            <Fld label="Business / Franchise Name" hint="Trading name of the franchise">
+              <Inp value={form.businessName} onChange={ff('businessName')} placeholder="e.g. Raj EV Services Pvt Ltd" />
+            </Fld>
+            <div className="row-2">
+              <Fld label="GST Number" hint="15-digit GSTIN">
+                <Inp value={form.gstNumber} onChange={ff('gstNumber')} placeholder="e.g. 37ABCDE1234F1Z5" />
+              </Fld>
+              <Fld label="PAN Number">
+                <Inp value={form.panNumber} onChange={ff('panNumber')} placeholder="e.g. ABCDE1234F" />
+              </Fld>
+            </div>
+
+            {/* ── Section: Manager ── */}
+            <div className="form-section-label">Manager / Contact Person</div>
+            <Fld label="Manager Name">
+              <Inp value={form.managerName} onChange={ff('managerName')} placeholder="e.g. Suresh Reddy" />
+            </Fld>
+            <div className="row-2">
+              <Fld label="Manager Phone" hint="Primary contact number">
+                <Inp value={form.managerPhone} onChange={ff('managerPhone')} type="tel" placeholder="+91 9876543210" />
+              </Fld>
+              <Fld label="Franchisee Phone" hint="Alternate / login phone">
+                <Inp value={form.phone} onChange={ff('phone')} type="tel" placeholder="+91 9876543210" />
+              </Fld>
+            </div>
+            <Fld label="Manager Email" hint="For operational communications">
+              <Inp value={form.managerEmail} onChange={ff('managerEmail')} type="email" placeholder="manager@example.com" />
+            </Fld>
+
+            {/* ── Section: Address ── */}
+            <div className="form-section-label">Address Details</div>
+            <Fld label="Address Line 1">
+              <Inp value={form.addressLine1} onChange={ff('addressLine1')} placeholder="Building / Plot No., Street Name" />
+            </Fld>
+            <Fld label="Address Line 2" hint="Area, Landmark (optional)">
+              <Inp value={form.addressLine2} onChange={ff('addressLine2')} placeholder="Landmark, Area" />
+            </Fld>
+            <div className="row-2">
+              <Fld label="City">
+                <Inp value={form.city} onChange={ff('city')} placeholder="e.g. Kurnool" />
+              </Fld>
+              <Fld label="District">
+                <Inp value={form.district} onChange={ff('district')} placeholder="e.g. Kurnool" />
+              </Fld>
+            </div>
+            <div className="row-2">
+              <Fld label="State">
+                <Sel value={form.state} onChange={ff('state')} placeholder="Select state…" opts={[
+                  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+                  'Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh',
+                  'Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab',
+                  'Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh',
+                  'Uttarakhand','West Bengal','Delhi','Jammu & Kashmir','Ladakh',
+                ].map(s => ({ v: s, l: s }))} />
+              </Fld>
+              <Fld label="Pincode" hint="6-digit PIN">
+                <Inp value={form.pincode} onChange={ff('pincode')} placeholder="e.g. 518001" maxLength={6} />
+              </Fld>
+            </div>
+
+            {/* ── Section: Notes ── */}
+                        <div className="form-section-label">Map Location</div>
+            <div className="row-2">
+              <Fld label="Latitude" required hint="Example: 15.8281">
+                <Inp value={form.latitude} onChange={ff('latitude')} type="number" step="any" placeholder="15.8281" />
+              </Fld>
+              <Fld label="Longitude" required hint="Example: 78.0373">
+                <Inp value={form.longitude} onChange={ff('longitude')} type="number" step="any" placeholder="78.0373" />
+              </Fld>
+            </div>
+
+            <div className="form-section-label">Additional Notes</div>
+            <Fld label="Notes / Remarks" hint="Internal notes about this franchisee">
+              <Txt value={form.notes} onChange={ff('notes')} placeholder="Any special instructions or remarks…" rows={2} />
+            </Fld>
+          </>
+        )}
+      </Modal>
+    )}
   </>;
+}
+
+// ── Demand ────────────────────────────────────────────────────────
+const EMPTY_DEM = { location: '', demandScore: '', competitionScore: '', evDensityScore: '', expectedRevenue: '', expectedCost: '' };
+
+function AdminDemand({ call }) {
+  const { data: initial, loading, error } = useFetch(call, '/admin/demand');
+  const [records, setRecords] = useState([]);
+  const [open,    setOpen]    = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [form,    setForm]    = useState(EMPTY_DEM);
+  const { toast, show }       = useToast();
+
+  useEffect(() => { if (Array.isArray(initial)) setRecords(initial); }, [initial]);
+
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.location || !form.demandScore) { show('Location and Demand Score are required', 'error'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        location:         form.location,
+        demandScore:      +form.demandScore,
+        competitionScore: form.competitionScore ? +form.competitionScore : undefined,
+        evDensityScore:   form.evDensityScore   ? +form.evDensityScore   : undefined,
+        expectedRevenue:  form.expectedRevenue  ? +form.expectedRevenue  : undefined,
+        expectedCost:     form.expectedCost     ? +form.expectedCost     : undefined,
+      };
+      const rec = await call('/admin/demand', { method: 'post', data: payload });
+      setRecords(r => [rec, ...r]);
+      setOpen(false);
+      setForm(EMPTY_DEM);
+      show('✓ Demand record added!');
+    } catch (e) {
+      show(e.response?.data?.message || 'Failed to add record', 'error');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <Loader />;
+  if (error)   return <Err msg={error} />;
+
+  return <>
+    <Toast toast={toast} />
+    <PageHeader
+      title="Demand Analysis"
+      sub="City-wise EV demand and capacity gaps."
+      actions={<button className="btn-primary" onClick={() => setOpen(true)}><Plus size={15} /> Add Record</button>}
+    />
+    <Card title="Demand by City" badge={`${records.length} records`}>
+      <DataTable rows={records} cols={['location', 'demandScore', 'competitionScore', 'evDensityScore', 'expectedRevenue']} />
+    </Card>
+
+    {open && (
+      <Modal
+        title="Add Demand Record"
+        subtitle="Enter city-level EV demand data for analysis"
+        onClose={() => setOpen(false)}
+        footer={<>
+          <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={saving}>
+            {saving ? 'Saving…' : <><Save size={14} /> Save Record</>}
+          </button>
+        </>}
+      >
+        <Fld label="Location / City" required>
+          <Inp value={form.location} onChange={ff('location')} placeholder="e.g. Vijayawada, Andhra Pradesh" />
+        </Fld>
+        <Fld label="Demand Score (0–100)" required hint="How strong is EV adoption demand in this city?">
+          <Inp value={form.demandScore} onChange={ff('demandScore')} type="number" placeholder="e.g. 85" />
+        </Fld>
+        <div className="row-2">
+          <Fld label="Competition Score (0–100)" hint="0 = no existing competitors">
+            <Inp value={form.competitionScore} onChange={ff('competitionScore')} type="number" placeholder="e.g. 30" />
+          </Fld>
+          <Fld label="EV Density Score (0–100)" hint="Concentration of EVs in area">
+            <Inp value={form.evDensityScore} onChange={ff('evDensityScore')} type="number" placeholder="e.g. 60" />
+          </Fld>
+        </div>
+        <div className="row-2">
+          <Fld label="Expected Monthly Revenue (₹)">
+            <Inp value={form.expectedRevenue} onChange={ff('expectedRevenue')} type="number" placeholder="150000" />
+          </Fld>
+          <Fld label="Expected Setup Cost (₹)">
+            <Inp value={form.expectedCost} onChange={ff('expectedCost')} type="number" placeholder="2500000" />
+          </Fld>
+        </div>
+      </Modal>
+    )}
+  </>;
+}
+
+// ── Expansion Engine ──────────────────────────────────────────────
+const EMPTY_EXP = { location: '', demandScore: '70', competitionScore: '40', evDensityScore: '60', expectedRevenue: '150000', expectedCost: '2500000' };
+
+function AdminExpansion({ call }) {
+  const { data, loading } = useFetch(call, '/admin/expansion');
+  const [result,  setResult]  = useState(null);
+  const [open,    setOpen]    = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [form,    setForm]    = useState(EMPTY_EXP);
+  const { toast, show }       = useToast();
+
+  useEffect(() => { if (data && !data.message) setResult(data); }, [data]);
+
+  const ff = k => v => setForm(f => ({ ...f, [k]: v }));
+
+  const submit = async () => {
+    if (!form.location) { show('Location is required', 'error'); return; }
+    setSaving(true);
+    try {
+      const payload = {
+        location:         form.location,
+        demandScore:      +form.demandScore,
+        competitionScore: +form.competitionScore,
+        evDensityScore:   +form.evDensityScore,
+        expectedRevenue:  +form.expectedRevenue,
+        expectedCost:     +form.expectedCost,
+      };
+      const rec = await call('/admin/expansion', { method: 'post', data: payload });
+      setResult(rec);
+      setOpen(false);
+      show('✓ Expansion analysis complete!');
+    } catch (e) {
+      show(e.response?.data?.message || 'Analysis failed', 'error');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <Loader />;
+
+  return <>
+    <Toast toast={toast} />
+    <PageHeader
+      title="Expansion Engine"
+      sub="AI-powered site viability analysis for new hub locations."
+      actions={<button className="btn-primary" onClick={() => setOpen(true)}><BarChart2 size={15} /> Run Analysis</button>}
+    />
+
+    {result ? <>
+      <MetricGrid metrics={[
+        { label: 'Demand Score', value: result.demandScore,                                                  Icon: TrendingUp, color: '#2563eb' },
+        { label: 'Monthly Rev',  value: `₹${(result.expectedRevenue ?? 0).toLocaleString()}`,                Icon: DollarSign, color: '#16a34a' },
+        { label: 'Setup Cost',   value: `₹${(result.expectedCost ?? 0).toLocaleString()}`,                  Icon: Factory,    color: '#d97706' },
+        { label: 'ROI',          value: `${result.roi ?? 0}%`,                                              Icon: Gauge,      color: '#7c3aed' },
+      ]} />
+      <Card title={`Analysis: ${result.location || 'Latest'}`}>
+        <div className="kv-list">
+          {result && Object.entries(result)
+            .filter(([k]) => !['_id', '__v', 'inputs', 'createdAt', 'updatedAt'].includes(k))
+            .map(([k, v]) => (
+              <div className="kv-row" key={k}>
+                <span>{k.replace(/([A-Z])/g, ' $1').trim()}</span>
+                <strong style={k === 'recommendation' ? { color: '#16a34a', fontWeight: 700 } : {}}>
+                  {String(v)}
+                </strong>
+              </div>
+            ))}
+        </div>
+      </Card>
+    </> : (
+      <Card title="No Analysis Yet">
+        <div className="empty-state">
+          <BarChart2 size={40} style={{ opacity: .3, marginBottom: 12 }} />
+          <p>No expansion analysis found. Click <strong>Run Analysis</strong> to get started.</p>
+        </div>
+      </Card>
+    )}
+
+    {open && (
+      <Modal
+        title="Run Expansion Analysis"
+        subtitle="Compute viability for a new hub location"
+        onClose={() => setOpen(false)}
+        footer={<>
+          <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+          <button className="btn-primary" onClick={submit} disabled={saving}>
+            {saving ? 'Analyzing…' : <><BarChart2 size={14} /> Run Analysis</>}
+          </button>
+        </>}
+      >
+        <Fld label="Target Location" required hint="City and state for the proposed hub">
+          <Inp value={form.location} onChange={ff('location')} placeholder="e.g. Vijayawada, Andhra Pradesh" />
+        </Fld>
+        <div className="row-2">
+          <Fld label="Demand Score (0–100)" hint="EV adoption potential">
+            <Inp value={form.demandScore} onChange={ff('demandScore')} type="number" />
+          </Fld>
+          <Fld label="Competition Score (0–100)" hint="0 = no competitors">
+            <Inp value={form.competitionScore} onChange={ff('competitionScore')} type="number" />
+          </Fld>
+        </div>
+        <div className="row-2">
+          <Fld label="EV Density Score (0–100)">
+            <Inp value={form.evDensityScore} onChange={ff('evDensityScore')} type="number" />
+          </Fld>
+          <Fld label="Expected Monthly Revenue (₹)">
+            <Inp value={form.expectedRevenue} onChange={ff('expectedRevenue')} type="number" />
+          </Fld>
+        </div>
+        <Fld label="Expected Setup Cost (₹)" hint="One-time capital expenditure">
+          <Inp value={form.expectedCost} onChange={ff('expectedCost')} type="number" />
+        </Fld>
+        <InfoBanner Icon={Activity}>
+          The AI engine will compute ROI, payback period and a Go/No-Go recommendation automatically.
+        </InfoBanner>
+      </Modal>
+    )}
+  </>;
+}
+
+
+// ── Franchisee Ratings ────────────────────────────────────────────
+function AdminFranchiseRatings({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/admin/franchise-ratings');
+  if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
+  return <><PageHeader title="Franchisee Ratings" sub="Customer feedback captured after complaints are solved." actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15}/> Refresh</button>}/>
+    <MetricGrid metrics={[{label:'Rated Franchisees',value:data?.length||0,Icon:Users,color:'#2563eb'},{label:'Total Ratings',value:(data||[]).reduce((s,x)=>s+(x.ratingCount||0),0),Icon:BarChart2,color:'#16a34a'},{label:'Network Avg',value:data?.length?((data.reduce((s,x)=>s+(x.averageRating||0)*(x.ratingCount||0),0)/(data.reduce((s,x)=>s+(x.ratingCount||0),0)||1)).toFixed(2)):'0.00',Icon:BarChart2,color:'#d97706'}]}/>
+    <Card title="Franchisee Performance" badge={`${data?.length||0} rated`}><div style={{display:'flex',flexDirection:'column',gap:10}}>{(data||[]).map(r=><div key={String(r._id)} style={{border:'1px solid #e5e7eb',borderRadius:10,padding:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><strong>{r.franchisee?.name||'Franchisee'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:3}}>{r.franchisee?.email||''} · PIN {r.franchisee?.address?.pincode||'—'}</div></div><div style={{fontWeight:800,fontSize:18}}>⭐ {(r.averageRating||0).toFixed(2)} <span style={{fontSize:11,fontWeight:500,color:'#64748b'}}>({r.ratingCount} ratings)</span></div></div>)}</div></Card>
+  </>;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// NOTE: Pending vehicle/staff data now lives in MongoDB via the API.
+// The localStorage helpers below are intentionally removed.
+// Both portals (all portals on one localhost) now talk to
+// the same backend endpoints:
+//   GET  /api/admin/pending-vehicles          — all submissions
+//   PUT  /api/admin/pending-vehicles/:id/approve
+//   PUT  /api/admin/pending-vehicles/:id/reject
+//   GET  /api/admin/pending-staff
+//   PUT  /api/admin/pending-staff/:id/approve — also creates User record
+//   PUT  /api/admin/pending-staff/:id/reject
+// ──────────────────────────────────────────────────────────────────
+
+// ── Dashboard Pending Banner ─────────────────────────────────────
+function AdminPendingBanner({ call }) {
+  const { data: vehicles } = useFetch(call, '/admin/pending-vehicles');
+  const { data: staff    } = useFetch(call, '/admin/pending-staff');
+  const vPending = (vehicles || []).filter(v => v.status === 'PENDING_APPROVAL').length;
+  const sPending = (staff    || []).filter(s => s.status === 'PENDING_APPROVAL').length;
+  if (vPending === 0 && sPending === 0) return null;
+  return (
+    <div className="info-banner" style={{ background: '#fffbeb', borderColor: '#fde68a', color: '#92400e', marginBottom: 16 }}>
+      <Clock size={15} />
+      <span>
+        <strong>{vPending} vehicle approval(s)</strong> and <strong>{sPending} staff approval(s)</strong> waiting in queue.
+        Check <em>Vehicle Approvals</em> and <em>Staff Approvals</em> in the sidebar.
+      </span>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VEHICLE & INVENTORY BY FRANCHISEE — full detail view
+// ══════════════════════════════════════════════════════════════════
+function AdminVehicleInventory({ call }) {
+  const { data: franchiseeList, loading: flLoading } = useFetch(call, '/admin/franchisees');
+  const { data: statsData,      loading: sdLoading } = useFetch(call, '/admin/franchisee-stats');
+  const { data: allVehicles,    loading: avLoading } = useFetch(call, '/admin/pending-vehicles');
+  const { data: allPartsData,   loading: apLoading } = useFetch(call, '/admin/all-parts');
+  const [activeTab,     setActiveTab]     = useState('vehicles');
+  const [selectedFr,    setSelectedFr]    = useState('all');
+  const [selectedVeh,   setSelectedVeh]   = useState(null);
+  const [selectedPart,  setSelectedPart]  = useState(null);
+  const { toast, show } = useToast();
+
+  if (flLoading || sdLoading || avLoading || apLoading) return <Loader />;
+
+  const franchisees  = franchiseeList || [];
+  const statsMap     = new Map((statsData?.franchisees || []).map(s => [s.franchiseeId, s]));
+  const inv          = statsData?.inventory || { totalSkus: 0, totalQty: 0, totalValue: 0 };
+  const vehicles     = allVehicles || [];
+  const allParts     = allPartsData || [];
+
+  const filteredVehicles = selectedFr === 'all'
+    ? vehicles
+    : vehicles.filter(v => v.franchiseeEmail === selectedFr || v.franchiseeId === selectedFr);
+
+  const approved  = vehicles.filter(v => v.status === 'APPROVED');
+  const pending   = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
+  const totalVeh  = (statsData?.franchisees || []).reduce((s, f) => s + f.totalVehicles, 0);
+
+  const totalPartsValue = allParts.reduce((s, p) => s + (Number(p.unitPrice || 0) * Number(p.quantity || 0)), 0);
+  const lowStockParts   = allParts.filter(p => p.quantity <= p.reorderLevel);
+
+  const TABS = [
+    { id: 'vehicles', label: 'Vehicles by Franchisee', Icon: Car,     count: vehicles.length },
+    { id: 'inventory', label: 'Parts Inventory',        Icon: Package, count: allParts.length },
+  ];
+
+  const fmt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  return <>
+    <Toast toast={toast} />
+    <PageHeader
+      title="Vehicle & Inventory by Franchisee"
+      sub="Complete network view — all vehicles and parts inventory across all franchise partners."
+      actions={<button className="btn-ghost" onClick={() => window.location.reload()}><RefreshCw size={15} /> Refresh</button>}
+    />
+
+    <MetricGrid metrics={[
+      { label: 'Total Partners',      value: franchisees.length, Icon: Users,         color: '#2563eb' },
+      { label: 'Total Vehicles',      value: totalVeh,           Icon: Car,           color: '#7c3aed' },
+      { label: 'Approved & Live',     value: approved.length,    Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Pending Approval',    value: pending.length,     Icon: Clock,         color: '#d97706' },
+      { label: 'Parts SKUs (Network)',value: inv.totalSkus,      Icon: Package,       color: '#0891b2' },
+      { label: 'Parts Stock (Units)', value: inv.totalQty,       Icon: Layers,        color: '#4f46e5' },
+    ]} />
+
+    {/* ── Subtab Bar ── */}
+    <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
+      {TABS.map(t => (
+        <button key={t.id} onClick={() => setActiveTab(t.id)}
+          style={{
+            display:'flex', alignItems:'center', gap:7, padding:'10px 22px',
+            border:'none', background:'none', cursor:'pointer',
+            borderBottom: activeTab === t.id ? '2px solid #2563eb' : '2px solid transparent',
+            color: activeTab === t.id ? '#2563eb' : '#6b7280',
+            fontWeight: activeTab === t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
+            transition:'all 0.15s',
+          }}>
+          <t.Icon size={15} />
+          {t.label}
+          <span style={{
+            background: activeTab === t.id ? '#2563eb' : '#e5e7eb',
+            color: activeTab === t.id ? '#fff' : '#374151',
+            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
+          }}>{t.count}</span>
+        </button>
+      ))}
+    </div>
+
+    {/* ── VEHICLES TAB ── */}
+    {activeTab === 'vehicles' && <>
+      {/* Franchisee filter */}
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Filter by Franchisee:</span>
+        <select
+          className="fld-input"
+          style={{ maxWidth:280, padding:'6px 12px', fontSize:13 }}
+          value={selectedFr}
+          onChange={e => setSelectedFr(e.target.value)}
+        >
+          <option value="all">All Franchisees ({vehicles.length} vehicles)</option>
+          {franchisees.map(f => {
+            const count = vehicles.filter(v => v.franchiseeEmail === f.email || v.franchiseeId === String(f._id)).length;
+            return <option key={f._id} value={f.email}>{f.name} — {f.email} ({count} vehicles)</option>;
+          })}
+        </select>
+        {selectedFr !== 'all' && (
+          <button className="btn-ghost" style={{ fontSize:12, padding:'4px 10px' }} onClick={() => setSelectedFr('all')}>
+            Clear Filter
+          </button>
+        )}
+      </div>
+
+      <Card title="Vehicle Listings" badge={`${filteredVehicles.length} vehicles`}>
+        {filteredVehicles.length === 0
+          ? <div className="empty-state"><Car size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No vehicles found.</p></div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Franchisee</th>
+                    <th>Category</th>
+                    <th>Make</th>
+                    <th>Model</th>
+                    <th>Registration No.</th>
+                    <th>Color</th>
+                    <th>Year</th>
+                    <th>Battery</th>
+                    <th>Range</th>
+                    <th>Charging</th>
+                    <th>Price/Day</th>
+                    <th>Qty</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredVehicles.map((v, i) => {
+                    const sc = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
+                    return (
+                      <tr key={v._id || i}>
+                        <td>
+                          <div style={{ fontWeight:600, fontSize:12 }}>{v.franchiseeName || '—'}</div>
+                          <div style={{ fontSize:11, color:'#9ca3af' }}>{v.franchiseeEmail || ''}</div>
+                        </td>
+                        <td style={{ fontSize:12 }}>{v.category || '—'}</td>
+                        <td style={{ fontWeight:600, fontSize:13 }}>{v.make || '—'}</td>
+                        <td style={{ fontSize:13 }}>{v.model || '—'}</td>
+                        <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.color || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.year || '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.rangeKm ? `${v.rangeKm} km` : '—'}</td>
+                        <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
+                        <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
+                        <td>
+                          <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:11 }}>
+                            {v.status === 'APPROVED' ? '✓ Approved' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:11 }}
+                            onClick={() => setSelectedVeh(v)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+
+    </>}
+
+    {/* ── INVENTORY TAB ── */}
+    {activeTab === 'inventory' && <>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:16 }}>
+        {[
+          { label:'Total Vehicles',      value: totalVeh,                                                                           Icon: Car,           color:'#2563eb' },
+          { label:'Parts SKUs',          value: allParts.length,                                                                    Icon: Package,       color:'#7c3aed' },
+          { label:'Approved & Live',     value: approved.length,                                                                    Icon: CheckCircle,   color:'#16a34a' },
+          { label:'Low Stock Parts',     value: lowStockParts.length,                                                               Icon: AlertTriangle, color:'#dc2626' },
+        ].map(({ label, value, Icon: Ic, color }) => (
+          <div key={label} style={{ background:'#fff', borderRadius:12, padding:'18px 20px', border:'1.5px solid #e5e7eb', display:'flex', alignItems:'center', gap:14 }}>
+            <div style={{ background: color + '15', borderRadius:10, width:42, height:42, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+              <Ic size={20} color={color} />
+            </div>
+            <div>
+              <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{label}</div>
+              <div style={{ fontSize:24, fontWeight:900, color }}>{value ?? 0}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Card
+        title="Parts Inventory"
+        badge={`${allParts.length} SKUs`}
+      >
+        {allParts.length === 0
+          ? <div className="empty-state" style={{ padding:'32px 24px' }}>
+              <Package size={38} style={{ opacity:.2, marginBottom:10 }} />
+              <p>No parts in inventory yet. Parts added by franchisees will appear here.</p>
+            </div>
+          : <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Part Code (SKU)</th>
+                    <th>Part Name</th>
+                    <th>Category</th>
+                    <th>Quantity</th>
+                    <th>Reorder Level</th>
+                    <th>Unit Price</th>
+                    <th>Stock Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allParts.map((p, i) => {
+                    const isLow = p.quantity <= p.reorderLevel;
+                    return (
+                      <tr key={p._id || p.sku || i}>
+                        <td>
+                          <span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8',
+                            background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>
+                            {p.sku || '—'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
+                        <td>
+                          <span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px',
+                            borderRadius:4, color:'#374151' }}>
+                            {p.category || 'General'}
+                          </span>
+                        </td>
+                        <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>
+                          {p.quantity ?? 0}
+                        </td>
+                        <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
+                        <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
+                        <td>
+                          <span className="status-pill" style={{
+                            background: isLow ? '#fee2e2' : '#dcfce7',
+                            color:      isLow ? '#991b1b' : '#166534',
+                          }}>
+                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                          </span>
+                        </td>
+                        <td>
+                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                            onClick={() => setSelectedPart(p)}>
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+        }
+      </Card>
+    </>}
+
+    {/* ── Vehicle Detail Modal ── */}
+    {selectedVeh && (
+      <div className="modal-overlay" onClick={() => setSelectedVeh(null)}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(640px,100%)' }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Vehicle Details</div>
+              <div className="modal-subtitle">Complete vehicle information submitted by franchisee</div>
+            </div>
+            <button className="icon-btn" onClick={() => setSelectedVeh(null)}><X size={20} /></button>
+          </div>
+          <div className="modal-body">
+            {/* Hero */}
+            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+              padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+              <div style={{ background:'#2563eb', color:'#fff', borderRadius:10,
+                width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 }}>
+                {selectedVeh.category === '2-wheeler' ? '🛵' : selectedVeh.category === '3-wheeler' ? '🛺' : '🚗'}
+              </div>
+              <div>
+                <div style={{ fontSize:11, fontWeight:700, color:'#2563eb', letterSpacing:'.08em', textTransform:'uppercase', marginBottom:3 }}>{selectedVeh.category || 'Vehicle'}</div>
+                <div style={{ fontSize:22, fontWeight:900, color:'#1e3a8a' }}>{selectedVeh.make} {selectedVeh.model}</div>
+                <div style={{ fontSize:12, color:'#3b82f6', marginTop:2, fontFamily:'monospace' }}>{selectedVeh.registrationNo || '—'}</div>
+              </div>
+            </div>
+
+            {/* Status + badges */}
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
+              {(() => {
+                const sc = selectedVeh.status === 'APPROVED' ? '#16a34a' : selectedVeh.status === 'REJECTED' ? '#dc2626' : '#d97706';
+                const sl = selectedVeh.status === 'APPROVED' ? '✓ Approved & Live' : selectedVeh.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending Approval';
+                return <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:13, padding:'4px 14px' }}>{sl}</span>;
+              })()}
+              {selectedVeh.year && <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>Year: {selectedVeh.year}</span>}
+              {selectedVeh.color && <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>{selectedVeh.color}</span>}
+              {selectedVeh.chargingType && <span className="status-pill" style={{ background:'#ecfdf5', color:'#065f46', fontSize:13, padding:'4px 14px' }}>⚡ {selectedVeh.chargingType}</span>}
+            </div>
+
+            {/* Images */}
+            {selectedVeh.images?.length > 0 && (
+              <div style={{ marginBottom:16 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Vehicle Images ({selectedVeh.images.length})</div>
+                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                  {selectedVeh.images.map((img, i) => (
+                    <div key={i} style={{ width:80, height:64, borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb' }}>
+                      <img src={img.url} alt={`Image ${i+1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* All Fields Grid */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+              {[
+                ['Make / Brand',        selectedVeh.make              || '—'],
+                ['Model Name',          selectedVeh.model             || '—'],
+                ['Category',            selectedVeh.category          || '—'],
+                ['Year of Manufacture', selectedVeh.year              || '—'],
+                ['Color',               selectedVeh.color             || '—'],
+                ['Registration No.',    selectedVeh.registrationNo    || '—'],
+                ['Battery Capacity',    selectedVeh.batteryCapacityKwh ? `${selectedVeh.batteryCapacityKwh} kWh` : '—'],
+                ['Range',               selectedVeh.rangeKm           ? `${selectedVeh.rangeKm} km` : '—'],
+                ['Charging Type',       selectedVeh.chargingType      || '—'],
+                ['Price Per Day',       `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
+                ['Quantity in Stock',   selectedVeh.quantity ?? 1],
+                ['Approval Status',     selectedVeh.status            || '—'],
+                ['Submitted By',        selectedVeh.franchiseeName    || '—'],
+                ['Franchisee Email',    selectedVeh.franchiseeEmail   || '—'],
+                ['Submitted At',        fmt(selectedVeh.createdAt)],
+                ['Last Updated',        fmt(selectedVeh.updatedAt)],
+              ].map(([k, val]) => (
+                <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                  <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                  <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:13 }}>{val}</div>
+                </div>
+              ))}
+            </div>
+
+            {selectedVeh.description && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+                <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                  {selectedVeh.description}
+                </div>
+              </div>
+            )}
+
+            {selectedVeh.status === 'REJECTED' && selectedVeh.rejectionReason && (
+              <InfoBanner Icon={AlertTriangle}>Rejection reason: {selectedVeh.rejectionReason}</InfoBanner>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setSelectedVeh(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Part Detail Modal ── */}
+    {selectedPart && (() => {
+      const p = selectedPart;
+      const isLow = p.quantity <= p.reorderLevel;
+      return (
+        <div className="modal-overlay" onClick={() => setSelectedPart(null)}>
+          <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(580px,100%)' }}>
+            <div className="modal-head">
+              <div>
+                <div className="modal-title">Part Details</div>
+                <div className="modal-subtitle">Complete information for this spare part</div>
+              </div>
+              <button className="icon-btn" onClick={() => setSelectedPart(null)}><X size={20} /></button>
+            </div>
+            <div className="modal-body">
+              {/* Hero: Part Code */}
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
+                padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+                <div style={{ background:'#1d4ed8', color:'#fff', borderRadius:10,
+                  width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <Hash size={22} />
+                </div>
+                <div>
+                  <div style={{ fontSize:11, fontWeight:700, color:'#1d4ed8', letterSpacing:'.1em',
+                    textTransform:'uppercase', marginBottom:3 }}>Part Code (SKU)</div>
+                  <div style={{ fontSize:26, fontWeight:900, fontFamily:'monospace', color:'#1e3a8a',
+                    letterSpacing:'.05em' }}>{p.sku || '—'}</div>
+                </div>
+              </div>
+              {/* Stock badge */}
+              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+                <span className="status-pill" style={{
+                  background: isLow ? '#fee2e2' : '#dcfce7',
+                  color:      isLow ? '#991b1b' : '#166534',
+                  fontSize:13, padding:'4px 14px',
+                }}>
+                  {isLow ? '⚠ Low Stock' : '✓ In Stock'}
+                </span>
+                <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>
+                  {p.category || 'General'}
+                </span>
+                {p.partType && (
+                  <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>
+                    {p.partType}
+                  </span>
+                )}
+              </div>
+              {/* Core Info Grid */}
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px',
+                background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+                {[
+                  ['Part Name',      p.name          || '—'],
+                  ['Category',       p.category      || 'General'],
+                  ['Current Stock',  p.quantity ?? 0],
+                  ['Reorder Level',  p.reorderLevel  ?? 5],
+                  ['Unit Price',     `₹${Number(p.unitPrice||0).toLocaleString('en-IN')}`],
+                  ['Total Value',    `₹${Number((p.unitPrice||0)*(p.quantity||0)).toLocaleString('en-IN')}`],
+                  p.manufacturer ? ['Manufacturer', p.manufacturer] : null,
+                  p.location     ? ['Storage Location', p.location]  : null,
+                  p.partType     ? ['Part Type', p.partType]          : null,
+                ].filter(Boolean).map(([k, v]) => (
+                  <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
+                    <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600,
+                      textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                    <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:14 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {p.compatibleVehicles && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8,
+                    display:'flex', alignItems:'center', gap:6 }}>
+                    <Car size={13} /> Compatible Vehicles
+                  </div>
+                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                    {p.compatibleVehicles}
+                  </div>
+                </div>
+              )}
+              {p.description && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
+                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
+                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
+                    {p.description}
+                  </div>
+                </div>
+              )}
+              {isLow && (
+                <InfoBanner Icon={AlertTriangle}>
+                  Stock ({p.quantity}) is at or below reorder level ({p.reorderLevel}). Consider restocking soon.
+                </InfoBanner>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setSelectedPart(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
+  </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// VEHICLE APPROVALS PAGE  — reads from /api/admin/pending-vehicles
+// ══════════════════════════════════════════════════════════════════
+function AdminVehicleApprovals({ call }) {
+  const { data: initial, loading, error, refresh } = useFetch(call, '/admin/pending-vehicles');
+  const [vehicles, setVehicles] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const { toast, show } = useToast();
+
+  useEffect(() => { if (initial) setVehicles(initial); }, [initial]);
+
+  const approve = async (id) => {
+    try {
+      const updated = await call(`/admin/pending-vehicles/${id}/approve`, { method: 'put' });
+      setVehicles(vs => vs.map(v => v._id === id ? updated : v));
+      setSelected(null);
+      show('✓ Vehicle approved — now live in Customer Portal!');
+    } catch (e) {
+      show(e.response?.data?.message || 'Approval failed', 'error');
+    }
+  };
+
+  const reject = async (id) => {
+    const reason = prompt('Rejection reason (optional):');
+    try {
+      const updated = await call(`/admin/pending-vehicles/${id}/reject`, { method: 'put', data: { reason: reason || '' } });
+      setVehicles(vs => vs.map(v => v._id === id ? updated : v));
+      setSelected(null);
+      show('Vehicle rejected.', 'error');
+    } catch (e) {
+      show(e.response?.data?.message || 'Rejection failed', 'error');
+    }
+  };
+
+  const pending  = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
+  const approved = vehicles.filter(v => v.status === 'APPROVED');
+  const rejected = vehicles.filter(v => v.status === 'REJECTED');
+
+  if (loading) return <Loader />;
+  if (error)   return <Err msg={error} />;
+
+  return <>
+    <Toast toast={toast} />
+    <PageHeader
+      title="Vehicle Approvals"
+      sub="Review and approve vehicle listings submitted by franchisees. Approved vehicles appear in the Customer Portal."
+      actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Refresh</button>}
+    />
+    <MetricGrid metrics={[
+      { label: 'Pending Review', value: pending.length,  Icon: Clock,         color: '#d97706' },
+      { label: 'Approved',       value: approved.length, Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Rejected',       value: rejected.length, Icon: AlertTriangle, color: '#dc2626' },
+      { label: 'Total',          value: vehicles.length, Icon: Car,           color: '#2563eb' },
+    ]} />
+
+    {pending.length > 0 && (
+      <Card title="Pending Approval" badge={`${pending.length} awaiting`}>
+        <div className="approval-list">
+          {pending.map(v => (
+            <div key={v._id} className="approval-card">
+              {v.images?.length > 0 && (
+                <div className="approval-img">
+                  <img src={v.images[0].url} alt={v.make} />
+                  {v.images.length > 1 && <span className="img-count">+{v.images.length - 1}</span>}
+                </div>
+              )}
+              <div className="approval-body">
+                <div className="approval-title">
+                  {v.category === '2-wheeler' ? '🛵' : v.category === '3-wheeler' ? '🛺' : '🚗'}
+                  &nbsp;{v.make} {v.model} ({v.year})
+                </div>
+                <div className="approval-meta">
+                  <span>Reg: {v.registrationNo}</span>
+                  <span>₹{v.pricePerDay}/day</span>
+                  <span>Stock: {v.quantity ?? 0}</span>
+                  <span>{v.rangeKm} km range</span>
+                  <span>{v.color}</span>
+                </div>
+                <div className="approval-franchise">
+                  Submitted by: <strong>{v.franchiseeName}</strong> ({v.franchiseeEmail})
+                  &nbsp;·&nbsp;{new Date(v.createdAt).toLocaleString()}
+                </div>
+              </div>
+              <div className="approval-actions">
+                <button className="btn-ghost" onClick={() => setSelected(v)}>View Details</button>
+                <button className="btn-approve" onClick={() => approve(v._id)}>
+                  <CheckCircle size={14} /> Approve
+                </button>
+                <button className="btn-reject" onClick={() => reject(v._id)}>
+                  <AlertTriangle size={14} /> Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    )}
+
+    {approved.length > 0 && (
+      <Card title="Approved Vehicles" badge={`${approved.length} live`}>
+        <DataTable rows={approved} cols={['make', 'model', 'category', 'registrationNo', 'pricePerDay', 'franchiseeName', 'status']} />
+      </Card>
+    )}
+
+    {rejected.length > 0 && (
+      <Card title="Rejected" badge={`${rejected.length}`}>
+        <DataTable rows={rejected} cols={['make', 'model', 'registrationNo', 'franchiseeName', 'rejectionReason', 'status']} />
+      </Card>
+    )}
+
+    {vehicles.length === 0 && (
+      <Card title="No Submissions Yet">
+        <div className="empty-state">
+          <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
+          <p>No vehicle submissions from franchisees yet. Once a franchisee adds a vehicle, it will appear here for review.</p>
+        </div>
+      </Card>
+    )}
+
+    {selected && (
+      <Modal
+        title={`${selected.make} ${selected.model} — Details`}
+        subtitle={`Submitted by ${selected.franchiseeName}`}
+        onClose={() => setSelected(null)}
+        footer={<>
+          <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
+          <button className="btn-reject" onClick={() => reject(selected._id)}><AlertTriangle size={14} /> Reject</button>
+          <button className="btn-approve" onClick={() => approve(selected._id)}><CheckCircle size={14} /> Approve</button>
+        </>}
+      >
+        {selected.images?.length > 0 && (
+          <div className="img-grid" style={{ marginBottom: 16 }}>
+            {selected.images.map((img, i) => (
+              <div key={i} className="img-thumb"><img src={img.url} alt={img.name} /></div>
+            ))}
+          </div>
+        )}
+        <div className="kv-list">
+          {[
+            ['Category', selected.category], ['Make', selected.make], ['Model', selected.model],
+            ['Year', selected.year], ['Color', selected.color], ['Registration', selected.registrationNo],
+            ['Battery', `${selected.batteryCapacityKwh} kWh`], ['Range', `${selected.rangeKm} km`],
+            ['Charging', selected.chargingType], ['Price/Day', `₹${selected.pricePerDay}`],
+            ['Franchisee', selected.franchiseeName], ['Email', selected.franchiseeEmail],
+            ['Submitted', new Date(selected.createdAt).toLocaleString()],
+          ].map(([k, v]) => (
+            <div className="kv-row" key={k}><span>{k}</span><strong>{v || '—'}</strong></div>
+          ))}
+        </div>
+        {selected.description && <p style={{ fontSize: 13, color: '#374151', marginTop: 12, lineHeight: 1.6 }}>{selected.description}</p>}
+      </Modal>
+    )}
+  </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN STAFF DIRECTORY — Unified page: Active | Inactive | Approvals
+// ══════════════════════════════════════════════════════════════════
+function AdminStaffDirectory({ call, initialTab = 'active' }) {
+  const { data: initial, loading, error, refresh } = useFetch(call, '/admin/pending-staff');
+  const [staffList,     setStaffList]     = useState([]);
+  const [newlyApproved, setNewlyApproved] = useState([]);
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [imageModal,    setImageModal]    = useState(null);
+  const [tab,           setTab]           = useState(initialTab);
+  const { toast, show } = useToast();
+
+  useEffect(() => { if (initial) setStaffList(initial); }, [initial]);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
+
+  const approveStaff = async (id) => {
+    try {
+      const result = await call(`/admin/pending-staff/${id}/approve`, { method: 'put' });
+      const updated = await call('/admin/pending-staff');
+      setStaffList(updated);
+      setNewlyApproved(a => [...a, {
+        _id: id, name: result.name, email: result.email,
+        role: result.role, password: result.password, franchiseeName: result.franchiseeName,
+      }]);
+      show(`✓ ${result.name} approved! Credentials generated.`);
+      setSelectedStaff(null);
+    } catch (e) {
+      show(e.response?.data?.message || 'Approval failed', 'error');
+    }
+  };
+
+  const rejectStaff = async (id) => {
+    const reason = prompt('Rejection reason (optional):');
+    try {
+      const updated_doc = await call(`/admin/pending-staff/${id}/reject`, { method: 'put', data: { reason: reason || '' } });
+      setStaffList(sl => sl.map(s => s._id === id ? updated_doc : s));
+      show('Staff entry rejected.', 'error');
+      setSelectedStaff(null);
+    } catch (e) {
+      show(e.response?.data?.message || 'Rejection failed', 'error');
+    }
+  };
+
+  const activeList   = staffList.filter(s => s.status === 'APPROVED' && !s.removedFromFranchisee);
+  const inactiveList = staffList.filter(s => s.removedFromFranchisee || s.status === 'REJECTED');
+  const pending      = staffList.filter(s => s.status === 'PENDING_APPROVAL' && !s.removedFromFranchisee);
+
+  const TABS = [
+    { id: 'active',    label: 'Active Staff',     count: activeList.length,   Icon: UserCheck },
+    { id: 'inactive',  label: 'Inactive / Removed', count: inactiveList.length, Icon: UserX },
+    { id: 'approvals', label: 'Staff Approvals',  count: pending.length,      Icon: Key },
+  ];
+
+  if (loading) return <Loader />;
+  if (error)   return <Err msg={error} />;
+
+  return <>
+    <Toast toast={toast} />
+
+    {/* Image lightbox */}
+    {imageModal && (
+      <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center' }}
+        onClick={() => setImageModal(null)}>
+        <div style={{ position:'relative', maxWidth:'90vw', maxHeight:'90vh' }} onClick={e => e.stopPropagation()}>
+          <img src={imageModal.url} alt={imageModal.title}
+            style={{ maxWidth:'88vw', maxHeight:'85vh', borderRadius:8, objectFit:'contain' }} />
+          <div style={{ color:'#fff', textAlign:'center', marginTop:8, fontSize:13 }}>{imageModal.title}</div>
+          <button onClick={() => setImageModal(null)}
+            style={{ position:'absolute', top:-12, right:-12, background:'#fff', border:'none', borderRadius:'50%',
+              width:32, height:32, cursor:'pointer', fontSize:18, display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+    )}
+
+    <PageHeader
+      title="Staff Directory"
+      sub="All staff across franchises — active, inactive/removed, and pending approvals."
+      actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Refresh</button>}
+    />
+
+    <MetricGrid metrics={[
+      { label: 'Active Staff',     value: activeList.length,   Icon: UserCheck,     color: '#16a34a' },
+      { label: 'Inactive / Removed',value: inactiveList.length,Icon: UserX,         color: '#dc2626' },
+      { label: 'Pending Approval', value: pending.length,      Icon: Clock,         color: '#d97706' },
+      { label: 'Total Records',    value: staffList.length,    Icon: Users,         color: '#2563eb' },
+    ]} />
+
+    {/* Tab Bar */}
+    <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb', paddingBottom:0 }}>
+      {TABS.map(t => (
+        <button key={t.id} onClick={() => setTab(t.id)}
+          style={{
+            display:'flex', alignItems:'center', gap:6, padding:'8px 18px',
+            border:'none', background:'none', cursor:'pointer',
+            borderBottom: tab === t.id ? '2px solid #2563eb' : '2px solid transparent',
+            color: tab === t.id ? '#2563eb' : '#6b7280',
+            fontWeight: tab === t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
+            transition:'all 0.15s',
+          }}>
+          <t.Icon size={15} />
+          {t.label}
+          <span style={{
+            background: tab === t.id ? '#2563eb' : '#e5e7eb',
+            color: tab === t.id ? '#fff' : '#374151',
+            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
+          }}>{t.count}</span>
+        </button>
+      ))}
+    </div>
+
+    {/* ── ACTIVE TAB ───────────────────────────────── */}
+    {tab === 'active' && (
+      <Card title="Active Staff — Full Details" badge={`${activeList.length} active`}>
+        {activeList.length === 0
+          ? <div className="empty-state"><UserCheck size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No active staff yet.</p></div>
+          : <AdminStaffFullTable rows={activeList} setImageModal={setImageModal} showFranchisee />
+        }
+      </Card>
+    )}
+
+    {/* ── INACTIVE TAB ─────────────────────────────── */}
+    {tab === 'inactive' && (
+      <Card title="Inactive / Removed Staff" badge={`${inactiveList.length}`}>
+        {inactiveList.length === 0
+          ? <div className="empty-state"><UserX size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No inactive staff records.</p></div>
+          : <AdminStaffFullTable rows={inactiveList} setImageModal={setImageModal} showFranchisee showRemovedBadge />
+        }
+      </Card>
+    )}
+
+    {/* ── APPROVALS TAB ────────────────────────────── */}
+    {tab === 'approvals' && <>
+      {newlyApproved.map(a => (
+        <div key={a._id} className="cred-reveal-card">
+          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+            <div style={{ background:'#dcfce7', color:'#16a34a', borderRadius:'50%', width:36, height:36, display:'grid', placeItems:'center' }}>
+              <CheckCircle size={18} />
+            </div>
+            <div>
+              <div style={{ fontWeight:700, fontSize:14 }}>{a.name} — Account Created</div>
+              <div style={{ fontSize:12, color:'#6b7280' }}>Credentials generated — share securely with staff member</div>
+            </div>
+          </div>
+          <div className="cred-box">
+            <div className="cred-row"><span>Name</span><code>{a.name}</code></div>
+            <div className="cred-row"><span>Email (Login)</span><code>{a.email}</code></div>
+            <div className="cred-row"><span>Password</span><code style={{ color:'#1d4ed8' }}>{a.password}</code></div>
+            <div className="cred-row"><span>Role</span><code>{a.role}</code></div>
+            <div className="cred-row"><span>Franchise</span><code>{a.franchiseeName}</code></div>
+          </div>
+          <div className="cred-warn">⚠ Share these credentials securely. Password is shown only once.</div>
+        </div>
+      ))}
+
+      {pending.length > 0 ? (
+        <Card title="Pending Staff Approvals" badge={`${pending.length} waiting`}>
+          <div className="approval-list">
+            {pending.map(s => (
+              <div key={s._id} className="approval-card staff-card" style={{ cursor:'pointer' }}
+                onClick={() => setSelectedStaff(s)}>
+                <div className="staff-avatar">{s.name?.[0]?.toUpperCase() || '?'}</div>
+                <div className="approval-body">
+                  <div className="approval-title">{s.name}</div>
+                  <div className="approval-meta">
+                    <span>{s.role}</span>
+                    <span>{s.email}</span>
+                    {s.phone && <span>{s.phone}</span>}
+                    {s.panNumber && <span>PAN: {s.panNumber}</span>}
+                    {s.aadhar && <span>Aadhar: {s.aadhar}</span>}
+                    {s.hubId && <span>Hub: {s.hubId}</span>}
+                  </div>
+                  <div className="approval-franchise">
+                    Franchisee: <strong>{s.franchiseeName}</strong> · {new Date(s.createdAt).toLocaleString()}
+                  </div>
+                </div>
+                <div className="approval-actions" onClick={e => e.stopPropagation()}>
+                  <button className="btn-approve" onClick={() => approveStaff(s._id)}>
+                    <CheckCircle size={14} /> Approve & Generate Credentials
+                  </button>
+                  <button className="btn-reject" onClick={() => rejectStaff(s._id)}>
+                    <AlertTriangle size={14} /> Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : (
+        <Card title="No Pending Approvals">
+          <div className="empty-state">
+            <CheckCircle size={40} style={{ opacity:.2, marginBottom:12 }} />
+            <p>All caught up — no pending staff submissions.</p>
+          </div>
+        </Card>
+      )}
+
+      {staffList.filter(s => s.status === 'REJECTED').length > 0 && (
+        <Card title="Rejected Submissions" badge={`${staffList.filter(s=>s.status==='REJECTED').length}`}>
+          <AdminStaffFullTable rows={staffList.filter(s => s.status === 'REJECTED')} setImageModal={setImageModal} showFranchisee showRejectedReason />
+        </Card>
+      )}
+    </>}
+
+    {/* Detail modal for pending staff */}
+    {selectedStaff && (
+      <Modal
+        title={`${selectedStaff.name} — Staff Details`}
+        subtitle={`Submitted by ${selectedStaff.franchiseeName}`}
+        onClose={() => setSelectedStaff(null)}
+        footer={<>
+          <button className="btn-ghost" onClick={() => setSelectedStaff(null)}>Close</button>
+          <button className="btn-reject" onClick={() => rejectStaff(selectedStaff._id)}><AlertTriangle size={14} /> Reject</button>
+          <button className="btn-approve" onClick={() => approveStaff(selectedStaff._id)}><CheckCircle size={14} /> Approve & Generate Credentials</button>
+        </>}
+      >
+        <div className="kv-list">
+          {[
+            ['Name',           selectedStaff.name],
+            ['Email',          selectedStaff.email],
+            ['Role',           selectedStaff.role],
+            ['Phone',          selectedStaff.phone || '—'],
+            ['Hub ID',         selectedStaff.hubId || '—'],
+            ['PAN Number',     selectedStaff.panNumber || '—'],
+            ['Aadhar Number',  selectedStaff.aadhar || '—'],
+            ['Address',        selectedStaff.address || '—'],
+            ['Franchisee',     selectedStaff.franchiseeName],
+            ['Franchise Email',selectedStaff.franchiseeEmail],
+            ['Submitted',      new Date(selectedStaff.createdAt).toLocaleString()],
+          ].map(([k, v]) => (
+            <div className="kv-row" key={k}><span>{k}</span><strong>{v || '—'}</strong></div>
+          ))}
+        </div>
+        <div style={{ display:'flex', gap:16, marginTop:16 }}>
+          {selectedStaff.aadharPhoto?.url && (
+            <div>
+              <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>Aadhar Photo</div>
+              <img src={selectedStaff.aadharPhoto.url} alt="Aadhar"
+                style={{ width:140, height:90, objectFit:'cover', borderRadius:6, border:'1px solid #e5e7eb', cursor:'pointer' }}
+                onClick={() => setImageModal({ url: selectedStaff.aadharPhoto.url, title:`${selectedStaff.name} — Aadhar` })} />
+            </div>
+          )}
+          {selectedStaff.panPhoto?.url && (
+            <div>
+              <div style={{ fontSize:12, color:'#6b7280', marginBottom:4 }}>PAN Card Photo</div>
+              <img src={selectedStaff.panPhoto.url} alt="PAN"
+                style={{ width:140, height:90, objectFit:'cover', borderRadius:6, border:'1px solid #e5e7eb', cursor:'pointer' }}
+                onClick={() => setImageModal({ url: selectedStaff.panPhoto.url, title:`${selectedStaff.name} — PAN` })} />
+            </div>
+          )}
+        </div>
+      </Modal>
+    )}
+  </>;
+}
+
+// ── Full-column staff table for Command Center ─────────────────────
+function AdminStaffFullTable({ rows, setImageModal, showFranchisee, showRemovedBadge, showRejectedReason }) {
+  return (
+    <div className="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th><th>Email</th><th>Role</th><th>Phone</th>
+            <th>Hub ID</th><th>Address</th>
+            <th>PAN No.</th><th>Aadhar No.</th>
+            <th>Aadhar Photo</th><th>PAN Photo</th>
+            {showFranchisee && <th>Franchisee</th>}
+            <th>Status</th>
+            {showRemovedBadge && <th>Removed</th>}
+            {showRejectedReason && <th>Rejection Reason</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(s => {
+            const statusColor = s.status === 'APPROVED' ? '#16a34a'
+              : s.status === 'REJECTED'  ? '#dc2626'
+              : s.status === 'PENDING_APPROVAL' ? '#d97706'
+              : '#6b7280';
+            return (
+              <tr key={s._id} style={showRemovedBadge && s.removedFromFranchisee ? { background:'#fff7f7' } : {}}>
+                <td style={{ fontWeight:600 }}>{s.name}</td>
+                <td style={{ fontSize:12 }}>{s.email}</td>
+                <td>{s.role}</td>
+                <td>{s.phone || '—'}</td>
+                <td>{s.hubId || '—'}</td>
+                <td style={{ maxWidth:140, fontSize:11, color:'#6b7280' }}>{s.address || '—'}</td>
+                <td><code style={{ fontSize:11 }}>{s.panNumber || '—'}</code></td>
+                <td><code style={{ fontSize:11 }}>{s.aadhar || '—'}</code></td>
+                <td>
+                  {s.aadharPhoto?.url
+                    ? <button className="btn-ghost" style={{ padding:'2px 8px', fontSize:11 }}
+                        onClick={() => setImageModal({ url:s.aadharPhoto.url, title:`${s.name} — Aadhar` })}>
+                        <Image size={11} style={{ display:'inline', marginRight:3 }} />View
+                      </button>
+                    : '—'}
+                </td>
+                <td>
+                  {s.panPhoto?.url
+                    ? <button className="btn-ghost" style={{ padding:'2px 8px', fontSize:11 }}
+                        onClick={() => setImageModal({ url:s.panPhoto.url, title:`${s.name} — PAN` })}>
+                        <Image size={11} style={{ display:'inline', marginRight:3 }} />View
+                      </button>
+                    : '—'}
+                </td>
+                {showFranchisee && <td style={{ fontSize:12 }}>{s.franchiseeName || '—'}</td>}
+                <td>
+                  <span className="status-pill" style={{ background: statusColor+'18', color: statusColor }}>
+                    {s.status}
+                  </span>
+                </td>
+                {showRemovedBadge && (
+                  <td>
+                    {s.removedFromFranchisee
+                      ? <span style={{ color:'#dc2626', fontWeight:600, fontSize:12, display:'flex', alignItems:'center', gap:3 }}>
+                          <UserX size={12} /> Removed
+                        </span>
+                      : <span style={{ color:'#16a34a', fontSize:12 }}>—</span>}
+                  </td>
+                )}
+                {showRejectedReason && (
+                  <td style={{ fontSize:12, color:'#9ca3af' }}>{s.rejectionReason || '—'}</td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN — CUSTOMERS  (Command Center)
+// Shows all registered customers with their profile and activity.
+// Data sourced from GET /api/admin/customers
+// ══════════════════════════════════════════════════════════════════
+function AdminCustomers({ call }) {
+  const [search,   setSearch]   = React.useState('');
+  const [page,     setPage]     = React.useState(1);
+  const [data,     setData]     = React.useState(null);
+  const [loading,  setLoading]  = React.useState(true);
+  const [error,    setError]    = React.useState(null);
+  const [selected, setSelected] = React.useState(null);
+  const [detail,   setDetail]   = React.useState(null);
+  const [dLoading, setDLoading] = React.useState(false);
+
+  const fetchCustomers = React.useCallback(() => {
+    setLoading(true); setError(null);
+    const qs = new URLSearchParams({ page, limit: 20, ...(search ? { search } : {}) });
+    call(`/admin/customers?${qs}`)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setError(e.message || 'Failed to load customers'); setLoading(false); });
+  }, [page, search]);
+
+  React.useEffect(() => { fetchCustomers(); }, [fetchCustomers]);
+
+  const openDetail = id => {
+    setSelected(id); setDLoading(true); setDetail(null);
+    call(`/admin/customers/${id}`)
+      .then(d => { setDetail(d); setDLoading(false); })
+      .catch(() => setDLoading(false));
+  };
+
+  const closeDetail = () => { setSelected(null); setDetail(null); };
+
+  const fmt = iso => iso ? new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const badge = (ok, label) => (
+    <span style={{
+      padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+      background: ok ? '#dcfce7' : '#fef9c3', color: ok ? '#15803d' : '#a16207'
+    }}>{label}</span>
+  );
+
+  return (
+    <>
+      <PageHeader
+        title="Customers"
+        sub="All registered customer accounts from the Customer Portal"
+        actions={
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input
+              type="search"
+              placeholder="Search name / email / phone…"
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              style={{ padding: '7px 12px', borderRadius: 7, border: '1px solid #e2e8f0', fontSize: 13, width: 220 }}
+            />
+            <button className="btn-primary" onClick={fetchCustomers} style={{ padding: '7px 14px' }}>
+              Refresh
+            </button>
+          </div>
+        }
+      />
+
+      {/* Summary cards */}
+      {data && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 16 }}>
+          {[
+            { label: 'Total Customers', value: data.total, color: '#2563eb' },
+            { label: 'Verified',
+              value: data.customers?.filter(c => c.otpVerified).length,
+              note: `of ${data.customers?.length} shown`,
+              color: '#16a34a' },
+            { label: 'Password Set',
+              value: data.customers?.filter(c => c.isPasswordSet).length,
+              color: '#7c3aed' },
+          ].map(({ label, value, note, color }) => (
+            <div key={label} style={{ background: '#fff', borderRadius: 10, padding: '14px 16px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color }}>{value ?? '—'}</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{label}</div>
+              {note && <div style={{ fontSize: 11, color: '#94a3b8' }}>{note}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {loading && <div style={{ textAlign: 'center', padding: 40, color: '#64748b' }}>Loading customers…</div>}
+      {error   && <div style={{ background: '#fef2f2', color: '#dc2626', padding: 14, borderRadius: 8 }}>{error}</div>}
+
+      {data && !loading && (
+        <Card title={`Customers (${data.total} total)`}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e2e8f0' }}>
+                  {['Name', 'Email', 'Phone', 'Verified', 'Password', 'Registered', 'Actions'].map(h => (
+                    <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.customers?.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: '#64748b' }}>No customers found.</td></tr>
+                )}
+                {data.customers?.map(c => (
+                  <tr key={c._id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '8px 12px', fontWeight: 600 }}>{c.name}</td>
+                    <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                    <td style={{ padding: '8px 12px', color: '#64748b' }}>{c.phone || '—'}</td>
+                    <td style={{ padding: '8px 12px' }}>{badge(c.otpVerified, c.otpVerified ? 'Verified' : 'Pending')}</td>
+                    <td style={{ padding: '8px 12px' }}>{badge(c.isPasswordSet, c.isPasswordSet ? 'Set' : 'OTP Only')}</td>
+                    <td style={{ padding: '8px 12px', color: '#64748b', whiteSpace: 'nowrap' }}>{fmt(c.createdAt)}</td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <button
+                        onClick={() => openDetail(c._id)}
+                        style={{ padding: '4px 10px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {data.pages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 16 }}>
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #e2e8f0', cursor: 'pointer', background: page <= 1 ? '#f8fafc' : '#fff' }}>
+                ← Prev
+              </button>
+              <span style={{ padding: '5px 12px', fontSize: 13, color: '#64748b' }}>Page {data.page} of {data.pages}</span>
+              <button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)}
+                style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid #e2e8f0', cursor: 'pointer', background: page >= data.pages ? '#f8fafc' : '#fff' }}>
+                Next →
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ── Customer Detail Modal ─────────────────────────────── */}
+      {selected && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000,
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '40px 16px', overflowY: 'auto'
+        }} onClick={e => e.target === e.currentTarget && closeDetail()}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 28, width: '100%', maxWidth: 680, boxShadow: '0 20px 60px rgba(0,0,0,.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>Customer Details</h2>
+              <button onClick={closeDetail} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            {dLoading && <div style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>Loading…</div>}
+
+            {detail && (
+              <>
+                {/* Profile */}
+                <div style={{ background: '#f8fafc', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    {[
+                      ['Name',       detail.customer?.name],
+                      ['Email',      detail.customer?.email],
+                      ['Phone',      detail.customer?.phone || '—'],
+                      ['Registered', fmt(detail.customer?.createdAt)],
+                      ['Email Verified', detail.customer?.otpVerified ? '✅ Yes' : '❌ No'],
+                      ['Password Set',   detail.customer?.isPasswordSet ? '✅ Yes' : '❌ OTP Only'],
+                    ].map(([k, v]) => (
+                      <div key={k}>
+                        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 2 }}>{k}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Vehicles */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: '#374151' }}>
+                    Vehicles ({detail.vehicles?.length || 0})
+                  </div>
+                  {detail.vehicles?.length === 0
+                    ? <div style={{ color: '#94a3b8', fontSize: 13 }}>No vehicles registered.</div>
+                    : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {detail.vehicles?.map(v => (
+                          <div key={v._id} style={{ background: '#f0f9ff', borderRadius: 7, padding: '8px 12px', fontSize: 13 }}>
+                            <strong>{v.registrationNo || v.vin}</strong> · {v.model} · SOC {v.batterySoc}% · SOH {v.batterySoh}%
+                          </div>
+                        ))}
+                      </div>
+                  }
+                </div>
+
+                {/* Recent Jobs */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: '#374151' }}>
+                    Recent Bookings ({detail.jobs?.length || 0})
+                  </div>
+                  {detail.jobs?.length === 0
+                    ? <div style={{ color: '#94a3b8', fontSize: 13 }}>No bookings yet.</div>
+                    : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            {['Service', 'Status', 'Amount', 'Date'].map(h => (
+                              <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: '#64748b', fontWeight: 600 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.jobs?.slice(0, 10).map(j => (
+                            <tr key={j._id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '5px 8px' }}>{j.serviceType}</td>
+                              <td style={{ padding: '5px 8px' }}>{j.status}</td>
+                              <td style={{ padding: '5px 8px' }}>₹{j.totalAmount}</td>
+                              <td style={{ padding: '5px 8px' }}>{fmt(j.createdAt)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                  }
+                </div>
+
+                {/* Payments */}
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: '#374151' }}>
+                    Payments ({detail.payments?.length || 0}) ·{' '}
+                    <span style={{ color: '#2563eb' }}>
+                      Total ₹{detail.payments?.reduce((s, p) => s + (p.amount || 0), 0).toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                  {detail.payments?.length === 0
+                    ? <div style={{ color: '#94a3b8', fontSize: 13 }}>No payments yet.</div>
+                    : <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            {['Amount', 'Method', 'Status', 'Date'].map(h => (
+                              <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: '#64748b', fontWeight: 600 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detail.payments?.slice(0, 10).map(p => (
+                            <tr key={p._id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                              <td style={{ padding: '5px 8px', fontWeight: 600 }}>₹{p.amount}</td>
+                              <td style={{ padding: '5px 8px' }}>{p.method || '—'}</td>
+                              <td style={{ padding: '5px 8px' }}>{p.status}</td>
+                              <td style={{ padding: '5px 8px' }}>{fmt(p.createdAt)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                  }
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// COMMAND CENTER — CUSTOMER PAYMENTS (Vehicle Rentals)
+// ══════════════════════════════════════════════════════════════════
+function AdminCustomerPayments({ call }) {
+  const [rentals, setRentals]     = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState(null);
+  const [selected, setSelected]   = useState(null);
+  const [filter, setFilter]       = useState('ALL');
+
+  const load = () => {
+    setLoading(true); setError(null);
+    call('/admin/rentals')
+      .then(d => setRentals(Array.isArray(d) ? d.filter(r => r.paymentStatus === 'PAID') : []))
+      .catch(e => setError(e.message || 'Failed to load rentals'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    load();
+    const timer = setInterval(load, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const statusColor = {
+    BOOKED:           '#d97706',
+    PAYMENT_DONE:     '#2563eb',
+    HANDOVER_PENDING: '#7c3aed',
+    ACTIVE:           '#16a34a',
+    COMPLETED:        '#64748b',
+    CANCELLED:        '#dc2626',
+  };
+
+  const filtered = filter === 'ALL' ? rentals : rentals.filter(r => r.status === filter);
+  const paid     = rentals.filter(r => r.paymentStatus === 'PAID');
+  const total    = paid.reduce((s, r) => s + (r.totalAmount || 0), 0);
+
+
+  const fmt = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading customer payments…</div>;
+  if (error)   return <div style={{ padding: 24, color: '#dc2626' }}>Error: {error}</div>;
+
+  return (
+    <>
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1f2e', margin: 0 }}>Customer Payments</h1>
+        <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
+          Paid vehicle rental bookings — refreshes every 30 seconds
+        </p>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
+        {[
+          { label: 'Total Bookings',  value: rentals.length,                                       color: '#2563eb' },
+          { label: 'Paid',            value: paid.length,                                           color: '#16a34a' },
+          { label: 'Active Rentals',  value: rentals.filter(r=>r.status==='ACTIVE').length,         color: '#16a34a' },
+          { label: 'Revenue Collected',value: `₹${total.toLocaleString('en-IN')}`,                 color: '#16a34a' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            background: '#fff', border: '1px solid #e4e7ef', borderRadius: 12,
+            padding: '14px 16px', boxShadow: '0 1px 4px rgba(0,0,0,.04)',
+          }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5 }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color, marginTop: 4 }}>{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        {['ALL','PAYMENT_DONE','ACTIVE','COMPLETED','CANCELLED'].map(s => (
+          <button key={s} onClick={() => setFilter(s)} style={{
+            padding: '6px 14px', borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: filter === s ? `1.5px solid ${statusColor[s] || '#2563eb'}` : '1.5px solid #e4e7ef',
+            background: filter === s ? (statusColor[s] || '#2563eb') + '18' : '#fff',
+            color: filter === s ? (statusColor[s] || '#2563eb') : '#6b7280',
+          }}>
+            {s === 'ALL' ? `All (${rentals.length})` : s.replace('_', ' ')}
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div style={{ background: '#fff', border: '1px solid #e4e7ef', borderRadius: 14, overflow: 'hidden' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#f8fafc' }}>
+              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Booking Status', 'Dates'].map(h => (
+                <th key={h} style={{ padding: '12px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 12, borderBottom: '1px solid #e4e7ef' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No records found.</td></tr>
+            )}
+            {filtered.map(r => {
+              const sc   = statusColor[r.status] || '#6b7280';
+              const cust = r.customerId || {};
+              const vs   = r.vehicleSnapshot || {};
+              return (
+                <tr key={r._id} style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer' }}
+                  onClick={() => setSelected(r)}>
+                  <td style={{ padding: '12px 14px' }}>
+                    <div style={{ fontWeight: 700 }}>{cust.name || '—'}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.email || '—'}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.phone || '—'}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <div style={{ fontWeight: 600 }}>{vs.make} {vs.model}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{vs.category} · {vs.year}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px', fontWeight: 700, color: '#1a1f2e' }}>
+                    ₹{(r.totalAmount || 0).toLocaleString('en-IN')}
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.durationDays} day{r.durationDays !== 1 ? 's' : ''}</div>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{
+                      background: r.paymentStatus === 'PAID' ? '#f0fdf4' : '#fef3c7',
+                      color: r.paymentStatus === 'PAID' ? '#16a34a' : '#d97706',
+                      borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700,
+                    }}>
+                      {r.paymentStatus === 'PAID' ? '✅ PAID' : r.paymentStatus}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 14px' }}>
+                    <span style={{ background: sc + '18', color: sc, borderRadius: 99, padding: '3px 10px', fontSize: 11, fontWeight: 700 }}>
+                      {r.status}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 14px', fontSize: 12, color: '#374151' }}>
+                    <div>{fmt(r.startDate)} →</div>
+                    <div>{fmt(r.endDate)}</div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detail drawer */}
+      {selected && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        }} onClick={() => setSelected(null)}>
+          <div style={{
+            background: '#fff', width: 'min(520px,100%)', height: '100%',
+            overflowY: 'auto', padding: 28, boxShadow: '-4px 0 32px rgba(0,0,0,.12)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e' }}>Rental Details</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>ID: {selected._id}</div>
+              </div>
+              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            {/* Vehicle images */}
+            {selected.vehicleSnapshot?.images?.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16 }}>
+                {selected.vehicleSnapshot.images.map((img, i) => (
+                  <img key={i} src={img.url} alt={img.name}
+                    style={{ width: 120, height: 80, objectFit: 'cover', borderRadius: 8, flexShrink: 0, border: '1px solid #e4e7ef' }} />
+                ))}
+              </div>
+            )}
+
+            {/* Customer info */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Customer</div>
+              {[
+                ['Name',  (selected.customerId?.name  || '—')],
+                ['Email', (selected.customerId?.email || '—')],
+                ['Phone', (selected.customerId?.phone || '—')],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ color: '#64748b' }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Vehicle info */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Vehicle</div>
+              {[
+                ['Make & Model', `${selected.vehicleSnapshot?.make || ''} ${selected.vehicleSnapshot?.model || ''}`],
+                ['Year/Color',   `${selected.vehicleSnapshot?.year || ''} · ${selected.vehicleSnapshot?.color || ''}`],
+                ['Category',     selected.vehicleSnapshot?.category || '—'],
+                ['Reg. No.',     selected.vehicleSnapshot?.registrationNo || '—'],
+                ['Battery',      selected.vehicleSnapshot?.batteryCapacityKwh ? `${selected.vehicleSnapshot.batteryCapacityKwh} kWh` : '—'],
+                ['Range',        selected.vehicleSnapshot?.rangeKm ? `${selected.vehicleSnapshot.rangeKm} km` : '—'],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc' }}>
+                  <span style={{ color: '#64748b' }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Booking & Payment */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Booking & Payment</div>
+              {[
+                ['Status',       selected.status],
+                ['Payment',      selected.paymentStatus],
+                ['Total Amount', `₹${(selected.totalAmount || 0).toLocaleString('en-IN')}`],
+                ['Rate',         `₹${selected.pricePerDay}/day`],
+                ['Duration',     `${selected.durationDays} day${selected.durationDays !== 1 ? 's' : ''}`],
+                ['Start Date',   fmt(selected.startDate)],
+                ['End Date',     fmt(selected.endDate)],
+                ['Booked On',    fmt(selected.createdAt)],
+                ...(selected.handoverDate ? [['Handover Date', fmt(selected.handoverDate)]] : []),
+                ...(selected.returnDate ? [['Returned Date', fmt(selected.returnDate)]] : []),
+                ['Razorpay Order', selected.razorpayOrderId || '—'],
+                ['Payment ID',    selected.razorpayPaymentId || '—'],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: 13, borderBottom: '1px solid #f8fafc', gap: 8 }}>
+                  <span style={{ color: '#64748b', flexShrink: 0 }}>{k}</span>
+                  <strong style={{ color: '#1a1f2e', textAlign: 'right', wordBreak: 'break-all' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Pickup Location */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Franchisee Pickup Location</div>
+              <div style={{ background: '#f0fdf4', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#166534', lineHeight: 1.6 }}>
+                {[selected.pickupLocation?.name || selected.franchiseeName, selected.pickupLocation?.address].filter(Boolean).join(' · ') || '—'}
+              </div>
+            </div>
+
+            {/* Handover action */}            {selected.status === 'ACTIVE' && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#16a34a', fontWeight: 700, fontSize: 14 }}>
+                ✅ Vehicle is with the customer — Rental Active
+                {selected.handoverDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Handed over: {fmt(selected.handoverDate)}</div>}
+              </div>
+            )}
+            {selected.status === 'COMPLETED' && (
+              <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#475569', fontWeight: 700, fontSize: 14 }}>
+                ✅ Booking Completed — Vehicle Returned to Franchise Stock
+                {selected.returnDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Returned: {fmt(selected.returnDate)}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

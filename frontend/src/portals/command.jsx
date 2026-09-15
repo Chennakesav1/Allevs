@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import allevLogo from './allevlogo.png';
+import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
@@ -827,7 +827,11 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',{attribution:'© <a href="https://stadiamaps.com/">Stadia Maps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',maxZoom:20}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(map);
     leafRef.current = map;
     drawMarkers(map, hubs);   // draw immediately — no waiting
   }, []);
@@ -1370,7 +1374,8 @@ function FranchiseeMap({ franchisees = [] }) {
       .setView([20.5937, 78.9629], 5);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd', maxZoom: 19,
+      subdomains: 'abcd',
+      maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
     return () => { markersRef.current.forEach(m => map.removeLayer(m)); map.remove(); leafRef.current = null; };
