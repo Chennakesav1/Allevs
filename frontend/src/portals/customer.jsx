@@ -115,22 +115,75 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-// ── useFetch hook ──────────────────────────────────────────────────
+// ── In-memory cache (TTL = 30 s) ──────────────────────────────────
+const _cache = new Map(); // path → { data, ts }
+const CACHE_TTL = 30_000; // ms
+
+function cacheGet(path) {
+  const entry = _cache.get(path);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CACHE_TTL) { _cache.delete(path); return null; }
+  return entry.data;
+}
+function cacheSet(path, data) { _cache.set(path, { data, ts: Date.now() }); }
+function cacheClear()         { _cache.clear(); }
+
+// In-flight deduplication: multiple callers for the same path share one fetch
+const _inflight = new Map(); // path → Promise
+
+function cachedCall(callFn, path) {
+  if (_inflight.has(path)) return _inflight.get(path);
+  const p = callFn(path)
+    .then(d => { cacheSet(path, d); return d; })
+    .finally(() => _inflight.delete(path));
+  _inflight.set(path, p);
+  return p;
+}
+
+// Prefetch all customer endpoints in parallel right after login
+const CUSTOMER_PREFETCH_PATHS = [
+  '/customer/vehicles',
+  '/customer/bookings',
+  '/customer/rentals',
+  '/customer/wallet',
+  '/customer/wallet/transactions',
+  '/customer/complaints',
+  '/customer/hubs',
+  '/customer/profile',
+];
+
+function prefetchCustomerData(callFn) {
+  CUSTOMER_PREFETCH_PATHS.forEach(path => {
+    if (!cacheGet(path)) cachedCall(callFn, path).catch(() => {});
+  });
+}
+
+// ── useFetch hook — cache-first, background revalidate ─────────────
 function useFetch(call, path) {
-  const [data, setData]       = useState(null);
-  const [loading, setLoading] = useState(true);
+  const cached = cacheGet(path);
+  const [data, setData]       = useState(cached);
+  const [loading, setLoading] = useState(!cached); // no spinner when cache hit
   const [error, setError]     = useState(null);
   const [tick, setTick]       = useState(0);
+
   useEffect(() => {
     let alive = true;
-    setLoading(true); setError(null);
-    call(path)
-      .then(d  => { if (alive) setData(d); })
-      .catch(e => { if (alive) setError(e.message); })
-      .finally(() => { if (alive) setLoading(false); });
+    // If we have cached data, show it immediately and revalidate silently
+    const hasCache = !!cacheGet(path);
+    if (!hasCache) setLoading(true);
+    setError(null);
+
+    cachedCall(call, path)
+      .then(d  => { if (alive) { setData(d); setLoading(false); } })
+      .catch(e => { if (alive) { setError(e.message); setLoading(false); } });
+
     return () => { alive = false; };
   }, [path, tick]);
-  const refresh = () => setTick(t => t + 1);
+
+  const refresh = () => {
+    _cache.delete(path); // force a real fetch on next call
+    setTick(t => t + 1);
+  };
   return { data, loading, error, refresh };
 }
 
@@ -182,6 +235,9 @@ export default function App() {
           return;
         }
         setUser(u);
+        // Returning session (page reload) — kick off prefetch so first
+        // page renders from cache rather than waiting on the network
+        prefetchCustomerData(api());
       })
       .catch(() => {
         localStorage.removeItem('ev_customer_token');
@@ -196,11 +252,15 @@ export default function App() {
     setToken(tok);
     setUser(userData);
     setAuthScreen('login');
+    // Fire all customer API calls in parallel immediately after login
+    // so data is in cache before the user clicks anything
+    prefetchCustomerData(api());
   };
 
   const logout = () => {
     localStorage.removeItem('ev_customer_token');
     localStorage.removeItem('ev_customer_refresh_token');
+    cacheClear(); // wipe cached data so next user starts fresh
     setToken(null); setUser(null); setPage('dashboard');
   };
 
@@ -929,7 +989,8 @@ function Err({ msg }) {
 function CustDashboard({ call }) {
   const { data: v, loading: lv } = useFetch(call, '/customer/vehicles');
   const { data: b, loading: lb } = useFetch(call, '/customer/bookings');
-  if (lv || lb) return <Loader />;
+  // Only show full-page loader when we have no data at all (first ever load)
+  if ((lv && !v) || (lb && !b)) return <Loader />;
   const active = b?.filter(x => !['COMPLETED', 'CANCELLED'].includes(x.status)) || [];
   return <>
     <PageHeader title="My Dashboard" sub="Overview of your vehicles and bookings." />
@@ -952,19 +1013,13 @@ function CustDashboard({ call }) {
 
 function CustVehicles({ call }) {
   const { data: owned, loading: lo, error: eo } = useFetch(call, '/customer/vehicles');
-  const [rentals, setRentals]   = useState([]);
-  const [rentLoading, setRL]    = useState(true);
+  const { data: rentalsRaw, loading: lr } = useFetch(call, '/customer/rentals');
+  const rentals = Array.isArray(rentalsRaw) ? rentalsRaw : [];
   const [extendRental, setExtendRental] = useState(null);
   const { toast, show } = useToast();
 
-  useEffect(() => {
-    call('/customer/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d : []))
-      .catch(() => setRentals([]))
-      .finally(() => setRL(false));
-  }, []);
-
-  if (lo || rentLoading) return <Loader />;
+  // Only block render when we have zero data (first load, nothing cached)
+  if ((lo && !owned) || (lr && !rentalsRaw)) return <Loader />;
 
   const activeRentals = rentals.filter(r => r.status === 'ACTIVE'); // Only truly delivered vehicles
   const pastRentals   = rentals.filter(r => ['COMPLETED','CANCELLED'].includes(r.status));
@@ -1053,7 +1108,13 @@ function CustVehicles({ call }) {
         call={call}
         onClose={() => setExtendRental(null)}
         onSuccess={(updated) => {
-          setRentals(prev => prev.map(x => String(x._id) === String(updated._id) ? updated : x));
+          // Update the rentals cache entry so the refreshed data is instant
+          const cached = cacheGet('/customer/rentals');
+          if (cached) {
+            cacheSet('/customer/rentals', cached.map(x =>
+              String(x._id) === String(updated._id) ? updated : x
+            ));
+          }
           setExtendRental(null);
           show('Rental extended successfully.');
         }}
@@ -1105,18 +1166,11 @@ function CustVehicles({ call }) {
 }
 
 function CustBookings({ call, setPage }) {
-  const [rentals, setRentals] = useState([]);
+  const { data: rentalsRaw, loading } = useFetch(call, '/customer/rentals');
+  const rentals = Array.isArray(rentalsRaw) ? rentalsRaw : [];
   const [pickup, setPickup] = useState(null);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    call('/customer/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d : []))
-      .catch(() => setRentals([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <Loader />;
+  if (loading && !rentalsRaw) return <Loader />;
 
   const bookings = rentals.filter(r => !['COMPLETED', 'CANCELLED'].includes(r.status));
   const statusColor = { BOOKED: '#d97706', PAYMENT_DONE: '#2563eb', HANDOVER_PENDING: '#7c3aed' };
@@ -1241,7 +1295,7 @@ function PickupLocationMap({ location, onClose }) {
 function CustWallet({ call }) {
   const { data: w, loading: lw } = useFetch(call, '/customer/wallet');
   const { data: tx, loading: lt } = useFetch(call, '/customer/wallet/transactions');
-  if (lw || lt) return <Loader />;
+  if ((lw && !w) || (lt && !tx)) return <Loader />;
   return <>
     <PageHeader title="Wallet" sub="Balance and transactions." />
     <MetricGrid metrics={[
@@ -1255,16 +1309,9 @@ function CustWallet({ call }) {
 }
 
 function CustInvoices({ call }) {
-  const [invoices, setInvoices] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [downloading, setDL]    = useState(null);
-
-  useEffect(() => {
-    call('/customer/rentals/invoices')
-      .then(d => setInvoices(Array.isArray(d) ? d : []))
-      .catch(() => setInvoices([]))
-      .finally(() => setLoading(false));
-  }, []);
+  const { data: invoicesRaw, loading } = useFetch(call, '/customer/rentals/invoices');
+  const invoices = Array.isArray(invoicesRaw) ? invoicesRaw : [];
+  const [downloading, setDL] = useState(null);
 
   const handleDownload = async (inv) => {
     setDL(inv._id);
@@ -1288,7 +1335,7 @@ function CustInvoices({ call }) {
     }
   };
 
-  if (loading) return <Loader />;
+  if (loading && !invoicesRaw) return <Loader />;
 
   const fmt = (n) => `\u20b9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const date = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -1373,6 +1420,9 @@ function CustComplaints({ call }) {
   const { toast, show } = useToast();
 
   const activeVehicles = options?.activeVehicles || [];
+  // Only block on first load with no cache
+  if (loading && !data) return <Loader />;
+  if (error && !data)   return <Err msg={error} />;
   const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
 
   const submit = async () => {
@@ -1393,8 +1443,6 @@ function CustComplaints({ call }) {
     catch(e){show(e.response?.data?.message||'Could not save feedback','error');}finally{setFeedbackBusy(null);}
   };
 
-  if (loading) return <Loader />;
-  if (error) return <Err msg={error} />;
   return <>
     <Toast toast={toast}/>
     <PageHeader title="Support & Complaints" sub="Register a complaint against an active vehicle and track franchisee resolution."
@@ -1451,27 +1499,49 @@ function CustAvailableVehicles({ call, setPage }) {
   const [nearbyFranchisees, setNearbyFranchisees] = useState([]);
   const [selectedFranchiseeId, setSelectedFranchiseeId] = useState('');
 
-  // FIX: Fetch approved vehicles from the API (MongoDB) instead of
-  // localStorage. The Command Center writes approvals to MongoDB via
-  // PUT /api/admin/pending-vehicles/:id/approve — localStorage is
-  // never updated, so the customer portal was always seeing nothing.
+  // Fetch profile first (cached instantly if prefetched), then fire
+  // vehicles + franchisees in parallel using the resolved pincode.
   useEffect(() => {
-    const load = async () => {
+    let alive = true;
+
+    const load = async (isInterval = false) => {
       try {
-        setLoading(true);
-        const profile = await call('/customer/profile');
+        if (!isInterval) setLoading(true);
+
+        // Step 1: profile — almost always cached after login prefetch
+        const profile = await cachedCall(call, '/customer/profile');
         const pin = profile?.address?.pincode || '';
-        const list = await call(`/customer/available-vehicles${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
-        setVehicles(Array.isArray(list) ? list : []);
-        setLocation(profile?.address || null);
-        const opt = await call(`/customer/complaint-options${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`);
-        setNearbyFranchisees(opt?.franchisees || []);
-      } catch { setVehicles([]); }
-      finally { setLoading(false); }
+        if (alive) setLocation(profile?.address || null);
+
+        // Step 2: vehicles + franchisees in parallel
+        const vehiclePath = `/customer/available-vehicles${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`;
+        const optPath     = `/customer/complaint-options${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`;
+
+        const [list, opt] = await Promise.all([
+          cachedCall(call, vehiclePath),
+          cachedCall(call, optPath),
+        ]);
+
+        if (alive) {
+          setVehicles(Array.isArray(list) ? list : []);
+          setNearbyFranchisees(opt?.franchisees || []);
+        }
+      } catch { if (alive) setVehicles([]); }
+      finally  { if (alive) setLoading(false); }
     };
+
     load();
-    const interval = setInterval(load, 10000); // refresh every 10 s
-    return () => clearInterval(interval);
+    // Background refresh every 10 s — uses cachedCall so no flicker
+    const interval = setInterval(() => {
+      // Invalidate vehicle/franchisee cache before background refresh
+      _cache.forEach((_, k) => {
+        if (k.startsWith('/customer/available-vehicles') || k.startsWith('/customer/complaint-options')) {
+          _cache.delete(k);
+        }
+      });
+      load(true);
+    }, 10_000);
+    return () => { alive = false; clearInterval(interval); };
   }, []);
 
   const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
@@ -2454,7 +2524,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
 function CustChargingStations({ call }) {
   const { data: rawHubs, loading, error } = useFetch(call, '/customer/hubs');
   const [userCoords,   setUserCoords]   = useState(null);
-  const [locStatus,    setLocStatus]    = useState('idle'); // idle | getting | done | denied
+  const [locStatus,    setLocStatus]    = useState('idle');
   const [selectedHub,  setSelectedHub]  = useState(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
 
@@ -2502,8 +2572,8 @@ function CustChargingStations({ call }) {
     );
   };
 
-  if (loading) return <Loader />;
-  if (error)   return <Err msg={error} />;
+  if (loading && !rawHubs) return <Loader />;
+  if (error   && !rawHubs) return <Err msg={error} />;
 
   const onlineCount = (rawHubs || []).filter(h => h.status === 'ONLINE').length;
 
