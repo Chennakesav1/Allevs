@@ -62,6 +62,7 @@ function LoadingScreen({ onDone }) {
   return (
     <div className="loader">
       <div className="loader-logo">
+        {/* No filter — logo colours render correctly on white background */}
         <img src={allevLogo} alt="allEV" />
       </div>
       <div className="loader-bar-track">
@@ -76,7 +77,6 @@ function PortalChooser() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Let the component mount, then trigger the CSS transition
     const id = requestAnimationFrame(() => setReady(true));
     return () => cancelAnimationFrame(id);
   }, []);
@@ -87,7 +87,8 @@ function PortalChooser() {
 
         {/* Brand */}
         <div className="chooser-brand">
-          <img src={allevLogo} alt="allEV" style={{ height: '32px', objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
+          {/* No filter — logo colours render correctly on white background */}
+          <img src={allevLogo} alt="allEV" style={{ height: '32px', objectFit: 'contain' }} />
           <span className="brand-divider" />
           <span className="brand-tag">EV Operations Platform</span>
         </div>

@@ -1,5 +1,5 @@
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-   allEV — Root App CSS
+   allEV — Root App CSS  (white theme)
    Covers: Loading screen + Portal Chooser
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
@@ -8,18 +8,26 @@
 *, *::before, *::after { box-sizing: border-box; }
 
 :root {
-  --bg:           #0b0f1c;
-  --surface:      #131929;
-  --border:       rgba(255,255,255,.08);
-  --border-hover: rgba(255,255,255,.18);
-  --accent:       #00d084;
-  --accent-dim:   rgba(0,208,132,.12);
-  --accent-glow:  rgba(0,208,132,.35);
-  --text-primary:   #f0f4ff;
-  --text-secondary: #8b99b8;
-  --text-muted:     #4e5d7a;
-  --card-bg:    rgba(255,255,255,.035);
-  --card-hover: rgba(255,255,255,.065);
+  --bg:             #f8f9fc;
+  --surface:        #ffffff;
+  --border:         #e8eaef;
+  --border-hover:   #c5cbdc;
+  --accent:         #1f7fe8;
+  --text-primary:   #0f1623;
+  --text-secondary: #5a6482;
+  --text-muted:     #9aa0b5;
+  --card-bg:        #ffffff;
+  --card-hover:     #f4f6fb;
+
+  /* Portal icon palettes */
+  --customer-bg:    #eff6ff;
+  --customer-icon:  #2563eb;
+  --staff-bg:       #f5f3ff;
+  --staff-icon:     #7c3aed;
+  --franchise-bg:   #fff7ed;
+  --franchise-icon: #ea7d0e;
+  --command-bg:     #f0fdf4;
+  --command-icon:   #16a34a;
 }
 
 /* ── Loading Screen ──────────────────────────────── */
@@ -27,36 +35,24 @@
   position: fixed; inset: 0;
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  background: var(--bg);
+  background: #ffffff;
   z-index: 9999;
 }
 
 .loader-logo {
-  position: relative;
-  margin-bottom: 32px;
+  margin-bottom: 28px;
 }
 .loader-logo img {
   height: 44px;
   object-fit: contain;
-  filter: brightness(0) invert(1);
+  /* no invert — logo colours look correct on white */
   opacity: 0;
   animation: logoReveal .75s cubic-bezier(.22,1,.36,1) .15s forwards;
-}
-.loader-logo::after {
-  content: '';
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 220px; height: 70px;
-  background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
-  opacity: 0;
-  animation: glowPulse 1.6s ease-in-out .5s infinite alternate;
-  pointer-events: none;
 }
 
 .loader-bar-track {
   width: 160px; height: 2px;
-  background: rgba(255,255,255,.08);
+  background: #e8eaef;
   border-radius: 2px;
   overflow: hidden;
 }
@@ -71,10 +67,6 @@
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-@keyframes glowPulse {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
 @keyframes barFill {
   from { width: 0; }
   to   { width: 100%; }
@@ -87,10 +79,6 @@
   padding: 32px 20px;
   background: var(--bg);
   font-family: 'Inter', system-ui, sans-serif;
-  /* subtle dot grid */
-  background-image:
-    radial-gradient(circle, rgba(255,255,255,.04) 1px, transparent 1px);
-  background-size: 36px 36px;
   opacity: 0;
   transform: translateY(10px);
   transition: opacity .55s ease, transform .55s ease;
@@ -106,7 +94,10 @@
   border: 1px solid var(--border);
   border-radius: 24px;
   padding: 48px 44px;
-  box-shadow: 0 40px 100px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04);
+  box-shadow:
+    0 1px 3px rgba(0,0,0,.04),
+    0 8px 32px rgba(0,0,0,.06),
+    0 32px 80px rgba(0,0,0,.05);
 }
 
 /* Brand row */
@@ -146,25 +137,22 @@
 
 .portal-card {
   display: flex; align-items: center; gap: 18px;
-  padding: 20px 20px;
+  padding: 20px;
   background: var(--card-bg);
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--border);
   border-radius: 16px;
   cursor: pointer; text-align: left;
   position: relative; overflow: hidden;
   opacity: 0; transform: translateY(8px);
   animation: cardIn .4s ease both;
-  transition: background .18s, border-color .18s, transform .2s;
+  transition: background .18s, border-color .18s, box-shadow .18s, transform .2s;
 }
-.portal-card::before {
-  content: '';
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
-  opacity: 0; transition: opacity .2s;
+.portal-card:hover {
+  background: var(--card-hover);
+  border-color: var(--border-hover);
+  box-shadow: 0 4px 16px rgba(0,0,0,.07);
+  transform: translateY(-2px);
 }
-.portal-card:hover { background: var(--card-hover); border-color: var(--border-hover); transform: translateY(-2px); }
-.portal-card:hover::before { opacity: 1; }
 .portal-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes cardIn {
@@ -179,10 +167,10 @@
   transition: transform .2s;
 }
 .portal-card:hover .portal-icon { transform: scale(1.08); }
-.portal-icon.customer  { background: rgba(59,130,246,.15); color: #60a5fa; }
-.portal-icon.staff     { background: rgba(168,85,247,.15);  color: #c084fc; }
-.portal-icon.franchise { background: rgba(251,191,36,.12);  color: #fbbf24; }
-.portal-icon.command   { background: var(--accent-dim);      color: var(--accent); }
+.portal-icon.customer  { background: var(--customer-bg);  color: var(--customer-icon); }
+.portal-icon.staff     { background: var(--staff-bg);     color: var(--staff-icon); }
+.portal-icon.franchise { background: var(--franchise-bg); color: var(--franchise-icon); }
+.portal-icon.command   { background: var(--command-bg);   color: var(--command-icon); }
 
 /* Portal text */
 .portal-info { flex: 1; min-width: 0; }
@@ -212,8 +200,8 @@
 }
 .status-dot {
   width: 7px; height: 7px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
+  background: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22,163,74,.2);
   animation: statusPulse 2s ease-in-out infinite;
   flex-shrink: 0;
 }
