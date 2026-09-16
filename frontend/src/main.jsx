@@ -13,10 +13,38 @@ import './portals/command.css';
 import './app.css';
 
 const PORTALS = [
-  { key: 'customer', path: '/customer', title: 'Customer Portal', description: 'Vehicles, bookings, wallet, invoices and support.', Icon: Car },
-  { key: 'staff', path: '/staff', title: 'Staff Portal', description: 'Jobs, inventory, technicians and service operations.', Icon: Wrench },
-  { key: 'franchisee', path: '/franchisee', title: 'Franchisee Portal', description: 'Financials, inventory, staff and jobs.', Icon: Users },
-  { key: 'command', path: '/command', title: 'Central Command', description: 'Network KPIs, hubs, chargers, approvals and expansion.', Icon: Shield },
+  {
+    key: 'customer',
+    path: '/customer',
+    title: 'Customer Portal',
+    description: 'Vehicles, bookings, wallet & support',
+    Icon: Car,
+    colorClass: 'customer',
+  },
+  {
+    key: 'staff',
+    path: '/staff',
+    title: 'Staff Portal',
+    description: 'Jobs, inventory, technicians & operations',
+    Icon: Wrench,
+    colorClass: 'staff',
+  },
+  {
+    key: 'franchisee',
+    path: '/franchisee',
+    title: 'Franchisee Portal',
+    description: 'Financials, inventory, staff & jobs',
+    Icon: Users,
+    colorClass: 'franchise',
+  },
+  {
+    key: 'command',
+    path: '/command',
+    title: 'Central Command',
+    description: 'Network KPIs, hubs, chargers & expansion',
+    Icon: Shield,
+    colorClass: 'command',
+  },
 ];
 
 function navigate(path) {
@@ -24,39 +52,103 @@ function navigate(path) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-function PortalChooser() {
+/* ── Loading Screen ─────────────────────────────────── */
+function LoadingScreen({ onDone }) {
+  useEffect(() => {
+    const timer = setTimeout(onDone, 1400);
+    return () => clearTimeout(timer);
+  }, [onDone]);
+
   return (
-    <div className="portal-chooser">
-      <div className="chooser-card">
-        <div className="chooser-brand"><img src={allevLogo} alt="allEV" style={{height:"36px",objectFit:"contain"}} /></div>
-        <div className="chooser-kicker">Integrated EV Operations Platform</div>
-        <h1>Choose your portal</h1>
-        <p>All four portals now run from one localhost and use the same Node/Express API and MongoDB.</p>
-        <div className="portal-grid">
-          {PORTALS.map(({ key, path, title, description, Icon }) => (
-            <button className="portal-card" key={key} onClick={() => navigate(path)}>
-              <div className="portal-icon"><Icon size={22}/></div>
-              <div><strong>{title}</strong><span>{description}</span><small>{path}</small></div>
-            </button>
-          ))}
-        </div>
+    <div className="loader">
+      <div className="loader-logo">
+        <img src={allevLogo} alt="allEV" />
+      </div>
+      <div className="loader-bar-track">
+        <div className="loader-bar-fill" />
       </div>
     </div>
   );
 }
 
-function App() {
-  const [path, setPath] = useState(window.location.pathname.toLowerCase().replace(/\/$/, '') || '/');
+/* ── Portal Chooser ─────────────────────────────────── */
+function PortalChooser() {
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname.toLowerCase().replace(/\/$/, '') || '/');
+    // Let the component mount, then trigger the CSS transition
+    const id = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  return (
+    <div className={`portal-chooser${ready ? ' visible' : ''}`}>
+      <div className="chooser-card">
+
+        {/* Brand */}
+        <div className="chooser-brand">
+          <img src={allevLogo} alt="allEV" style={{ height: '32px', objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
+          <span className="brand-divider" />
+          <span className="brand-tag">EV Operations Platform</span>
+        </div>
+
+        {/* Headline */}
+        <h1 className="chooser-headline">
+          Welcome back.<br />
+          <span className="chooser-headline-accent">Choose your portal.</span>
+        </h1>
+        <p className="chooser-sub">Select the workspace that matches your role to continue.</p>
+
+        {/* Cards */}
+        <div className="portal-grid">
+          {PORTALS.map(({ key, path, title, description, Icon, colorClass }, i) => (
+            <button
+              className="portal-card"
+              key={key}
+              style={{ animationDelay: `${0.55 + i * 0.1}s` }}
+              onClick={() => navigate(path)}
+            >
+              <div className={`portal-icon ${colorClass}`}>
+                <Icon size={20} />
+              </div>
+              <div className="portal-info">
+                <strong className="portal-title">{title}</strong>
+                <span className="portal-desc">{description}</span>
+              </div>
+              <span className="portal-arrow">›</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Status footer */}
+        <div className="status-bar">
+          <span className="status-dot" />
+          <span className="status-text">All systems operational</span>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+/* ── App Root ─────────────────────────────────────────── */
+function App() {
+  const [loading, setLoading] = useState(true);
+  const [path, setPath] = useState(
+    window.location.pathname.toLowerCase().replace(/\/$/, '') || '/'
+  );
+
+  useEffect(() => {
+    const onPop = () =>
+      setPath(window.location.pathname.toLowerCase().replace(/\/$/, '') || '/');
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  if (path === '/customer') return <CustomerApp />;
-  if (path === '/staff') return <StaffApp />;
-  if (path === '/franchisee') return <FranchiseeApp />;
+  if (loading) return <LoadingScreen onDone={() => setLoading(false)} />;
+  if (path === '/customer')                    return <CustomerApp />;
+  if (path === '/staff')                       return <StaffApp />;
+  if (path === '/franchisee')                  return <FranchiseeApp />;
   if (path === '/command' || path === '/admin') return <CommandApp />;
   return <PortalChooser />;
 }
