@@ -877,3 +877,579 @@ tr:hover td { background: #fafbff; }
   /* Card padding */
   .card { padding: 14px 14px; }
 }
+/* ══════════════════════════════════════
+   ENHANCED ANIMATIONS & LOADING — v2
+══════════════════════════════════════ */
+
+/* ── Keyframes ── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+@keyframes float-up {
+  0%   { opacity: 0; transform: translateY(22px) scale(.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(.88); }
+  70%  { transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes slide-up {
+  0%   { opacity: 0; transform: translateY(16px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  0%   { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes checkmark-draw {
+  0%   { stroke-dashoffset: 100; }
+  100% { stroke-dashoffset: 0; }
+}
+@keyframes circle-scale {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes confetti-fall {
+  0%   { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(80px) rotate(720deg); opacity: 0; }
+}
+@keyframes ripple {
+  0%   { transform: scale(1); opacity: .6; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes progress-fill {
+  0%   { width: 0%; }
+  100% { width: 100%; }
+}
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40%            { transform: scale(1); }
+}
+@keyframes card-appear {
+  0%   { opacity: 0; transform: translateY(18px) scale(.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+@keyframes ev-bolt {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .3; }
+}
+@keyframes logo-spin-once {
+  0%   { transform: rotate(0deg) scale(1); }
+  50%  { transform: rotate(180deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+/* ── Vehicle skeleton loading cards ── */
+.vehicle-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-top: 4px;
+}
+.vehicle-skeleton-card {
+  background: #fff;
+  border: 1.5px solid #e4e7ef;
+  border-radius: 16px;
+  overflow: hidden;
+  animation: float-up .4s ease both;
+}
+.vehicle-skeleton-card:nth-child(1) { animation-delay: 0ms; }
+.vehicle-skeleton-card:nth-child(2) { animation-delay: 60ms; }
+.vehicle-skeleton-card:nth-child(3) { animation-delay: 120ms; }
+.vehicle-skeleton-card:nth-child(4) { animation-delay: 180ms; }
+.vehicle-skeleton-card:nth-child(5) { animation-delay: 240ms; }
+.vehicle-skeleton-card:nth-child(6) { animation-delay: 300ms; }
+
+.skel-shimmer {
+  background: linear-gradient(
+    90deg,
+    #f0f2f5 25%,
+    #e6e9f0 50%,
+    #f0f2f5 75%
+  );
+  background-size: 600px 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+.skel-img    { height: 160px; }
+.skel-body   { padding: 14px 14px 8px; }
+.skel-line   { height: 12px; border-radius: 6px; margin-bottom: 10px; }
+.skel-line-lg { width: 70%; }
+.skel-line-sm { width: 45%; margin-bottom: 8px; }
+.skel-line-xs { width: 30%; height: 10px; }
+.skel-specs  {
+  display: flex; gap: 8px; margin-bottom: 10px;
+}
+.skel-spec-chip {
+  height: 10px; width: 60px; border-radius: 99px;
+}
+.skel-price  { height: 22px; width: 80px; border-radius: 8px; margin-bottom: 14px; }
+.skel-btn    { height: 38px; margin: 0 14px 14px; border-radius: 10px; }
+
+/* ── EV Loading screen (full-page) ── */
+.ev-loading-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+  padding: 48px 24px;
+  animation: fade-in .3s ease;
+}
+.ev-logo-ring {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 24px;
+}
+.ev-logo-inner {
+  width: 80px;
+  height: 80px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+  display: grid;
+  place-items: center;
+  animation: logo-spin-once 1.2s cubic-bezier(.4,0,.2,1) both;
+  box-shadow: 0 8px 28px rgba(37,99,235,.35);
+}
+.ev-logo-bolt {
+  font-size: 36px;
+  animation: ev-bolt 1s ease-in-out infinite;
+}
+.ev-ripple {
+  position: absolute;
+  inset: -8px;
+  border-radius: 26px;
+  border: 2px solid rgba(37,99,235,.35);
+  animation: pulse-ring 1.4s ease-out infinite;
+}
+.ev-ripple-2 {
+  position: absolute;
+  inset: -16px;
+  border-radius: 32px;
+  border: 2px solid rgba(37,99,235,.18);
+  animation: pulse-ring 1.4s ease-out infinite .4s;
+}
+.ev-loading-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1f2e;
+  margin-bottom: 6px;
+}
+.ev-loading-sub {
+  font-size: 13px;
+  color: #9ca3af;
+  margin-bottom: 20px;
+}
+.ev-progress-bar {
+  width: 200px;
+  height: 4px;
+  background: #e4e7ef;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.ev-progress-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #1d4ed8, #60a5fa);
+  animation: progress-fill 2.2s cubic-bezier(.4,0,.2,1) both;
+}
+.ev-dots {
+  display: flex;
+  gap: 6px;
+}
+.ev-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1d4ed8;
+  animation: dot-bounce 1.3s ease-in-out infinite;
+}
+.ev-dot:nth-child(2) { animation-delay: 0.2s; }
+.ev-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── Vehicle cards appear animation ── */
+.vehicle-browse-card {
+  animation: card-appear .38s cubic-bezier(.2,.8,.4,1) both;
+}
+.vehicle-browse-card:nth-child(1)  { animation-delay: 0ms; }
+.vehicle-browse-card:nth-child(2)  { animation-delay: 55ms; }
+.vehicle-browse-card:nth-child(3)  { animation-delay: 110ms; }
+.vehicle-browse-card:nth-child(4)  { animation-delay: 165ms; }
+.vehicle-browse-card:nth-child(5)  { animation-delay: 220ms; }
+.vehicle-browse-card:nth-child(6)  { animation-delay: 275ms; }
+.vehicle-browse-card:nth-child(7)  { animation-delay: 330ms; }
+.vehicle-browse-card:nth-child(8)  { animation-delay: 385ms; }
+.vehicle-browse-card:nth-child(9)  { animation-delay: 440ms; }
+.vehicle-browse-card:nth-child(10) { animation-delay: 495ms; }
+.vehicle-browse-card:nth-child(n+11) { animation-delay: 550ms; }
+
+/* ── Image lazy-load fade ── */
+.vbc-img img {
+  animation: fade-in .4s ease;
+}
+
+/* ── Payment processing overlay ── */
+.payment-processing-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,.75);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in .25s ease;
+}
+.payment-processing-card {
+  background: #fff;
+  border-radius: 24px;
+  padding: 40px 44px;
+  text-align: center;
+  box-shadow: 0 32px 80px rgba(0,0,0,.28);
+  animation: pop-in .35s cubic-bezier(.2,.8,.4,1);
+  max-width: 340px;
+  width: 90%;
+}
+.payment-spinner {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 20px;
+  position: relative;
+}
+.payment-spinner-ring {
+  width: 64px;
+  height: 64px;
+  border: 4px solid #e4e7ef;
+  border-top-color: #1d4ed8;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.payment-spinner-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+.payment-processing-title {
+  font-size: 17px;
+  font-weight: 800;
+  color: #1a1f2e;
+  margin-bottom: 6px;
+}
+.payment-processing-sub {
+  font-size: 13px;
+  color: #9ca3af;
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+.payment-processing-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+.payment-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #374151;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  transition: background .2s, color .2s;
+}
+.payment-step.done  { background: #f0fdf4; color: #15803d; }
+.payment-step.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+.payment-step-icon { font-size: 16px; flex-shrink: 0; }
+.payment-step-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid #bfdbfe;
+  border-top-color: #1d4ed8;
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ── Payment success animation ── */
+.payment-success-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,.72);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in .3s ease;
+}
+.payment-success-card {
+  background: #fff;
+  border-radius: 28px;
+  padding: 44px 40px 36px;
+  text-align: center;
+  max-width: 420px;
+  width: 92%;
+  box-shadow: 0 40px 100px rgba(0,0,0,.28);
+  animation: pop-in .4s cubic-bezier(.2,.8,.4,1);
+  position: relative;
+  overflow: hidden;
+}
+.success-confetti-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.confetti-piece {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  animation: confetti-fall 1.8s ease-out both;
+}
+.success-checkmark-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.success-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #16a34a, #22c55e);
+  display: grid;
+  place-items: center;
+  animation: circle-scale .5s cubic-bezier(.2,.8,.4,1) .1s both;
+  box-shadow: 0 8px 28px rgba(22,163,74,.35);
+}
+.success-check-svg {
+  width: 40px;
+  height: 40px;
+}
+.success-check-path {
+  stroke: #fff;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: checkmark-draw .5s ease .55s forwards;
+}
+.success-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #1a1f2e;
+  margin-bottom: 6px;
+  animation: slide-up .4s ease .4s both;
+}
+.success-amount {
+  font-size: 28px;
+  font-weight: 800;
+  color: #16a34a;
+  margin-bottom: 4px;
+  animation: slide-up .4s ease .5s both;
+}
+.success-sub {
+  font-size: 13px;
+  color: #9ca3af;
+  margin-bottom: 24px;
+  animation: slide-up .4s ease .55s both;
+}
+.success-details-card {
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  text-align: left;
+  margin-bottom: 20px;
+  animation: slide-up .4s ease .6s both;
+}
+.success-detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(187,247,208,.7);
+  font-size: 13px;
+  gap: 12px;
+}
+.success-detail-row:last-child { border-bottom: none; }
+.success-detail-label { color: #64748b; flex-shrink: 0; }
+.success-detail-value { color: #1a1f2e; font-weight: 600; text-align: right; word-break: break-all; }
+.success-pickup-banner {
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  color: #1e40af;
+  margin-bottom: 20px;
+  animation: slide-up .4s ease .65s both;
+  text-align: left;
+}
+.success-actions {
+  display: flex;
+  gap: 10px;
+  animation: slide-up .4s ease .7s both;
+}
+.success-actions .btn-primary {
+  flex: 1;
+  justify-content: center;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+
+/* ── Step progress indicator ── */
+.booking-steps {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 20px;
+  padding: 0 2px;
+}
+.booking-step-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+.booking-step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid #e4e7ef;
+  background: #fff;
+  color: #9ca3af;
+  transition: all .3s cubic-bezier(.2,.8,.4,1);
+  position: relative;
+  z-index: 1;
+}
+.booking-step-dot.done {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+.booking-step-dot.active {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(37,99,235,.18);
+}
+.booking-step-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #9ca3af;
+  white-space: nowrap;
+  transition: color .3s;
+}
+.booking-step-label.active { color: #1d4ed8; }
+.booking-step-label.done   { color: #16a34a; }
+.booking-step-connector {
+  height: 2px;
+  flex: 1;
+  margin-top: -16px;
+  background: #e4e7ef;
+  transition: background .4s;
+  position: relative;
+}
+.booking-step-connector.done {
+  background: #16a34a;
+}
+.booking-step-connector::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: #16a34a;
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform .5s cubic-bezier(.2,.8,.4,1);
+}
+.booking-step-connector.done::after {
+  transform: scaleX(1);
+}
+
+/* ── Modal entrance animation ── */
+.modal-drawer {
+  animation: pop-in .3s cubic-bezier(.2,.8,.4,1);
+}
+
+/* ── Image loading shimmer in vehicle cards ── */
+.vbc-img-loading {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #f0f2f5 25%, #e6e9f0 50%, #f0f2f5 75%);
+  background-size: 600px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+.vbc-img img {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Pincode lookup spinner ── */
+.pincode-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid #bfdbfe;
+  border-top-color: #1d4ed8;
+  border-radius: 50%;
+  animation: spin .75s linear infinite;
+}
+
+/* ── Payment step button loading state ── */
+.btn-primary.loading {
+  position: relative;
+  pointer-events: none;
+  opacity: .85;
+}
+.btn-primary.loading::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border: 2.5px solid rgba(255,255,255,.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .7s linear infinite;
+  margin-left: 4px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ── Franchisee tabs animated ── */
+.franchisee-tab-enter {
+  animation: float-up .3s ease both;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

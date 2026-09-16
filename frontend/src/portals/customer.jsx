@@ -973,8 +973,170 @@ function DataTable({ rows = [], cols = [] }) {
 
 function Loader() {
   return (
-    <div className="loader-wrap">
-      <div className="skeleton" /><div className="skeleton" /><div className="skeleton" />
+    <div className="ev-loading-screen">
+      <div className="ev-logo-ring">
+        <div className="ev-logo-inner">
+          <span className="ev-logo-bolt">⚡</span>
+        </div>
+        <div className="ev-ripple" />
+        <div className="ev-ripple-2" />
+      </div>
+      <div className="ev-loading-title">Loading EV Data…</div>
+      <div className="ev-loading-sub">Fetching latest information</div>
+      <div className="ev-progress-bar">
+        <div className="ev-progress-fill" />
+      </div>
+      <div className="ev-dots">
+        <div className="ev-dot" /><div className="ev-dot" /><div className="ev-dot" />
+      </div>
+    </div>
+  );
+}
+
+// Shimmer skeleton cards for Available Vehicles section
+function VehicleSkeletonGrid({ count = 6 }) {
+  return (
+    <div className="vehicle-skeleton-grid">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="vehicle-skeleton-card" style={{ animationDelay: `${i * 60}ms` }}>
+          <div className="skel-img skel-shimmer" />
+          <div className="skel-body">
+            <div className="skel-line skel-line-lg skel-shimmer" />
+            <div className="skel-line skel-line-sm skel-shimmer" />
+            <div className="skel-specs">
+              <div className="skel-spec-chip skel-shimmer" />
+              <div className="skel-spec-chip skel-shimmer" />
+              <div className="skel-spec-chip skel-shimmer" style={{ width: 48 }} />
+            </div>
+            <div className="skel-price skel-shimmer" />
+            <div className="skel-line skel-line-xs skel-shimmer" style={{ marginBottom: 12 }} />
+          </div>
+          <div className="skel-btn skel-shimmer" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Full-screen EV loading for Available Vehicles initial fetch
+function EVLoadingScreen({ label = 'Finding vehicles near you…' }) {
+  return (
+    <div className="ev-loading-screen">
+      <div className="ev-logo-ring">
+        <div className="ev-logo-inner">
+          <span className="ev-logo-bolt">⚡</span>
+        </div>
+        <div className="ev-ripple" />
+        <div className="ev-ripple-2" />
+      </div>
+      <div className="ev-loading-title">{label}</div>
+      <div className="ev-loading-sub">Checking availability near your location</div>
+      <div className="ev-progress-bar">
+        <div className="ev-progress-fill" />
+      </div>
+      <div className="ev-dots">
+        <div className="ev-dot" /><div className="ev-dot" /><div className="ev-dot" />
+      </div>
+    </div>
+  );
+}
+
+// Payment processing overlay with animated steps
+function PaymentProcessingOverlay({ steps, currentStep }) {
+  return (
+    <div className="payment-processing-overlay">
+      <div className="payment-processing-card">
+        <div className="payment-spinner">
+          <div className="payment-spinner-ring" />
+          <div className="payment-spinner-icon">💳</div>
+        </div>
+        <div className="payment-processing-title">Processing Payment</div>
+        <div className="payment-processing-sub">Please don't close this window</div>
+        <div className="payment-processing-steps">
+          {steps.map((step, i) => (
+            <div key={i} className={`payment-step ${i < currentStep ? 'done' : i === currentStep ? 'active' : ''}`}>
+              {i < currentStep
+                ? <span className="payment-step-icon">✅</span>
+                : i === currentStep
+                  ? <div className="payment-step-spinner" />
+                  : <span className="payment-step-icon">⏳</span>
+              }
+              {step}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Animated payment success screen
+function PaymentSuccessScreen({ successData, vehicle, onDone }) {
+  const confettiColors = ['#1d4ed8','#22c55e','#f59e0b','#ec4899','#8b5cf6','#06b6d4'];
+  const confettiPieces = Array.from({ length: 18 }).map((_, i) => ({
+    left: `${5 + (i * 5.5) % 90}%`,
+    top:  `${(i * 7) % 40}%`,
+    color: confettiColors[i % confettiColors.length],
+    delay: `${(i * 0.09).toFixed(2)}s`,
+    size: i % 3 === 0 ? '10px' : '7px',
+    borderRadius: i % 2 === 0 ? '50%' : '2px',
+  }));
+
+  return (
+    <div className="payment-success-overlay">
+      <div className="payment-success-card">
+        {/* Confetti */}
+        <div className="success-confetti-container">
+          {confettiPieces.map((p, i) => (
+            <div key={i} className="confetti-piece" style={{
+              left: p.left, top: p.top,
+              background: p.color,
+              animationDelay: p.delay,
+              width: p.size, height: p.size,
+              borderRadius: p.borderRadius,
+            }} />
+          ))}
+        </div>
+
+        {/* Checkmark */}
+        <div className="success-checkmark-wrap">
+          <div className="success-circle">
+            <svg className="success-check-svg" viewBox="0 0 40 40">
+              <path className="success-check-path" d="M9 20 L17 28 L31 12" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="success-title">Booking Confirmed! 🎉</div>
+        <div className="success-amount">₹{successData.amount}</div>
+        <div className="success-sub">Payment received successfully</div>
+
+        <div className="success-details-card">
+          {[
+            ['Vehicle',   successData.vehicleName],
+            ['Duration',  `${successData.days} day${successData.days !== 1 ? 's' : ''}`],
+            ['Dates',     `${successData.startDate} → ${successData.endDate}`],
+            ['Location',  successData.address],
+            ['Payment ID', successData.paymentId],
+          ].map(([k, v]) => (
+            <div className="success-detail-row" key={k}>
+              <span className="success-detail-label">{k}</span>
+              <span className="success-detail-value">{v}</span>
+            </div>
+          ))}
+        </div>
+
+        {successData.pickup && (
+          <div className="success-pickup-banner">
+            <strong>📍 Pickup at:</strong> {successData.pickup}<br />
+            <span style={{ fontSize: 12, opacity: .85 }}>The franchisee will handover your vehicle after verifying your booking.</span>
+          </div>
+        )}
+
+        <div className="success-actions">
+          <button className="btn-primary" onClick={onDone}>View My Bookings →</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1568,12 +1730,21 @@ function CustAvailableVehicles({ call, setPage }) {
   const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
 
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
+  const [imgLoaded, setImgLoaded] = useState({});
 
   return <>
     <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
 
-    {location?.pincode && (
-      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14}}>
+    {/* Loading state — EV logo + skeleton grid */}
+    {loading && (
+      <>
+        <EVLoadingScreen label="Finding vehicles near you…" />
+        <VehicleSkeletonGrid count={6} />
+      </>
+    )}
+
+    {!loading && location?.pincode && (
+      <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14,animation:'slide-up .4s ease'}}>
         <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
         <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
         {availableFranchisees.length > 0 && (
@@ -1583,7 +1754,8 @@ function CustAvailableVehicles({ call, setPage }) {
               const active = String(fr._id) === String(selectedFranchiseeId);
               return (
                 <button key={fr._id} type="button" onClick={() => setSelectedFranchiseeId(String(fr._id))}
-                  style={{fontSize:12,fontWeight:700,color:active?'#fff':'#1d4ed8',background:active?'#2563eb':'#fff',border:`1px solid ${active?'#2563eb':'#bfdbfe'}`,borderRadius:999,padding:'6px 11px',cursor:'pointer'}}>
+                  className="franchisee-tab-enter"
+                  style={{fontSize:12,fontWeight:700,color:active?'#fff':'#1d4ed8',background:active?'#2563eb':'#fff',border:`1px solid ${active?'#2563eb':'#bfdbfe'}`,borderRadius:999,padding:'6px 11px',cursor:'pointer',transition:'all .2s',animationDelay:`${i*60}ms`}}>
                   {i === 0 ? '📍 ' : '🏪 '}{fr.name}{fr.address?.pincode ? ` · ${fr.address.pincode}` : ''}
                 </button>
               );
@@ -1591,7 +1763,7 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
         )}
         {selectedFranchisee && (
-          <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569'}}>
+          <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569',animation:'slide-up .3s ease .1s both'}}>
             <strong>Booking from:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
             <span style={{marginLeft:6,color:'#64748b'}}>The vehicle will be handed over only by this franchisee.</span>
           </div>
@@ -1599,52 +1771,69 @@ function CustAvailableVehicles({ call, setPage }) {
       </div>
     )}
 
-    {/* Category filter tabs */}
-    <div className="filter-tabs">
-      {categories.map(c => (
-        <button key={c} className={'filter-tab' + (filterCat === c ? ' active' : '')}
-          onClick={() => setFilterCat(c)}>
-          {c === 'all' ? 'All Vehicles' : `${catEmoji[c]} ${c}`}
-        </button>
-      ))}
-    </div>
-
-    {filtered.length === 0 ? (
-      <div className="card">
-        <div className="empty-state">
-          <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
-          <p>No vehicles available in this category yet.<br />Check back soon — franchisees are adding vehicles regularly.</p>
+    {!loading && (
+      <>
+        {/* Category filter tabs */}
+        <div className="filter-tabs" style={{animation:'slide-up .35s ease .05s both'}}>
+          {categories.map(c => (
+            <button key={c} className={'filter-tab' + (filterCat === c ? ' active' : '')}
+              onClick={() => setFilterCat(c)}>
+              {c === 'all' ? '🚘 All Vehicles' : `${catEmoji[c]} ${c}`}
+            </button>
+          ))}
         </div>
-      </div>
-    ) : (
-      <div className="vehicle-browse-grid">
-        {filtered.map(v => (
-          <div key={v._id || v.id} className="vehicle-browse-card" onClick={() => setSelected(v)}>
-            <div className="vbc-img">
-              {v.images?.length > 0
-                ? <img src={v.images[0].url} alt={v.make} />
-                : <div className="vbc-no-img">{catEmoji[v.category] || '🚗'}</div>
-              }
-              <span className="vbc-cat-badge">{v.category}</span>
+
+        {filtered.length === 0 ? (
+          <div className="card" style={{animation:'float-up .4s ease'}}>
+            <div className="empty-state">
+              <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
+              <p>No vehicles available in this category yet.<br />Check back soon — franchisees are adding vehicles regularly.</p>
             </div>
-            <div className="vbc-body">
-              <div className="vbc-name">{v.make} {v.model}</div>
-              <div className="vbc-year">{v.year} · {v.color}</div>
-              <div className="vbc-specs">
-                {v.rangeKm && <span>🔋 {v.rangeKm} km</span>}
-                {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
-                {v.chargingType && <span>🔌 {v.chargingType}</span>}
-              </div>
-              <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:4}}>{v.quantity} unit{Number(v.quantity)===1?'':'s'} available · {v.franchiseeName || 'EV CORE franchise'}</div>
-              <div className="vbc-price">
-                <span className="price-amt">₹{v.pricePerDay}</span>
-                <span className="price-unit">/day</span>
-              </div>
-            </div>
-            <button className="vbc-btn">View Details</button>
           </div>
-        ))}
-      </div>
+        ) : (
+          <div className="vehicle-browse-grid">
+            {filtered.map((v, idx) => (
+              <div key={v._id || v.id} className="vehicle-browse-card"
+                style={{ animationDelay: `${Math.min(idx * 55, 550)}ms` }}
+                onClick={() => setSelected(v)}>
+                <div className="vbc-img">
+                  {v.images?.length > 0 ? (
+                    <>
+                      {!imgLoaded[v._id] && <div className="vbc-img-loading" />}
+                      <img
+                        src={v.images[0].url}
+                        alt={v.make}
+                        onLoad={() => setImgLoaded(p => ({ ...p, [v._id]: true }))}
+                        style={{ opacity: imgLoaded[v._id] ? 1 : 0, transition: 'opacity .35s ease' }}
+                      />
+                    </>
+                  ) : (
+                    <div className="vbc-no-img" style={{ fontSize: 52 }}>{catEmoji[v.category] || '🚗'}</div>
+                  )}
+                  <span className="vbc-cat-badge">{v.category}</span>
+                </div>
+                <div className="vbc-body">
+                  <div className="vbc-name">{v.make} {v.model}</div>
+                  <div className="vbc-year">{v.year} · {v.color}</div>
+                  <div className="vbc-specs">
+                    {v.rangeKm && <span>🔋 {v.rangeKm} km</span>}
+                    {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
+                    {v.chargingType && <span>🔌 {v.chargingType}</span>}
+                  </div>
+                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:4}}>
+                    ✅ {v.quantity} unit{Number(v.quantity)===1?'':'s'} available · {v.franchiseeName || 'EV CORE franchise'}
+                  </div>
+                  <div className="vbc-price">
+                    <span className="price-amt">₹{v.pricePerDay}</span>
+                    <span className="price-unit">/day</span>
+                  </div>
+                </div>
+                <button className="vbc-btn">View Details →</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </>
     )}
 
     {/* Detail modal */}
@@ -1812,8 +2001,17 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate]     = useState('');
   const [busy, setBusy]           = useState(false);
+  const [processingOverlay, setProcessingOverlay] = useState(false);
+  const [processingStep, setProcessingStep] = useState(0);
   const [msg, setMsg]             = useState({ type: '', text: '' });
   const [successData, setSuccessData] = useState(null);
+
+  const PAYMENT_STEPS = [
+    'Creating secure booking order',
+    'Opening Razorpay checkout',
+    'Verifying payment with server',
+    'Confirming your booking',
+  ];
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -1867,8 +2065,9 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
 
   const initiatePayment = async () => {
     setBusy(true); setMsg({ type: '', text: '' });
+    setProcessingOverlay(true); setProcessingStep(0);
     try {
-      // Create Razorpay order via backend
+      // Step 0: Create Razorpay order via backend
       const orderRes = await call('/customer/rentals/create-order', {
         method: 'POST',
         data: {
@@ -1886,8 +2085,15 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
       });
 
       const { rentalId, orderId, amount, currency, keyId } = orderRes;
+      setProcessingStep(1);
 
-      // Open Razorpay checkout
+      if (!window.Razorpay) {
+        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
+        setBusy(false); setProcessingOverlay(false);
+        return;
+      }
+
+      // Step 1: Open Razorpay checkout
       const options = {
         key:         keyId,
         amount,
@@ -1896,7 +2102,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         description: `${vehicle.make} ${vehicle.model} rental for ${durationDays} day(s)`,
         order_id:    orderId,
         handler: async (response) => {
-          // Verify payment on backend
+          setProcessingOverlay(true); setProcessingStep(2);
+          // Step 2: Verify payment on backend
           try {
             await call('/customer/rentals/verify-payment', {
               method: 'POST',
@@ -1907,6 +2114,9 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 razorpay_signature:   response.razorpay_signature,
               },
             });
+            setProcessingStep(3);
+            await new Promise(r => setTimeout(r, 600)); // brief moment at step 3
+            setProcessingOverlay(false);
             setSuccessData({
               rentalId,
               vehicleName: `${vehicle.make} ${vehicle.model}`,
@@ -1919,6 +2129,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
             });
             setStep('success');
           } catch (e) {
+            setProcessingOverlay(false);
             setMsg({ type: 'error', text: 'Payment verification failed. Contact support with payment ID: ' + response.razorpay_payment_id });
           }
         },
@@ -1926,35 +2137,55 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         theme: { color: '#2563eb' },
         redirect: false,
         modal: {
-          ondismiss:  () => { setBusy(false); },
+          ondismiss:  () => { setBusy(false); setProcessingOverlay(false); },
           escape:     false,
           backdropclose: false,
         },
       };
 
-      if (!window.Razorpay) {
-        setMsg({ type: 'error', text: 'Razorpay SDK not loaded. Please check your internet connection.' });
-        setBusy(false);
-        return;
-      }
+      setProcessingOverlay(false); // hide while Razorpay modal is open
       const rzp = new window.Razorpay(options);
       rzp.on('payment.failed', (resp) => {
         setMsg({ type: 'error', text: 'Payment failed: ' + resp.error.description });
-        setBusy(false);
+        setBusy(false); setProcessingOverlay(false);
       });
       rzp.open();
     } catch (e) {
+      setProcessingOverlay(false);
       setMsg({ type: 'error', text: e.response?.data?.message || 'Could not create booking. Please try again.' });
     } finally { setBusy(false); }
   };
 
+  // If success, show full-screen celebration overlay (not the modal)
+  if (step === 'success' && successData) {
+    return (
+      <PaymentSuccessScreen
+        successData={successData}
+        vehicle={vehicle}
+        onDone={onSuccess}
+      />
+    );
+  }
+
+  const stepMeta = [
+    { label: 'Location', key: 'address' },
+    { label: 'Dates',    key: 'dates' },
+    { label: 'Payment',  key: 'payment' },
+  ];
+  const stepIdx = { address: 0, dates: 1, payment: 2 };
+  const currentIdx = stepIdx[step] ?? 0;
+
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <>
+      {processingOverlay && (
+        <PaymentProcessingOverlay steps={PAYMENT_STEPS} currentStep={processingStep} />
+      )}
+      <div className="modal-overlay" onClick={onClose}>
       <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(560px,100%)' }}>
         <div className="modal-head">
           <div>
             <div className="modal-title">
-              {step === 'success' ? '🎉 Booking Confirmed!' : `Book — ${vehicle.make} ${vehicle.model}`}
+              {`Book — ${vehicle.make} ${vehicle.model}`}
             </div>
             <div className="modal-subtitle">
               {step === 'address' && 'Step 1 of 3 — Customer Location'}
@@ -1967,21 +2198,42 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         </div>
 
         <div className="modal-body">
+          {/* ── Step progress bar ── */}
+          <div className="booking-steps" style={{ marginBottom: 20 }}>
+            {stepMeta.map((s, i) => (
+              <React.Fragment key={s.key}>
+                {i > 0 && (
+                  <div className={`booking-step-connector ${i <= currentIdx ? 'done' : ''}`} />
+                )}
+                <div className="booking-step-item">
+                  <div className={`booking-step-dot ${i < currentIdx ? 'done' : i === currentIdx ? 'active' : ''}`}>
+                    {i < currentIdx ? '✓' : i + 1}
+                  </div>
+                  <span className={`booking-step-label ${i < currentIdx ? 'done' : i === currentIdx ? 'active' : ''}`}>
+                    {s.label}
+                  </span>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+
           <Msg type={msg.type} text={msg.text} />
 
           {/* ── STEP 1: Address ── */}
           {step === 'address' && (
-            <div className="login-form">
+            <div className="login-form" style={{ animation: 'slide-up .3s ease' }}>
               <label>Pincode *
                 <div style={{ position: 'relative' }}>
                   <input
                     type="text" inputMode="numeric" maxLength={6}
                     value={pincode} onChange={e => handlePincodeChange(e.target.value)}
                     placeholder="6-digit pincode"
-                    style={{ paddingRight: 36 }}
+                    style={{ paddingRight: 44 }}
                   />
                   {pincodeLoading && (
-                    <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>⏳</span>
+                    <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+                      <div className="pincode-spinner" />
+                    </div>
                   )}
                   {addrData && !pincodeLoading && (
                     <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 18 }}>✅</span>
@@ -2048,7 +2300,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
 
           {/* ── STEP 3: Payment summary ── */}
           {step === 'payment' && (
-            <div>
+            <div style={{ animation: 'slide-up .3s ease' }}>
               <div style={{ background: '#f8fafc', border: '1px solid #e4e7ef', borderRadius: 12, padding: '16px 18px', marginBottom: 16 }}>
                 <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e', marginBottom: 12 }}>Booking Summary</div>
                 {[
@@ -2112,7 +2364,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
             <>
               <button className="btn-ghost" onClick={onClose}>Cancel</button>
               <button className="btn-primary" onClick={handleAddressNext} disabled={!addrData || pincodeLoading}>
-                Continue →
+                {pincodeLoading ? 'Verifying pincode…' : 'Continue →'}
               </button>
             </>
           )}
@@ -2126,20 +2378,16 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
           )}
           {step === 'payment' && (
             <>
-              <button className="btn-ghost" onClick={() => setStep('dates')}>← Back</button>
-              <button className="btn-primary" onClick={initiatePayment} disabled={busy}>
-                {busy ? 'Processing…' : `Pay ₹${(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}`}
+              <button className="btn-ghost" onClick={() => setStep('dates')} disabled={busy}>← Back</button>
+              <button className={`btn-primary${busy ? ' loading' : ''}`} onClick={initiatePayment} disabled={busy}>
+                {busy ? 'Opening payment…' : `🔒 Pay ₹${(vehicle.pricePerDay * durationDays).toLocaleString('en-IN')}`}
               </button>
             </>
-          )}
-          {step === 'success' && (
-            <button className="btn-primary" style={{ width: '100%' }} onClick={onSuccess}>
-              View My Bookings →
-            </button>
           )}
         </div>
       </div>
     </div>
+    </>
   );
 }
 
