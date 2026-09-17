@@ -1,5 +1,14 @@
 const {Job,Inventory,Vehicle,User}=require('../models'); const audit=require('../services/audit');
-exports.jobs=async(req,res)=>res.json(await Job.find().populate('vehicleId customerId technicianId hubId').sort('-createdAt'));
+// Return only jobs assigned to the logged-in staff member (by technicianId)
+exports.jobs=async(req,res)=>{
+  try {
+    const staffId = req.user._id;
+    const jobs = await Job.find({ technicianId: staffId })
+      .populate('vehicleId customerId technicianId hubId')
+      .sort('-createdAt');
+    res.json(jobs);
+  } catch(e) { res.status(500).json({ message: e.message }); }
+};
 exports.create=async(req,res)=>{const j=await Job.create(req.body);await audit(req.user._id,'CREATE','Job',j._id);res.status(201).json(j)};
 exports.update=async(req,res)=>{const j=await Job.findByIdAndUpdate(req.params.id,req.body,{new:true});if(!j)return res.status(404).json({message:'Job not found'});await audit(req.user._id,'UPDATE','Job',j._id,req.body);res.json(j)};
 exports.assign=async(req,res)=>{const j=await Job.findByIdAndUpdate(req.params.id,{technicianId:req.body.technicianId,status:'ASSIGNED',trackingStatus:'Technician Assigned'},{new:true});res.json(j)};

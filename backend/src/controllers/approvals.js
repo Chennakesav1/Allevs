@@ -357,3 +357,49 @@ exports.removeStaffFromFranchisee = async (req, res) => {
     res.status(500).json({ message: e.message });
   }
 };
+// ═══════════════════════════════════════════════════════════════
+// UPDATE VEHICLE (franchisee edits own vehicle)
+// ═══════════════════════════════════════════════════════════════
+
+/** PUT /api/franchise/pending-vehicles/:id */
+exports.updateVehicle = async (req, res) => {
+  try {
+    const filter = req.user.role === 'FRANCHISEE'
+      ? { _id: req.params.id, franchiseeId: req.user._id }
+      : { _id: req.params.id };
+
+    const doc = await PendingVehicle.findOne(filter);
+    if (!doc) return res.status(404).json({ message: 'Vehicle not found or access denied.' });
+
+    // Allow editing; if the vehicle was approved and key fields change, re-queue for approval
+    const sensitiveFields = ['pricePerDay', 'quantity', 'make', 'model', 'registrationNo', 'category'];
+    const needsReApproval = sensitiveFields.some(
+      f => req.body[f] !== undefined && String(req.body[f]) !== String(doc[f])
+    );
+
+    const allowedFields = [
+      'category','make','model','year','color','registrationNo',
+      'batteryCapacityKwh','rangeKm','chargingType','pricePerDay',
+      'description','quantity','images',
+    ];
+
+    const updates = {};
+    allowedFields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+
+    if (needsReApproval && doc.status === 'APPROVED') {
+      updates.status = 'PENDING_APPROVAL';
+      updates.reviewedBy  = undefined;
+      updates.reviewedAt  = undefined;
+    }
+
+    if (updates.quantity !== undefined) updates.quantity = Math.max(0, Number(updates.quantity));
+    if (updates.pricePerDay !== undefined) updates.pricePerDay = Number(updates.pricePerDay);
+
+    const updated = await PendingVehicle.findByIdAndUpdate(doc._id, updates, { new: true });
+    await audit(req.user._id, 'UPDATE', 'PendingVehicle', doc._id, updates);
+    res.json({ ...updated.toObject(), reQueued: needsReApproval && doc.status === 'APPROVED' });
+  } catch (e) {
+    console.error('updateVehicle error:', e);
+    res.status(500).json({ message: e.message });
+  }
+};

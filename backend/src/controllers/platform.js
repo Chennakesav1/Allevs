@@ -1,5 +1,31 @@
 const M=require('../models'); const {notify}=require('../services/notify'); const {emi,roi,expansion}=require('../services/finance'); const {autoAssign}=require('../services/dispatch'); const {detectCharging}=require('../services/anomaly');
 const ok=(res,data,status=200)=>res.status(status).json(data); const fail=(res,e)=>res.status(400).json({message:e.message||String(e)});
+const crypto=require('crypto');
+const getRazorpay=()=>{
+  if(!process.env.RAZORPAY_KEY_ID||!process.env.RAZORPAY_KEY_SECRET) throw Error('Razorpay not configured');
+  const Razorpay=require('razorpay');
+  return new Razorpay({key_id:process.env.RAZORPAY_KEY_ID,key_secret:process.env.RAZORPAY_KEY_SECRET});
+};
+const creditWalletRecharge=async({customerId,recharge,paymentId,signature})=>{
+  // Idempotency: a payment/order may credit the wallet exactly once.
+  const existing=await M.WalletTransaction.findOne({$or:[{razorpayPaymentId:paymentId},{razorpayOrderId:recharge.orderId}],type:'CREDIT',status:'SUCCESS'});
+  if(existing){
+    const wallet=await M.Wallet.findOne({customerId});
+    return {wallet,tx:existing,alreadyCredited:true};
+  }
+  const customer=await M.User.findById(customerId).select('name email phone').lean();
+  const w=await M.Wallet.findOneAndUpdate({customerId},{$inc:{balance:recharge.amount}},{new:true,upsert:true});
+  const tx=await M.WalletTransaction.create({
+    customerId,type:'CREDIT',amount:recharge.amount,referenceType:'RAZORPAY_RECHARGE',
+    description:'Wallet recharge via Razorpay',balanceAfter:w.balance,status:'SUCCESS',provider:'RAZORPAY',
+    providerRef:paymentId,razorpayPaymentId:paymentId,razorpayOrderId:recharge.orderId,
+    customerName:customer?.name,customerEmail:customer?.email,customerPhone:customer?.phone,
+  });
+  recharge.status='PAID'; recharge.paymentId=paymentId; recharge.signature=signature; recharge.creditedAt=new Date();
+  await recharge.save();
+  return {wallet:w,tx,alreadyCredited:false};
+};
+
 exports.customer={
  profile:async(req,res)=>ok(res,await M.User.findById(req.user._id).select('-passwordHash -refreshTokenHash')),
  vehicles:async(req,res)=>ok(res,await M.Vehicle.find({customerId:req.user._id})),
@@ -10,7 +36,60 @@ exports.customer={
  tracking:async(req,res)=>ok(res,await M.Job.findOne({_id:req.params.id,customerId:req.user._id}).populate('technicianId')),
  wallet:async(req,res)=>ok(res,await M.Wallet.findOne({customerId:req.user._id})||await M.Wallet.create({customerId:req.user._id})),
  walletTx:async(req,res)=>ok(res,await M.WalletTransaction.find({customerId:req.user._id}).sort('-createdAt')),
- addMoney:async(req,res)=>{try{const amount=Number(req.body.amount);if(!amount||amount<=0)throw Error('Invalid amount');const w=await M.Wallet.findOneAndUpdate({customerId:req.user._id},{$inc:{balance:amount}},{new:true,upsert:true});await M.WalletTransaction.create({customerId:req.user._id,type:'CREDIT',amount,referenceType:'TOPUP',description:'Wallet top-up',balanceAfter:w.balance});return ok(res,w)}catch(e){fail(res,e)}},
+ addMoney:async(req,res)=>{try{
+  if(process.env.ENABLE_DEV_WALLET_TOPUP!=='true') return ok(res,{message:'Direct wallet top-up is disabled. Use Razorpay recharge.'},403);
+  const amount=Number(req.body.amount); if(!amount||amount<=0)throw Error('Invalid amount');
+  const customer=await M.User.findById(req.user._id).select('name email phone').lean();
+  const w=await M.Wallet.findOneAndUpdate({customerId:req.user._id},{$inc:{balance:amount}},{new:true,upsert:true});
+  await M.WalletTransaction.create({customerId:req.user._id,type:'CREDIT',amount,referenceType:'DEV_TOPUP',description:'Development wallet top-up',balanceAfter:w.balance,status:'SUCCESS',provider:'DEV',customerName:customer?.name,customerEmail:customer?.email,customerPhone:customer?.phone});
+  return ok(res,w)
+ }catch(e){fail(res,e)}},
+ walletRechargeOrder:async(req,res)=>{try{
+  const amount=Number(req.body.amount); if(!amount||amount<1)throw Error('Invalid amount');
+  const rz=getRazorpay(); const amountPaise=Math.round(amount*100);
+  const order=await rz.orders.create({amount:amountPaise,currency:'INR',receipt:`wallet_${Date.now()}`,notes:{customerId:String(req.user._id),type:'WALLET_RECHARGE'}});
+  await M.WalletRecharge.create({customerId:req.user._id,orderId:order.id,amount,amountPaise:order.amount,currency:order.currency,status:'CREATED'});
+  return ok(res,{orderId:order.id,amount:order.amount,currency:order.currency,keyId:process.env.RAZORPAY_KEY_ID})
+ }catch(e){fail(res,e)}},
+ walletVerifyRecharge:async(req,res)=>{try{
+  const {razorpay_order_id,razorpay_payment_id,razorpay_signature}=req.body;
+  if(!razorpay_order_id||!razorpay_payment_id||!razorpay_signature) throw Error('Incomplete payment verification data');
+  const recharge=await M.WalletRecharge.findOne({orderId:razorpay_order_id,customerId:req.user._id});
+  if(!recharge) return ok(res,{message:'Recharge order not found'},404);
+  if(recharge.status==='PAID'){
+    const wallet=await M.Wallet.findOne({customerId:req.user._id});
+    return ok(res,{...wallet?.toObject(),paymentId:recharge.paymentId,orderId:recharge.orderId,status:'PAID',alreadyCredited:true});
+  }
+  const expected=crypto.createHmac('sha256',process.env.RAZORPAY_KEY_SECRET||'').update(`${razorpay_order_id}|${razorpay_payment_id}`).digest('hex');
+  if(!process.env.RAZORPAY_KEY_SECRET||expected!==razorpay_signature){recharge.status='FAILED';recharge.failureReason='Invalid payment signature';await recharge.save();throw Error('Invalid payment signature');}
+  // Server-to-server verification: never trust amount/status supplied by the browser.
+  const rz=getRazorpay(); const payment=await rz.payments.fetch(razorpay_payment_id);
+  if(payment.order_id!==recharge.orderId) throw Error('Payment does not belong to this recharge order');
+  if(Number(payment.amount)!==Number(recharge.amountPaise)) throw Error('Payment amount mismatch');
+  if(payment.currency!==recharge.currency) throw Error('Payment currency mismatch');
+  if(payment.status!=='captured') throw Error(`Payment is not captured (${payment.status})`);
+  const result=await creditWalletRecharge({customerId:req.user._id,recharge,paymentId:razorpay_payment_id,signature:razorpay_signature});
+  return ok(res,{...result.wallet.toObject(),paymentId:razorpay_payment_id,orderId:recharge.orderId,status:'PAID',alreadyCredited:result.alreadyCredited})
+ }catch(e){fail(res,e)}},
+ walletRechargeStatus:async(req,res)=>{try{
+  const recharge=await M.WalletRecharge.findOne({orderId:req.params.orderId,customerId:req.user._id});
+  if(!recharge)return ok(res,{message:'Recharge order not found'},404);
+  if(recharge.status==='PAID') return ok(res,{status:'PAID',orderId:recharge.orderId,paymentId:recharge.paymentId,amount:recharge.amount});
+  const rz=getRazorpay();
+  const payments=await rz.orders.fetchPayments(recharge.orderId);
+  const paid=(payments.items||[]).find(p=>Number(p.amount)===Number(recharge.amountPaise)&&p.status==='captured');
+  if(paid){
+    const result=await creditWalletRecharge({customerId:req.user._id,recharge,paymentId:paid.id,signature:'SERVER_RECONCILED'});
+    return ok(res,{status:'PAID',orderId:recharge.orderId,paymentId:paid.id,amount:recharge.amount,balance:result.wallet.balance,reconciled:true});
+  }
+  return ok(res,{status:recharge.status,orderId:recharge.orderId,amount:recharge.amount});
+ }catch(e){fail(res,e)}},
+ walletCancelRecharge:async(req,res)=>{try{
+  const recharge=await M.WalletRecharge.findOne({orderId:req.params.orderId,customerId:req.user._id});
+  if(!recharge)return ok(res,{message:'Recharge order not found'},404);
+  if(recharge.status!=='PAID'){recharge.status='CANCELLED';recharge.cancelledAt=new Date();await recharge.save();}
+  return ok(res,{status:recharge.status,orderId:recharge.orderId});
+ }catch(e){fail(res,e)}},
  pay:async(req,res)=>{try{const p=await M.Payment.create({...req.body,customerId:req.user._id,status:'PENDING',provider:process.env.RAZORPAY_KEY_ID?'RAZORPAY':'MANUAL'});return ok(res,p,201)}catch(e){fail(res,e)}},
  invoices:async(req,res)=>ok(res,await M.Invoice.find({customerId:req.user._id}).sort('-createdAt')),
  review:async(req,res)=>ok(res,await M.Review.create({...req.body,customerId:req.user._id}),201),

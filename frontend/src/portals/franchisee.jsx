@@ -6,7 +6,8 @@ import {
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell,
   FileText, Plus, X, Save, Upload, Clock, Image, ChevronRight,
-  UserX, UserCheck, UserMinus, Hash, Tag, Layers, Wrench, Building2
+  UserX, UserCheck, UserMinus, Hash, Tag, Layers, Wrench, Building2,
+  Edit2, Pencil, RefreshCw
 } from 'lucide-react';
 import './franchisee.css';
 
@@ -39,7 +40,7 @@ const NAV_ITEMS = {
     { id: 'attendance',       label: 'Attendance',       Icon: Clock },
     { id: 'leave-approval',   label: 'Leave Approvals',  Icon: FileText },
     { id: 'jobs',             label: 'Jobs',             Icon: ClipboardList },
-    { id: 'rentals',           label: 'Customer Bookings', Icon: Car },
+    { id: 'rentals',           label: 'Vehicle Sales', Icon: Car },
     { id: 'complaints',       label: 'Customer Complaints', Icon: Bell },
     { id: 'fault-vehicles',   label: 'Fault Vehicles',      Icon: AlertTriangle },
   ],
@@ -209,7 +210,7 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {navItems.map(({ id, label, Icon, parent, sub }) => {
+          {!user ? <SidebarSkeleton count={navItems.length || 7} /> : navItems.map(({ id, label, Icon, parent, sub }) => {
             const isActive = activePage === id;
             const isParentActive = parent && activePage === parent;
             return (
@@ -365,10 +366,42 @@ function DataTable({ rows = [], cols = [], renderActions }) {
   );
 }
 
+// Sidebar skeleton — shown while nav / user is loading
+function SidebarSkeleton({ count = 7 }) {
+  return (
+    <div className="sidebar-skeleton-nav">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="sidebar-skel-item">
+          <div className="sidebar-skel-icon" style={{ animationDelay: `${i * 60}ms` }} />
+          <div className="sidebar-skel-label" style={{ animationDelay: `${i * 60 + 30}ms` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Loader() {
   return (
-    <div className="loader-wrap">
-      <div className="skeleton" /><div className="skeleton" /><div className="skeleton" />
+    <div className="page-center-loader">
+      <div className="ev-loading-screen">
+        <div className="ev-logo-aura-wrap">
+          <div className="ev-logo-aura ev-logo-aura-1" />
+          <div className="ev-logo-aura ev-logo-aura-2" />
+          <div className="ev-logo-aura ev-logo-aura-3" />
+          <div className="ev-logo-card">
+            <img src={allevLogo} alt="allEV" className="ev-logo-img" />
+            <div className="ev-logo-shimmer-sweep" />
+          </div>
+        </div>
+        <div className="ev-loading-title">Loading EV Data…</div>
+        <div className="ev-loading-sub">Fetching latest information</div>
+        <div className="ev-progress-bar">
+          <div className="ev-progress-fill" />
+        </div>
+        <div className="ev-dots">
+          <div className="ev-dot" /><div className="ev-dot" /><div className="ev-dot" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -547,6 +580,8 @@ function FranInventory({ call, user, setPage }) {
   const [partDrawerOpen,    setPartDrawerOpen]    = useState(false);
   const [selectedPart,      setSelectedPart]      = useState(null);
   const [selectedVehicle,   setSelectedVehicle]   = useState(null);
+  const [editVehicle,       setEditVehicle]       = useState(null);   // vehicle being edited
+  const [editPart,          setEditPart]          = useState(null);   // part being edited
   const [activeTab,         setActiveTab]         = useState('vehicles');
   const { toast, show } = useToast();
 
@@ -558,6 +593,18 @@ function FranInventory({ call, user, setPage }) {
   const onPartAdded = () => {
     refreshParts();
     show('New part added to inventory!');
+  };
+
+  const onVehicleUpdated = (msg) => {
+    refresh();
+    setEditVehicle(null);
+    show(msg || 'Vehicle updated successfully!');
+  };
+
+  const onPartUpdated = (msg) => {
+    refreshParts();
+    setEditPart(null);
+    show(msg || 'Part updated successfully!');
   };
 
   if (loading || pvLoading) return <Loader />;
@@ -650,7 +697,7 @@ function FranInventory({ call, user, setPage }) {
                     <th>Model</th>
                     <th>Registration No</th>
                     <th>Color</th>
-                    <th>Price Per Day</th>
+                    <th>Price</th>
                     <th>Quantity</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -666,7 +713,7 @@ function FranInventory({ call, user, setPage }) {
                         <td>{v.model || '—'}</td>
                         <td style={{ fontFamily:'monospace', fontSize:12 }}>{v.registrationNo || '—'}</td>
                         <td>{v.color || '—'}</td>
-                        <td>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                        <td style={{fontWeight:700}}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
                         <td style={{ fontWeight:700, textAlign:'center' }}>{v.quantity ?? 1}</td>
                         <td>
                           <span className="status-pill" style={{ background: sc + '18', color: sc }}>
@@ -674,10 +721,17 @@ function FranInventory({ call, user, setPage }) {
                           </span>
                         </td>
                         <td>
-                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
-                            onClick={() => setSelectedVehicle(v)}>
-                            View Details
-                          </button>
+                          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                            <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                              onClick={() => setSelectedVehicle(v)}>
+                              View Details
+                            </button>
+                            <button style={{ padding:'3px 10px', fontSize:12, display:'flex', alignItems:'center', gap:4,
+                              border:'1px solid #bfdbfe', borderRadius:6, background:'#eff6ff', color:'#2563eb', cursor:'pointer', fontWeight:600 }}
+                              onClick={() => setEditVehicle(v)}>
+                              <Edit2 size={12} /> Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -751,10 +805,17 @@ function FranInventory({ call, user, setPage }) {
                           </span>
                         </td>
                         <td>
-                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
-                            onClick={() => setSelectedPart(p)}>
-                            View Details
-                          </button>
+                          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                            <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
+                              onClick={() => setSelectedPart(p)}>
+                              View Details
+                            </button>
+                            <button style={{ padding:'3px 10px', fontSize:12, display:'flex', alignItems:'center', gap:4,
+                              border:'1px solid #bfdbfe', borderRadius:6, background:'#eff6ff', color:'#2563eb', cursor:'pointer', fontWeight:600 }}
+                              onClick={() => setEditPart(p)}>
+                              <Edit2 size={12} /> Edit
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -774,6 +835,26 @@ function FranInventory({ call, user, setPage }) {
     {/* Vehicle Detail Modal */}
     {selectedVehicle && (
       <VehicleDetailModal vehicle={selectedVehicle} onClose={() => setSelectedVehicle(null)} />
+    )}
+
+    {/* ── EDIT Vehicle Modal ── */}
+    {editVehicle && (
+      <EditVehicleModal
+        vehicle={editVehicle}
+        call={call}
+        onClose={() => setEditVehicle(null)}
+        onSaved={onVehicleUpdated}
+      />
+    )}
+
+    {/* ── EDIT Part Modal ── */}
+    {editPart && (
+      <EditPartModal
+        part={editPart}
+        call={call}
+        onClose={() => setEditPart(null)}
+        onSaved={onPartUpdated}
+      />
     )}
 
     <AddInventoryDrawer
@@ -868,7 +949,7 @@ function VehicleDetailModal({ vehicle: v, onClose }) {
               ['Battery Capacity',    v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'],
               ['Range',               v.rangeKm           ? `${v.rangeKm} km` : '—'],
               ['Charging Type',       v.chargingType      || '—'],
-              ['Price Per Day',       `₹${Number(v.pricePerDay || 0).toLocaleString('en-IN')}`],
+              ['Price (per unit)',    `₹${Number(v.pricePerDay || 0).toLocaleString('en-IN')}`],
               ['Quantity in Stock',   v.quantity ?? 1],
               ['Approval Status',     v.status            || '—'],
             ].map(([k, val]) => (
@@ -927,6 +1008,338 @@ function VehicleDetailModal({ vehicle: v, onClose }) {
 
         <div className="modal-footer">
           <button className="btn-ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EDIT VEHICLE MODAL — full inline edit for every vehicle field
+// ══════════════════════════════════════════════════════════════════
+function EditVehicleModal({ vehicle, call, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    category:           vehicle.category           || '',
+    make:               vehicle.make               || '',
+    model:              vehicle.model              || '',
+    year:               vehicle.year               || '',
+    color:              vehicle.color              || '',
+    registrationNo:     vehicle.registrationNo     || '',
+    batteryCapacityKwh: vehicle.batteryCapacityKwh || '',
+    rangeKm:            vehicle.rangeKm            || '',
+    chargingType:       vehicle.chargingType       || '',
+    pricePerDay:        vehicle.pricePerDay        || '',
+    quantity:           vehicle.quantity           ?? 1,
+    description:        vehicle.description        || '',
+    images:             vehicle.images             || [],
+  });
+  const [saving,  setSaving]  = useState(false);
+  const [error,   setError]   = useState('');
+  const [imgPreviewing, setImgPreviewing] = useState(null);
+
+  const ff = field => val => setForm(f => ({ ...f, [field]: typeof val === 'string' ? val : val?.target?.value ?? val }));
+
+  // Image handling
+  const handleImages = async e => {
+    const files = Array.from(e.target.files).slice(0, 5 - form.images.length);
+    const newImgs = await Promise.all(files.map(file => new Promise(res => {
+      const reader = new FileReader();
+      reader.onload = ev => res({ name: file.name, url: ev.target.result });
+      reader.readAsDataURL(file);
+    })));
+    setForm(f => ({ ...f, images: [...f.images, ...newImgs].slice(0, 5) }));
+  };
+  const removeImg = idx => setForm(f => ({ ...f, images: f.images.filter((_, i) => i !== idx) }));
+
+  const handleSave = async () => {
+    if (!form.make || !form.model || !form.pricePerDay) {
+      setError('Make, Model, and Price are required.'); return;
+    }
+    setSaving(true); setError('');
+    try {
+      const payload = {
+        ...form,
+        pricePerDay:        Number(form.pricePerDay),
+        quantity:           Number(form.quantity),
+        batteryCapacityKwh: form.batteryCapacityKwh ? Number(form.batteryCapacityKwh) : undefined,
+        rangeKm:            form.rangeKm ? Number(form.rangeKm) : undefined,
+        year:               form.year || undefined,
+      };
+      const res = await call(`/franchise/pending-vehicles/${vehicle._id}`, { method: 'put', data: payload });
+      const msg = res.reQueued
+        ? 'Vehicle updated! Since price/quantity/key details changed, it has been re-sent for Command Center approval.'
+        : 'Vehicle updated successfully!';
+      onSaved(msg);
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Failed to save.');
+    } finally { setSaving(false); }
+  };
+
+  const cats = VEHICLE_CATEGORIES || [];
+  const chargingOpts = ['AC', 'DC', 'AC+DC', 'CCS2', 'CHAdeMO'];
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(680px,100%)', maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title" style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <Edit2 size={18} color="#2563eb" /> Edit Vehicle
+            </div>
+            <div className="modal-subtitle">{vehicle.make} {vehicle.model} — all fields are editable</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div className="modal-body" style={{ overflowY:'auto', flex:1 }}>
+          {error && <InfoBanner type="warning" Icon={AlertTriangle}>{error}</InfoBanner>}
+
+          {vehicle.status === 'APPROVED' && (
+            <InfoBanner Icon={RefreshCw}>
+              This vehicle is <strong>Approved &amp; Live</strong>. Changing price, quantity, make, model, or category will <strong>re-queue it for Command Center approval</strong> and temporarily hide it from customers.
+            </InfoBanner>
+          )}
+
+          {/* Category */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Vehicle Category</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))', gap:8 }}>
+              {cats.map(c => (
+                <button key={c.value} type="button"
+                  onClick={() => ff('category')(c.value)}
+                  style={{
+                    display:'flex', flexDirection:'column', alignItems:'center', gap:4, padding:'10px 8px',
+                    border: form.category === c.value ? '2px solid #2563eb' : '1.5px solid #e5e7eb',
+                    borderRadius:10, background: form.category === c.value ? '#eff6ff' : '#fff',
+                    cursor:'pointer', transition:'all 0.15s',
+                  }}>
+                  <span style={{ fontSize:22 }}>{c.emoji}</span>
+                  <span style={{ fontSize:11, fontWeight:700, color: form.category === c.value ? '#2563eb' : '#374151' }}>{c.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Make & Model */}
+          <div className="row-2">
+            <Fld label="Make / Brand" required>
+              <Inp value={form.make} onChange={ff('make')} placeholder="e.g. Ola Electric" />
+            </Fld>
+            <Fld label="Model Name" required>
+              <Inp value={form.model} onChange={ff('model')} placeholder="e.g. S1 Pro" />
+            </Fld>
+          </div>
+
+          {/* Year & Color */}
+          <div className="row-2">
+            <Fld label="Year of Manufacture">
+              <Inp value={form.year} onChange={ff('year')} type="number" placeholder="2024" />
+            </Fld>
+            <Fld label="Color">
+              <Inp value={form.color} onChange={ff('color')} placeholder="e.g. Jet Black" />
+            </Fld>
+          </div>
+
+          {/* Registration */}
+          <Fld label="Registration Number" required hint="e.g. TS09EV1234">
+            <Inp value={form.registrationNo} onChange={ff('registrationNo')} placeholder="TS09EV1234" />
+          </Fld>
+
+          {/* Battery & Range */}
+          <div className="row-2">
+            <Fld label="Battery Capacity (kWh)">
+              <Inp value={form.batteryCapacityKwh} onChange={ff('batteryCapacityKwh')} type="number" placeholder="40.5" />
+            </Fld>
+            <Fld label="Range (km)">
+              <Inp value={form.rangeKm} onChange={ff('rangeKm')} type="number" placeholder="312" />
+            </Fld>
+          </div>
+
+          {/* Charging, Price, Qty */}
+          <div className="row-2">
+            <Fld label="Charging Type">
+              <Sel value={form.chargingType} onChange={ff('chargingType')} opts={chargingOpts} placeholder="Select…" />
+            </Fld>
+            <Fld label="Price per Unit (₹)" required hint="Selling price">
+              <Inp value={form.pricePerDay} onChange={ff('pricePerDay')} type="number" placeholder="149900" />
+            </Fld>
+          </div>
+          <Fld label="Available Quantity" required hint="Total units in stock">
+            <Inp value={form.quantity} onChange={ff('quantity')} type="number" placeholder="1" />
+          </Fld>
+
+          {/* Description */}
+          <Fld label="Description / Notes">
+            <Txt value={form.description} onChange={ff('description')} placeholder="Features, condition, special notes…" />
+          </Fld>
+
+          {/* Images */}
+          <div style={{ marginBottom:14 }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+              <Upload size={13} /> Vehicle Images ({form.images.length}/5)
+            </div>
+
+            {form.images.length > 0 && (
+              <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:12 }}>
+                {form.images.map((img, i) => (
+                  <div key={i} style={{ position:'relative', width:90, height:72, borderRadius:8, overflow:'hidden',
+                    border:'2px solid #e5e7eb', cursor:'pointer' }}
+                    onClick={() => setImgPreviewing(img.url)}>
+                    <img src={img.url} alt={img.name} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                    <button
+                      onClick={e => { e.stopPropagation(); removeImg(i); }}
+                      style={{ position:'absolute', top:3, right:3, background:'rgba(220,38,38,0.9)', border:'none',
+                        borderRadius:'50%', width:20, height:20, display:'flex', alignItems:'center',
+                        justifyContent:'center', cursor:'pointer', color:'#fff' }}>
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {form.images.length < 5 && (
+              <label style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 14px',
+                border:'1.5px dashed #93c5fd', borderRadius:8, cursor:'pointer', color:'#2563eb',
+                background:'#f0f9ff', fontSize:13, fontWeight:600 }}>
+                <Upload size={16} />
+                {form.images.length === 0 ? 'Upload vehicle photos (up to 5)' : 'Add more photos'}
+                <input type="file" accept="image/*" multiple style={{ display:'none' }} onChange={handleImages} />
+              </label>
+            )}
+          </div>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? <><RefreshCw size={14} style={{ animation:'spin 1s linear infinite' }} /> Saving…</> : <><Save size={14} /> Save Changes</>}
+          </button>
+        </div>
+      </div>
+
+      {/* Image full-preview */}
+      {imgPreviewing && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.85)', zIndex:9999,
+          display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={() => setImgPreviewing(null)}>
+          <img src={imgPreviewing} alt="preview" style={{ maxWidth:'90vw', maxHeight:'90vh', borderRadius:12, objectFit:'contain' }} />
+          <button style={{ position:'absolute', top:18, right:22, background:'rgba(255,255,255,0.15)', border:'none',
+            borderRadius:'50%', width:36, height:36, color:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}
+            onClick={() => setImgPreviewing(null)}><X size={18} /></button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EDIT PART MODAL — inline edit for every part/inventory field
+// ══════════════════════════════════════════════════════════════════
+function EditPartModal({ part, call, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    name:               part.name               || '',
+    category:           part.category           || '',
+    quantity:           part.quantity           ?? 0,
+    reorderLevel:       part.reorderLevel       ?? 5,
+    unitPrice:          part.unitPrice          || 0,
+    description:        part.description        || '',
+    manufacturer:       part.manufacturer       || '',
+    compatibleVehicles: part.compatibleVehicles || '',
+    location:           part.location           || '',
+    partType:           part.partType           || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error,  setError]  = useState('');
+
+  const ff = field => val => setForm(f => ({ ...f, [field]: typeof val === 'string' ? val : val?.target?.value ?? val }));
+
+  const PART_CATS = ['Brake System','Battery & Charging','Motor & Drivetrain','Body & Frame',
+    'Electrical','Suspension','Tyres & Wheels','Lighting','Cooling','General'];
+
+  const handleSave = async () => {
+    if (!form.name) { setError('Part name is required.'); return; }
+    setSaving(true); setError('');
+    try {
+      await call(`/franchise/inventory/${part._id}`, {
+        method: 'put',
+        data: {
+          ...form,
+          quantity:     Number(form.quantity),
+          reorderLevel: Number(form.reorderLevel),
+          unitPrice:    Number(form.unitPrice),
+        },
+      });
+      onSaved('Part updated successfully!');
+    } catch (e) {
+      setError(e.response?.data?.message || e.message || 'Failed to save.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(600px,100%)', maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title" style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <Edit2 size={18} color="#2563eb" /> Edit Part
+            </div>
+            <div className="modal-subtitle" style={{ fontFamily:'monospace', fontSize:12 }}>SKU: {part.sku}</div>
+          </div>
+          <button className="icon-btn" onClick={onClose}><X size={20} /></button>
+        </div>
+
+        <div className="modal-body" style={{ overflowY:'auto', flex:1 }}>
+          {error && <InfoBanner type="warning" Icon={AlertTriangle}>{error}</InfoBanner>}
+
+          <Fld label="Part Name" required>
+            <Inp value={form.name} onChange={ff('name')} placeholder="e.g. Disc Brake Pad Set" />
+          </Fld>
+
+          <div className="row-2">
+            <Fld label="Category">
+              <Sel value={form.category} onChange={ff('category')} opts={PART_CATS} placeholder="Select category…" />
+            </Fld>
+            <Fld label="Part Type">
+              <Inp value={form.partType} onChange={ff('partType')} placeholder="e.g. OEM, Aftermarket" />
+            </Fld>
+          </div>
+
+          <div className="row-2">
+            <Fld label="Quantity in Stock" required>
+              <Inp value={form.quantity} onChange={ff('quantity')} type="number" placeholder="0" />
+            </Fld>
+            <Fld label="Reorder Level" hint="Alert threshold">
+              <Inp value={form.reorderLevel} onChange={ff('reorderLevel')} type="number" placeholder="5" />
+            </Fld>
+          </div>
+
+          <Fld label="Unit Price (₹)" required>
+            <Inp value={form.unitPrice} onChange={ff('unitPrice')} type="number" placeholder="0" />
+          </Fld>
+
+          <Fld label="Manufacturer">
+            <Inp value={form.manufacturer} onChange={ff('manufacturer')} placeholder="e.g. Bosch" />
+          </Fld>
+
+          <Fld label="Compatible Vehicles" hint="List vehicle makes/models this part fits">
+            <Txt value={form.compatibleVehicles} onChange={ff('compatibleVehicles')} placeholder="e.g. Ola S1, Ather 450X" />
+          </Fld>
+
+          <Fld label="Storage Location" hint="Shelf/bin/rack reference">
+            <Inp value={form.location} onChange={ff('location')} placeholder="e.g. Rack A-3" />
+          </Fld>
+
+          <Fld label="Description / Notes">
+            <Txt value={form.description} onChange={ff('description')} placeholder="Additional notes about this part…" />
+          </Fld>
+        </div>
+
+        <div className="modal-footer">
+          <button className="btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? <><RefreshCw size={14} style={{ animation:'spin 1s linear infinite' }} /> Saving…</> : <><Save size={14} /> Save Changes</>}
+          </button>
         </div>
       </div>
     </div>
@@ -1450,7 +1863,7 @@ function VehicleSubmitSuccess({ form }) {
         <div className="cred-row"><span>Vehicle</span><code>{form.make} {form.model}</code></div>
         <div className="cred-row"><span>Category</span><code>{form.category}</code></div>
         <div className="cred-row"><span>Reg. No.</span><code>{form.registrationNo}</code></div>
-        <div className="cred-row"><span>Price/Day</span><code>₹{form.pricePerDay}</code></div>
+        <div className="cred-row"><span>Price/Vehicle</span><code>₹{form.pricePerDay}</code></div>
         <div className="cred-row"><span>Status</span><code style={{ color: '#d97706' }}>PENDING_APPROVAL</code></div>
       </div>
     </div>
@@ -1563,7 +1976,7 @@ function VehicleStep1({ form, ff }) {
           <Sel value={form.chargingType} onChange={ff('chargingType')}
             opts={['AC', 'DC', 'AC+DC', 'CCS2', 'CHAdeMO']} />
         </Fld>
-        <Fld label="Price Per Day (₹)" required>
+        <Fld label="Price per Unit (₹)" required hint="Selling price per vehicle unit">
           <Inp value={form.pricePerDay} onChange={ff('pricePerDay')} type="number" placeholder="1499" />
         </Fld>
         <Fld label="Available Quantity" required hint="Number of identical units in inventory">
@@ -1626,7 +2039,7 @@ function VehicleStep3({ form }) {
           ['Battery', `${form.batteryCapacityKwh} kWh`],
           ['Range', `${form.rangeKm} km`],
           ['Charging Type', form.chargingType],
-          ['Price/Day', `₹${form.pricePerDay}`],
+          ['Unit Price', `₹${form.pricePerDay}`],
         ].map(([k, v]) => v && v !== ' kWh' && v !== ' km' && (
           <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
         ))}
@@ -2544,16 +2957,16 @@ function FranJobs({ call }) {
   const jobs = Array.isArray(data) ? data : [];
   const completed = jobs.filter(j => j.status === 'COMPLETED');
   return <>
-    <PageHeader title="Jobs" sub="Completed rental-return tasks and service jobs for this franchise." />
+    <PageHeader title="Jobs" sub="Completed vehicle-delivery tasks and service jobs for this franchise." />
     <MetricGrid metrics={[
       { label: 'Total Jobs', value: jobs.length, Icon: ClipboardList, color: '#2563eb' },
       { label: 'Completed Tasks', value: completed.length, Icon: CheckCircle, color: '#16a34a' },
-      { label: 'Rental Returns', value: jobs.filter(j => j.serviceType === 'RENTAL_RETURN').length, Icon: Car, color: '#7c3aed' },
+      { label: 'Delivery Tasks', value: jobs.filter(j => j.serviceType === 'DELIVERY_COMPLETED').length, Icon: Car, color: '#7c3aed' },
     ]} />
     {jobs.length > 0 && <Card title="Recent Tasks" badge={`${jobs.length} tasks`}>
       <DataTable rows={jobs.map(j => ({
         ...j,
-        task: j.serviceType === 'RENTAL_RETURN' ? 'Rental Vehicle Return' : (j.serviceType || 'Service Task'),
+        task: j.serviceType === 'DELIVERY_COMPLETED' ? 'Vehicle Delivery' : (j.serviceType || 'Service Task'),
         statusLabel: j.status,
         tracking: j.trackingStatus || '—',
         created: j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-IN') : '—',
@@ -2568,31 +2981,19 @@ function FranJobs({ call }) {
 // ══════════════════════════════════════════════════════════════════
 
 function FranRentals({ call }) {
-  const { data, loading, error, refresh } = useFetch(call, '/franchise/rentals');
+  const { data, loading, error, refresh } = useFetch(call, '/franchise/purchases');
   const [busy, setBusy] = useState(null);
   const [selected, setSelected] = useState(null);
   const { toast, show } = useToast();
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
-  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—';
   const handover = async id => {
     setBusy(id);
     try {
-      await call(`/franchise/rentals/${id}/handover`, { method:'put' });
+      await call(`/franchise/purchases/${id}/handover`, {method:'put'});
       show('Vehicle handover marked successfully.');
-      refresh();
-      setSelected(null);
+      refresh(); setSelected(null);
     } catch(e) { show(e.response?.data?.message || 'Handover failed','error'); }
-    finally { setBusy(null); }
-  };
-  const markReturned = async id => {
-    if (!window.confirm('Mark this vehicle as returned? It will move back into franchise stock and the rental will be completed.')) return;
-    setBusy(id);
-    try {
-      await call(`/franchise/rentals/${id}/return`, { method:'put' });
-      show('Vehicle returned, stock restored and completion task created.');
-      refresh();
-      setSelected(null);
-    } catch(e) { show(e.response?.data?.message || 'Vehicle return failed','error'); }
     finally { setBusy(null); }
   };
 
@@ -2602,16 +3003,15 @@ function FranRentals({ call }) {
 
   return <>
     <Toast toast={toast}/>
-    <PageHeader title="Customer Bookings" sub="Customer rental payments, pickup details and vehicle handover." />
+    <PageHeader title="Vehicle Sales" sub="Paid vehicle purchases, customer details and handover management." />
     <MetricGrid metrics={[
-      {label:'Total Bookings',value:rows.length,Icon:ClipboardList,color:'#2563eb'},
+      {label:'Total Sales',value:rows.length,Icon:ClipboardList,color:'#2563eb'},
       {label:'Paid',value:rows.filter(r=>r.paymentStatus==='PAID').length,Icon:CheckCircle,color:'#16a34a'},
       {label:'Awaiting Handover',value:rows.filter(r=>r.paymentStatus==='PAID'&&!r.handoverDate).length,Icon:Clock,color:'#d97706'},
-      {label:'Active Rentals',value:rows.filter(r=>r.status==='ACTIVE').length,Icon:Car,color:'#16a34a'},
-      {label:'Completed',value:rows.filter(r=>r.status==='COMPLETED').length,Icon:CheckCircle,color:'#64748b'},
+      {label:'Vehicles Handed Over',value:rows.filter(r=>r.handoverDate).length,Icon:Car,color:'#16a34a'},
     ]}/>
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {rows.map(r => {
+      {rows.map(r=>{
         const vs=r.vehicleSnapshot||{}, cust=r.customerId||{};
         return <div key={r._id} className="card" style={{padding:16}}>
           <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
@@ -2623,154 +3023,805 @@ function FranRentals({ call }) {
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginTop:14}}>
             <div><small>Vehicle</small><strong>{vs.registrationNo||'—'}</strong></div>
-            <div><small>Rental Start</small><strong>{fmt(r.startDate)}</strong></div>
-            <div><small>Due / End</small><strong>{fmt(r.endDate)}</strong></div>
-            <div><small>Duration</small><strong>{r.durationDays||0} day(s)</strong></div>
+            <div><small>Purchase Date</small><strong>{fmt(r.purchaseDate||r.createdAt)}</strong></div>
+            <div><small>Quantity</small><strong>{r.saleQuantity||r.durationDays||1} vehicle(s)</strong></div>
+            <div><small>Vehicle Price</small><strong>₹{Number(r.price||r.pricePerDay||0).toLocaleString('en-IN')}</strong></div>
             <div><small>Amount Paid</small><strong>₹{Number(r.totalAmount||0).toLocaleString('en-IN')}</strong></div>
             <div><small>Handover Date</small><strong>{fmt(r.handoverDate)}</strong></div>
-            {(r.extensionHistory||[]).length>0 && <div><small>Extensions</small><strong style={{color:'#7c3aed'}}>{(r.extensionHistory||[]).length}×</strong></div>}
-            {(r.extensionHistory||[]).length>0 && <div><small>Extended By</small><strong style={{color:'#7c3aed'}}>+{(r.extensionHistory||[]).reduce((s,e)=>s+(e.days||0),0)} day(s)</strong></div>}
           </div>
-          {(r.extensionHistory||[]).length>0 && (
-            <div style={{marginTop:10,padding:'10px 12px',background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:10}}>
-              <div style={{fontSize:12,fontWeight:700,color:'#5b21b6',marginBottom:6}}>🔄 Rental Extensions ({(r.extensionHistory||[]).length})</div>
-              <div style={{display:'flex',flexDirection:'column',gap:5}}>
-                {(r.extensionHistory||[]).map((ex,i)=>(
-                  <div key={i} style={{display:'flex',flexWrap:'wrap',gap:'4px 16px',fontSize:12,color:'#4c1d95',background:'#ede9fe',padding:'6px 10px',borderRadius:7}}>
-                    <span>📅 <b>Ext #{i+1}</b></span>
-                    <span>+{ex.days} day{ex.days!==1?'s':''}</span>
-                    <span>₹{Number(ex.amount||0).toLocaleString('en-IN')}</span>
-                    <span>{fmt(ex.oldEndDate)} → <b>{fmt(ex.newEndDate)}</b></span>
-                    <span style={{color:'#7c3aed'}}>{ex.at?new Date(ex.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):''}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginTop:12}}>
-            <div style={{padding:10,background:'#f8fafc',borderRadius:9,fontSize:12,color:'#475569'}}><b>Customer Location:</b><br/>{r.customerLocation?.fullAddress || r.fullAddress || [r.area,r.district,r.state,r.pincode].filter(Boolean).join(', ') || '—'}</div>
-            <div style={{padding:10,background:'#f0fdf4',borderRadius:9,fontSize:12,color:'#166534'}}><b>Pickup Location:</b><br/>{r.pickupLocation?.name || r.franchiseeName || '—'} · {r.pickupLocation?.address || '—'}</div>
+            <div style={{padding:10,background:'#f8fafc',borderRadius:9,fontSize:12,color:'#475569'}}><b>Customer Location:</b><br/>{r.customerLocation?.fullAddress||r.fullAddress||[r.area,r.district,r.state,r.pincode].filter(Boolean).join(', ')||'—'}</div>
+            <div style={{padding:10,background:'#f0fdf4',borderRadius:9,fontSize:12,color:'#166534'}}><b>Pickup / Handover Location:</b><br/>{r.pickupLocation?.name||r.franchiseeName||'—'} · {r.pickupLocation?.address||'—'}</div>
           </div>
           <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
             <button className="btn-ghost" onClick={()=>setSelected(r)}>View Complete Details</button>
-            {r.paymentStatus==='PAID' && !r.handoverDate && <button className="btn-primary" disabled={busy===r._id} onClick={()=>handover(r._id)}>
-              {busy===r._id?'Processing…':'🚗 Mark Handover'}
-            </button>}
-            {r.handoverDate && r.status === 'ACTIVE' && <button className="btn-primary" disabled={busy===r._id} onClick={()=>markReturned(r._id)}>
-              {busy===r._id?'Processing…':'↩ Mark Returned'}
-            </button>}
-            {r.handoverDate && r.status === 'ACTIVE' && <span style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#166534'}}>✓ Handed over {fmt(r.handoverDate)}</span>}
-            {r.status === 'COMPLETED' && <span style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#475569'}}>✓ Returned {fmt(r.returnDate)}</span>}
+            {r.paymentStatus==='PAID'&&!r.handoverDate&&<button className="btn-primary" disabled={busy===r._id} onClick={()=>handover(r._id)}>{busy===r._id?'Processing…':'🚗 Mark Handover'}</button>}
+            {r.handoverDate&&<span style={{padding:'8px 12px',fontSize:12,fontWeight:700,color:'#166534'}}>✓ Vehicle handed over {fmt(r.handoverDate)}</span>}
           </div>
         </div>;
       })}
-      {!rows.length && <div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer bookings for this franchisee.</p></div></div>}
+      {!rows.length&&<div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer vehicle purchases for this franchisee.</p></div></div>}
     </div>
-    {selected && <div className="modal-overlay" onClick={()=>setSelected(null)}>
+    {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}>
       <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}>
-        <div className="modal-head"><div><div className="modal-title">Booking Details</div><div className="modal-subtitle">Customer payment and handover record</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div>
+        <div className="modal-head"><div><div className="modal-title">Purchase Details</div><div className="modal-subtitle">Customer payment and vehicle handover record</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div>
         <div className="modal-body">
-          <div style={{marginBottom:14,padding:14,borderRadius:12,background:selected.paymentStatus==='PAID'?'#dcfce7':selected.paymentStatus==='FAILED'?'#fee2e2':'#fef3c7',border:`1px solid ${selected.paymentStatus==='PAID'?'#86efac':selected.paymentStatus==='FAILED'?'#fca5a5':'#fde68a'}`}}>
-            <div style={{display:'flex',alignItems:'center',gap:10}}>
-              <span style={{width:34,height:34,borderRadius:'50%',display:'inline-flex',alignItems:'center',justifyContent:'center',background:selected.paymentStatus==='PAID'?'#16a34a':selected.paymentStatus==='FAILED'?'#dc2626':'#d97706',color:'#fff',fontSize:20,fontWeight:900}}>{selected.paymentStatus==='PAID'?'✓':selected.paymentStatus==='FAILED'?'✕':'!'}</span>
-              <div><div style={{fontWeight:900,color:selected.paymentStatus==='PAID'?'#166534':selected.paymentStatus==='FAILED'?'#991b1b':'#92400e'}}>Payment {selected.paymentStatus}</div><div style={{fontSize:12,color:'#475569'}}>Booking payment status</div></div>
-            </div>
-          </div>
           {[
             ['Customer',selected.customerId?.name||'—'],['Email',selected.customerId?.email||'—'],['Phone',selected.customerId?.phone||'—'],
-            ['Customer Location',selected.customerLocation?.fullAddress || selected.fullAddress || [selected.area,selected.district,selected.state,selected.pincode].filter(Boolean).join(', ') || '—'],
-            ['Customer Pincode',selected.customerLocation?.pincode || selected.pincode || '—'],
             ['Vehicle',`${selected.vehicleSnapshot?.make||''} ${selected.vehicleSnapshot?.model||''}`],['Registration',selected.vehicleSnapshot?.registrationNo||'—'],
-            ['Payment ID',selected.razorpayPaymentId||'—'],['Amount Paid',`₹${Number(selected.totalAmount||0).toLocaleString('en-IN')}`],
-            ['Start Date',fmt(selected.startDate)],['Due / End Date',fmt(selected.endDate)],['Duration',`${selected.durationDays||0} day(s)`],
-            ['Pickup Franchisee',selected.pickupLocation?.name||selected.franchiseeName||'—'],['Pickup Address',selected.pickupLocation?.address||'—'],
-            ['Pickup Coordinates',selected.pickupLocation?.lat!=null&&selected.pickupLocation?.lng!=null?`${selected.pickupLocation.lat}, ${selected.pickupLocation.lng}`:'—'],
-            ['Handover Date',fmt(selected.handoverDate)],['Booking Created',fmt(selected.createdAt)],
-            ...((selected.extensionHistory||[]).length>0?[
-              ['Extensions',`${(selected.extensionHistory||[]).length} extension(s) — +${(selected.extensionHistory||[]).reduce((s,e)=>s+(e.days||0),0)} day(s)`],
-              ['Extended End Date',fmt(selected.endDate)],
-            ]:[]),
-          ].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:12,padding:'7px 0',borderBottom:'1px solid #f1f5f9',fontSize:13}}><span style={{color:'#64748b'}}>{k}</span><strong style={{textAlign:'right',wordBreak:'break-word'}}>{v}</strong></div>)}
-          <div style={{marginTop:16,fontWeight:800,fontSize:14}}>Booking History</div>
-          <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:7}}>
-            {(selected.bookingHistory||[]).slice().reverse().map((h,i)=><div key={i} style={{padding:10,borderRadius:9,background:'#f8fafc',border:'1px solid #e2e8f0',fontSize:12}}><b>{String(h.event||'EVENT').replaceAll('_',' ')}</b><span style={{float:'right',color:'#64748b'}}>{h.at?fmt(h.at):'—'}</span><div style={{marginTop:4,color:'#475569'}}>Payment: {h.paymentStatus||selected.paymentStatus||'—'} · Status: {h.status||selected.status||'—'} · Customer Location: {h.customerLocation?.fullAddress||selected.fullAddress||'—'}</div></div>)}
-            {!(selected.bookingHistory||[]).length&&<div style={{fontSize:12,color:'#64748b'}}>No historical events recorded for this booking.</div>}
-          </div>
-          {(selected.extensionHistory||[]).length>0 && <>
-            <div style={{marginTop:16,fontWeight:800,fontSize:14,color:'#5b21b6'}}>🔄 Extension History ({(selected.extensionHistory||[]).length})</div>
-            <div style={{marginTop:8,display:'flex',flexDirection:'column',gap:7}}>
-              {(selected.extensionHistory||[]).map((ex,i)=>(
-                <div key={i} style={{padding:10,borderRadius:9,background:'#f5f3ff',border:'1px solid #ddd6fe',fontSize:12}}>
-                  <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:4}}>
-                    <b style={{color:'#5b21b6'}}>Extension #{i+1}</b>
-                    <span style={{color:'#7c3aed'}}>{ex.at?new Date(ex.at).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):''}</span>
-                  </div>
-                  <div style={{marginTop:6,display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:'4px 12px',color:'#4c1d95'}}>
-                    <div><span style={{opacity:.7}}>Extra Days: </span><b>+{ex.days} day{ex.days!==1?'s':''}</b></div>
-                    <div><span style={{opacity:.7}}>Extension Paid: </span><b>₹{Number(ex.amount||0).toLocaleString('en-IN')}</b></div>
-                    <div><span style={{opacity:.7}}>Old End Date: </span><b>{fmt(ex.oldEndDate)}</b></div>
-                    <div><span style={{opacity:.7}}>New End Date: </span><b>{fmt(ex.newEndDate)}</b></div>
-                    {ex.razorpayPaymentId && <div style={{gridColumn:'1/-1'}}><span style={{opacity:.7}}>Payment ID: </span><code style={{fontSize:11,background:'#ede9fe',padding:'1px 5px',borderRadius:4}}>{ex.razorpayPaymentId}</code></div>}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>}
-        </div>
-        <div className="modal-footer">
-          {selected.paymentStatus==='PAID' && !selected.handoverDate && <button className="btn-primary" disabled={busy===selected._id} onClick={()=>handover(selected._id)}>{busy===selected._id?'Processing…':'🚗 Mark Handover'}</button>}
-          {selected.status==='ACTIVE' && selected.handoverDate && <button className="btn-primary" disabled={busy===selected._id} onClick={()=>markReturned(selected._id)}>{busy===selected._id?'Processing…':'↩ Mark Returned'}</button>}
-          <button className="btn-ghost" onClick={()=>setSelected(null)}>Close</button>
+            ['Quantity',selected.saleQuantity||selected.durationDays||1],['Vehicle Price',`₹${Number(selected.price||selected.pricePerDay||0).toLocaleString('en-IN')}`],
+            ['Amount Paid',`₹${Number(selected.totalAmount||0).toLocaleString('en-IN')}`],['Payment ID',selected.razorpayPaymentId||'—'],
+            ['Purchase Date',fmt(selected.purchaseDate||selected.createdAt)],['Handover Date',fmt(selected.handoverDate)],
+            ['Pickup / Handover Location',[selected.pickupLocation?.name||selected.franchiseeName,selected.pickupLocation?.address].filter(Boolean).join(' · ')||'—'],
+          ].map(([k,v])=><div key={k} className="kv-row"><span>{k}</span><strong>{v}</strong></div>)}
         </div>
       </div>
     </div>}
   </>;
 }
 
+
 function FranComplaints({ call }) {
   const { data, loading, error, refresh } = useFetch(call, '/franchise/complaints');
   const { data: inventory } = useFetch(call, '/franchise/pending-vehicles');
+  const { data: staffList } = useFetch(call, '/franchise/staff-list');
+  const [tab, setTab] = useState('open'); // 'open' | 'resolved'
   const [selected, setSelected] = useState(null);
+  const [modalTab, setModalTab] = useState('details'); // 'details' | 'history' | 'jobcard'
   const [resolution, setResolution] = useState('');
   const [replaceId, setReplaceId] = useState('');
   const [faultReason, setFaultReason] = useState('');
   const [busy, setBusy] = useState(false);
   const { toast, show } = useToast();
+  // Vehicle history
+  const [vHistory, setVHistory] = useState(null);
+  const [vHistoryLoading, setVHistoryLoading] = useState(false);
+  // Job card creation
+  const [jcStaffId, setJcStaffId] = useState('');
+  const [jcDescription, setJcDescription] = useState('');
+  const [jcPriority, setJcPriority] = useState('NORMAL');
+  const [jcBusy, setJcBusy] = useState(false);
+  // Job cards tab sub-tabs
+  const [jcTab, setJcTab] = useState('pending'); // 'pending' | 'completed'
+
   const available = (inventory || []).filter(v => v.status === 'APPROVED' && Number(v.quantity ?? 1) > 0);
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—';
+  const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+
+  const openModal = async (c) => {
+    setSelected(c);
+    setResolution('');
+    setReplaceId('');
+    setFaultReason('');
+    setJcStaffId('');
+    setJcDescription(c.message || '');
+    setJcPriority('NORMAL');
+    setModalTab('details');
+    setVHistory(null);
+    setVHistoryLoading(true);
+    try {
+      const h = await call(`/franchise/complaints/${c._id}/vehicle-history`);
+      setVHistory(h);
+    } catch (_) { setVHistory({ jobs: [], rentals: [] }); }
+    finally { setVHistoryLoading(false); }
+  };
+
   const solve = async () => {
     if (!selected) return;
     setBusy(true);
     try {
       await call(`/franchise/complaints/${selected._id}/solve`, { method:'put', data:{ resolution, replacementVehicleId:replaceId||undefined, faultReason:faultReason||undefined } });
-      show('Complaint marked solved. Customer feedback request sent.');
-      setSelected(null); setResolution(''); setReplaceId(''); setFaultReason(''); refresh();
-    } catch(e) { show(e.response?.data?.message || 'Could not solve complaint','error'); }
+      // Push a review request so the customer portal surfaces the rating prompt
+      try {
+        const reviewRequests = JSON.parse(localStorage.getItem('ev_customer_review_requests') || '[]');
+        // Avoid duplicate requests for the same complaint
+        if (!reviewRequests.find(r => r.complaintId === selected._id)) {
+          reviewRequests.push({
+            complaintId: selected._id,
+            vehicleMake: selected.vehicleSnapshot?.make || '',
+            vehicleModel: selected.vehicleSnapshot?.model || '',
+            vehicleReg: selected.vehicleSnapshot?.registrationNo || '—',
+            resolution,
+            resolvedAt: new Date().toISOString(),
+            customerPhone: selected.customerId?.phone || '',
+            customerName: selected.customerId?.name || 'Customer',
+            reviewed: false,
+          });
+          localStorage.setItem('ev_customer_review_requests', JSON.stringify(reviewRequests));
+        }
+      } catch (_) {}
+      show('Complaint marked resolved. Customer has been asked to leave a review.');
+      setSelected(null); refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not resolve complaint','error'); }
     finally { setBusy(false); }
   };
+
+  const createJobCard = async () => {
+    if (!selected) return;
+    setJcBusy(true);
+    try {
+      const job = await call(`/franchise/complaints/${selected._id}/work-order`, {
+        method:'post',
+        data:{ description: jcDescription, staffId: jcStaffId||undefined, priority: jcPriority }
+      });
+      // Write to localStorage so staff portal can see it
+      const staffJobCards = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+      const staffMember = (staffList||[]).find(s => s._id === jcStaffId);
+      staffJobCards.push({
+        id: job._id || Date.now().toString(),
+        jobId: job._id,
+        complaintId: selected._id,
+        staffId: jcStaffId,
+        staffName: staffMember?.name || 'Unassigned',
+        vehicleMake: selected.vehicleSnapshot?.make || '',
+        vehicleModel: selected.vehicleSnapshot?.model || '',
+        vehicleReg: selected.vehicleSnapshot?.registrationNo || '—',
+        customerName: selected.customerId?.name || 'Customer',
+        customerPhone: selected.customerId?.phone || '—',
+        problem: selected.message,
+        description: jcDescription,
+        priority: jcPriority,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        elapsedSeconds: 0,
+        remarks: '',
+      });
+      localStorage.setItem('ev_franchise_job_cards', JSON.stringify(staffJobCards));
+      show(`Job card created${jcStaffId ? ` and assigned to ${staffMember?.name || 'staff'}` : ''}.`);
+      setJcStaffId(''); setJcDescription(''); refresh();
+      setModalTab('jobcard'); setJcTab('pending');
+    } catch(e) { show(e.response?.data?.message || 'Could not create job card','error'); }
+    finally { setJcBusy(false); }
+  };
+
+  const complaints = data || [];
+  const openComplaints = complaints.filter(c => !['SOLVED','CLOSED'].includes(c.status));
+  const resolvedComplaints = complaints.filter(c => ['SOLVED','CLOSED'].includes(c.status));
+  const displayList = tab === 'open' ? openComplaints : resolvedComplaints;
+
+  // Job cards from localStorage tied to this franchisee
+  const allJobCards = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+  const pendingJobCards = allJobCards.filter(j => j.status !== 'COMPLETED');
+  const completedJobCards = allJobCards.filter(j => j.status === 'COMPLETED');
+
+  // Page-level tab: 'complaints' | 'jobcards'
+  const [pageTab, setPageTab] = useState('complaints');
+  // Selected job card for detail panel
+  const [selectedJc, setSelectedJc] = useState(null);
+
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
+
+  const STAT_COLOR = { OPEN:'#d97706', IN_PROGRESS:'#2563eb', SOLVED:'#16a34a', CLOSED:'#64748b' };
+
+  const jcStatusMeta = (jc) => {
+    if (jc.status==='COMPLETED') return { label:'✅ Completed', bg:'#dcfce7', color:'#166534', border:'#16a34a', cardBg:'#f0fdf4' };
+    if (jc.status==='PAUSED')    return { label:'⏸ Paused',    bg:'#fef3c7', color:'#92400e', border:'#d97706', cardBg:'#fffbeb' };
+    if (jc.status==='IN_PROGRESS') return { label:'▶ In Progress', bg:'#dbeafe', color:'#1d4ed8', border:'#2563eb', cardBg:'#eff6ff' };
+    return { label:'⏳ Pending', bg:'#f3e8ff', color:'#7c3aed', border:'#7c3aed', cardBg:'#fff' };
+  };
+
+  const fmtElapsed = s => {
+    if (!s) return '0m';
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
   return <>
     <Toast toast={toast}/>
-    <PageHeader title="Customer Complaints" sub="Resolve complaints and optionally issue a replacement from approved inventory."/>
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><div><strong>{c.subject||c.category||'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Customer: {c.customerId?.name||'Customer'} · {new Date(c.createdAt).toLocaleString()}</div></div><span style={{fontSize:11,fontWeight:700}}>{c.status}</span></div>
-        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
-        {c.vehicleSnapshot&&<div style={{fontSize:12,color:'#475569',marginTop:7}}>🚗 {c.vehicleSnapshot.make||''} {c.vehicleSnapshot.model||''} · Reg {c.vehicleSnapshot.registrationNo||'—'}</div>}
-        {c.paymentDetails&&<div style={{fontSize:11,color:'#64748b',marginTop:4}}>Payment: {c.paymentDetails.paymentStatus||'—'} · {c.paymentDetails.razorpayPaymentId||'—'} · ₹{c.paymentDetails.totalAmount||0}</div>}
-        {c.status!=='SOLVED'&&c.status!=='CLOSED'&&<button className="btn-primary" style={{marginTop:12}} onClick={()=>setSelected(c)}>Open & Resolve</button>}
-        {c.status==='SOLVED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>✓ Solved. Waiting for customer feedback.</div>}
-        {c.status==='CLOSED'&&<div style={{marginTop:8,color:'#166534',fontSize:12}}>⭐ Customer rating: {c.franchiseeRating||'—'}/5 {c.feedback?`· ${c.feedback}`:''}</div>}
-      </div>)}
-      {!data?.length&&<div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25}}/><p>No customer complaints.</p></div></div>}
+    <PageHeader title="Customer Complaints" sub="Resolve complaints, view vehicle history, create and assign job cards."/>
+
+    {/* ── Metrics ── */}
+    <div className="metric-grid" style={{marginBottom:20}}>
+      {[
+        {label:'Total',value:complaints.length,color:'#2563eb',Icon:Bell},
+        {label:'Open',value:openComplaints.length,color:'#d97706',Icon:AlertTriangle},
+        {label:'In Progress',value:complaints.filter(c=>c.status==='IN_PROGRESS').length,color:'#7c3aed',Icon:Wrench},
+        {label:'Resolved',value:resolvedComplaints.length,color:'#16a34a',Icon:CheckCircle},
+      ].map(({label,value,color,Icon})=>(
+        <div key={label} className="metric-card">
+          <div className="metric-icon" style={{background:color+'18',color}}><Icon size={20}/></div>
+          <div className="metric-body"><div className="metric-label">{label}</div><div className="metric-value">{value}</div></div>
+        </div>
+      ))}
     </div>
-    {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Resolve Complaint</div><div className="modal-subtitle">Solve the issue or issue a replacement vehicle.</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div><div className="modal-body"><div className="login-form">
-      <div style={{background:'#f8fafc',padding:12,borderRadius:10,border:'1px solid #e2e8f0'}}><strong>Complaint</strong><div style={{fontSize:13,marginTop:5}}>{selected.message}</div></div>
-      <label>Resolution *<textarea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Explain how the issue was resolved…"/></label>
-      <label>Replacement Vehicle (optional)<select value={replaceId} onChange={e=>setReplaceId(e.target.value)}><option value="">No replacement</option>{available.map(v=><option key={v._id} value={v._id}>{v.make} {v.model} · {v.registrationNo} · {v.quantity??1} available</option>)}</select></label>
-      {replaceId&&<label>Old Vehicle Fault / Replacement Reason *<textarea rows={2} value={faultReason} onChange={e=>setFaultReason(e.target.value)} placeholder="Why is the old vehicle being replaced?"/></label>}
-      {replaceId&&<InfoBanner Icon={AlertTriangle}>Replacement stock is reduced by 1 and the old vehicle is added to Fault Vehicles with its vehicle/payment snapshot and your reason.</InfoBanner>}
-    </div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setSelected(null)}>Cancel</button><button className="btn-primary" onClick={solve} disabled={busy||!resolution||!!(replaceId&&!faultReason)}>{busy?'Saving…':'Mark as Solved'}</button></div></div></div>}
+
+    {/* ── Page-level Tab Bar ── */}
+    <div style={{
+      display:'flex', alignItems:'center', justifyContent:'space-between',
+      borderBottom:'2px solid #f1f5f9', marginBottom:20, gap:12, flexWrap:'wrap',
+    }}>
+      <div style={{display:'flex', gap:0}}>
+        {[
+          ['complaints', '🔔 Complaints', complaints.length],
+          ['jobcards', '🪪 Job Cards', allJobCards.length],
+        ].map(([key, label, cnt]) => (
+          <button key={key} onClick={()=>setPageTab(key)} style={{
+            padding:'10px 22px', border:'none', cursor:'pointer',
+            fontWeight:700, fontSize:14, background:'transparent',
+            color: pageTab===key ? '#2563eb' : '#6b7280',
+            borderBottom: pageTab===key ? '2.5px solid #2563eb' : '2.5px solid transparent',
+            marginBottom:'-2px', transition:'all .15s',
+            display:'flex', alignItems:'center', gap:8,
+          }}>
+            {label}
+            <span style={{
+              background: pageTab===key ? '#2563eb' : '#e2e8f0',
+              color: pageTab===key ? '#fff' : '#64748b',
+              borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700,
+            }}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+      {/* Add Job Card button — only visible in job cards tab */}
+      {pageTab==='jobcards' && (
+        <button
+          onClick={()=>{ if(complaints.length>0){openModal(complaints[0]);} }}
+          style={{
+            display:'flex', alignItems:'center', gap:6,
+            background:'#7c3aed', color:'#fff', border:'none', borderRadius:10,
+            padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13,
+            boxShadow:'0 2px 8px rgba(124,58,237,.25)',
+          }}
+        >
+          <Plus size={15}/> Add Job Card
+        </button>
+      )}
+    </div>
+
+    {/* ══════════════════════════════════════
+        COMPLAINTS TAB
+    ══════════════════════════════════════ */}
+    {pageTab==='complaints' && (<>
+      {/* Sub-tabs: Open / Resolved */}
+      <div style={{display:'flex',gap:8,marginBottom:16}}>
+        {[['open','🔔 Open / Active',openComplaints.length],['resolved','✅ Resolved / Closed',resolvedComplaints.length]].map(([key,label,cnt])=>(
+          <button key={key} onClick={()=>setTab(key)} style={{
+            padding:'7px 18px', borderRadius:24, border:'2px solid', cursor:'pointer', fontWeight:700, fontSize:13,
+            borderColor: tab===key ? '#2563eb' : '#e2e8f0',
+            background:  tab===key ? '#2563eb' : '#fff',
+            color:       tab===key ? '#fff'    : '#374151',
+          }}>
+            {label}
+            <span style={{marginLeft:6,background:tab===key?'rgba(255,255,255,.25)':'#f1f5f9',borderRadius:99,padding:'1px 8px',fontSize:11}}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Complaint Cards */}
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        {displayList.map(c=>(
+          <div key={c._id} className="card" style={{padding:0,overflow:'hidden',borderLeft:`4px solid ${STAT_COLOR[c.status]||'#e2e8f0'}`}}>
+            {/* Card Header */}
+            <div style={{padding:'14px 18px 10px', borderBottom:'1px solid #f8fafc'}}>
+              <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap',alignItems:'flex-start'}}>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:15,color:'#111827'}}>{c.subject||c.category||'Vehicle Complaint'}</div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:4,display:'flex',gap:10,flexWrap:'wrap'}}>
+                    <span>👤 {c.customerId?.name||'Customer'}</span>
+                    <span>📞 {c.customerId?.phone||'—'}</span>
+                    <span>🕐 {fmtDt(c.createdAt)}</span>
+                  </div>
+                </div>
+                <span style={{
+                  fontSize:11, fontWeight:800, padding:'4px 12px', borderRadius:99, whiteSpace:'nowrap',
+                  background:(STAT_COLOR[c.status]||'#64748b')+'18', color:STAT_COLOR[c.status]||'#64748b',
+                }}>{c.status}</span>
+              </div>
+            </div>
+            {/* Card Body */}
+            <div style={{padding:'12px 18px'}}>
+              <div style={{fontSize:13,color:'#374151',lineHeight:1.6,marginBottom:8}}>{c.message}</div>
+              <div style={{display:'flex',gap:16,flexWrap:'wrap',fontSize:12,color:'#475569'}}>
+                {c.vehicleSnapshot&&<span>🚗 <b>{c.vehicleSnapshot.make||''} {c.vehicleSnapshot.model||''}</b> · {c.vehicleSnapshot.registrationNo||'—'}</span>}
+                {c.paymentDetails&&<span>💳 {c.paymentDetails.paymentStatus||'—'} · ₹{Number(c.paymentDetails.totalAmount||0).toLocaleString('en-IN')}</span>}
+                {c.assignedStaffName&&<span style={{color:'#2563eb'}}>🔧 {c.assignedStaffName}</span>}
+              </div>
+              {c.resolution&&<div style={{marginTop:8,fontSize:12,color:'#166534',background:'#f0fdf4',padding:'7px 10px',borderRadius:8,lineHeight:1.5}}>✓ <b>Resolution:</b> {c.resolution}</div>}
+              {c.status==='SOLVED'&&<div style={{marginTop:6,color:'#16a34a',fontSize:12}}>✓ Solved {fmt(c.solvedAt)} · Waiting for customer feedback.</div>}
+              {c.status==='CLOSED'&&<div style={{marginTop:6,color:'#166534',fontSize:12}}>⭐ Rating: {c.franchiseeRating||'—'}/5{c.feedback?` · "${c.feedback}"`:''}</div>}
+            </div>
+            {/* Card Footer */}
+            <div style={{padding:'10px 18px',background:'#f8fafc',borderTop:'1px solid #f1f5f9',display:'flex',gap:8,flexWrap:'wrap'}}>
+              {!['SOLVED','CLOSED'].includes(c.status)&&(
+                <button className="btn-primary" onClick={()=>openModal(c)}>🔍 Open &amp; Resolve</button>
+              )}
+              {['SOLVED','CLOSED'].includes(c.status)&&(
+                <button className="btn-ghost" onClick={()=>openModal(c)}>📋 View Details</button>
+              )}
+              {!['SOLVED','CLOSED'].includes(c.status)&&(
+                <button className="btn-ghost" onClick={()=>{openModal(c);setTimeout(()=>setModalTab('jobcard'),50);}}>🪪 Job Card</button>
+              )}
+            </div>
+          </div>
+        ))}
+        {!displayList.length&&(
+          <div className="card">
+            <div className="empty-state">
+              <Bell size={40} style={{opacity:.2, marginBottom:12}}/>
+              <p style={{fontWeight:600,color:'#94a3b8'}}>No {tab} complaints</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </>)}
+
+    {/* ══════════════════════════════════════
+        JOB CARDS TAB
+    ══════════════════════════════════════ */}
+    {pageTab==='jobcards' && (<>
+      {/* Sub-tabs: Pending / In Progress / Paused / Completed */}
+      <div style={{display:'flex',gap:8,marginBottom:20,flexWrap:'wrap'}}>
+        {[
+          ['pending',    '⏳ Pending',     allJobCards.filter(j=>j.status==='PENDING').length],
+          ['in_progress','▶ In Progress',  allJobCards.filter(j=>j.status==='IN_PROGRESS').length],
+          ['paused',     '⏸ Paused',       allJobCards.filter(j=>j.status==='PAUSED').length],
+          ['completed',  '✅ Completed',   completedJobCards.length],
+        ].map(([key,label,cnt])=>(
+          <button key={key} onClick={()=>setJcTab(key)} style={{
+            padding:'7px 16px', borderRadius:8, border:'2px solid', cursor:'pointer', fontWeight:700, fontSize:13,
+            borderColor: jcTab===key
+              ? (key==='completed'?'#16a34a':key==='paused'?'#d97706':key==='in_progress'?'#2563eb':'#7c3aed')
+              : '#e2e8f0',
+            background: jcTab===key
+              ? (key==='completed'?'#16a34a':key==='paused'?'#d97706':key==='in_progress'?'#2563eb':'#7c3aed')
+              : '#fff',
+            color: jcTab===key ? '#fff' : '#374151',
+            display:'flex', alignItems:'center', gap:6,
+          }}>
+            {label}
+            <span style={{
+              background: jcTab===key ? 'rgba(255,255,255,.25)' : '#f1f5f9',
+              color: jcTab===key ? '#fff' : '#64748b',
+              borderRadius:99, padding:'0px 7px', fontSize:11, fontWeight:700, minWidth:18, textAlign:'center',
+            }}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ── Job Cards Grid ── */}
+      {(()=>{
+        const filtered = jcTab==='completed' ? completedJobCards
+          : jcTab==='paused'      ? allJobCards.filter(j=>j.status==='PAUSED')
+          : jcTab==='in_progress' ? allJobCards.filter(j=>j.status==='IN_PROGRESS')
+          : allJobCards.filter(j=>j.status==='PENDING');
+
+        if (!filtered.length) return (
+          <div style={{
+            display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+            minHeight:260, background:'#fff', border:'1.5px dashed #e2e8f0', borderRadius:16, gap:12,
+          }}>
+            <ClipboardList size={40} style={{color:'#cbd5e1'}}/>
+            <div style={{fontWeight:700, fontSize:15, color:'#94a3b8'}}>No {jcTab.replace('_',' ')} job cards</div>
+            <div style={{fontSize:13, color:'#cbd5e1'}}>
+              {jcTab==='pending' ? 'Job cards you create will appear here.' : `No ${jcTab.replace('_',' ')} cards right now.`}
+            </div>
+            {jcTab==='pending' && complaints.length>0 && (
+              <button onClick={()=>{openModal(complaints[0]);}} style={{
+                marginTop:4, background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
+                padding:'9px 20px', cursor:'pointer', fontWeight:700, fontSize:13,
+              }}><Plus size={14} style={{verticalAlign:'middle',marginRight:4}}/>Create First Job Card</button>
+            )}
+          </div>
+        );
+
+        return (
+          <div style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(auto-fill, minmax(340px, 1fr))',
+            gap:16,
+          }}>
+            {filtered.map(jc=>{
+              const meta = jcStatusMeta(jc);
+              const isSelected = selectedJc?.id === jc.id;
+              return (
+                <div
+                  key={jc.id}
+                  onClick={()=>setSelectedJc(isSelected ? null : jc)}
+                  style={{
+                    border: `2px solid ${isSelected ? meta.border : '#e2e8f0'}`,
+                    borderRadius:14, overflow:'hidden',
+                    background: meta.cardBg,
+                    boxShadow: isSelected ? `0 0 0 3px ${meta.border}33` : '0 1px 4px rgba(0,0,0,.06)',
+                    cursor:'pointer', transition:'box-shadow .15s, border-color .15s',
+                    borderTop:`4px solid ${meta.border}`,
+                  }}
+                >
+                  {/* Card Top */}
+                  <div style={{padding:'14px 16px 10px'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:8,marginBottom:8}}>
+                      <div style={{fontWeight:800,fontSize:14,color:'#111827',lineHeight:1.3}}>
+                        🚗 {jc.vehicleMake} {jc.vehicleModel}
+                      </div>
+                      <span style={{
+                        fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99, whiteSpace:'nowrap', flexShrink:0,
+                        background:meta.bg, color:meta.color,
+                      }}>{meta.label}</span>
+                    </div>
+                    <div style={{fontSize:12,color:'#64748b',marginBottom:6}}>
+                      🔖 {jc.vehicleReg} &nbsp;·&nbsp; 👤 {jc.customerName}
+                    </div>
+                    <div style={{fontSize:12,color:'#374151',lineHeight:1.5}}>
+                      <span style={{fontWeight:600}}>Problem:</span> {jc.problem}
+                    </div>
+                  </div>
+
+                  {/* Divider row: staff + priority + time */}
+                  <div style={{
+                    display:'flex', gap:12, flexWrap:'wrap', alignItems:'center',
+                    padding:'8px 16px', background:'rgba(0,0,0,.025)',
+                    borderTop:'1px solid rgba(0,0,0,.06)',
+                    fontSize:12, color:'#475569',
+                  }}>
+                    <span style={{display:'flex',alignItems:'center',gap:4}}>
+                      <span style={{width:6,height:6,borderRadius:'50%',background:'#94a3b8',display:'inline-block'}}/>
+                      {jc.staffName||'Unassigned'}
+                    </span>
+                    <span style={{
+                      padding:'1px 8px', borderRadius:99, fontSize:11, fontWeight:700,
+                      background: jc.priority==='URGENT'||jc.priority==='HIGH' ? '#fee2e2' : jc.priority==='LOW' ? '#f0fdf4' : '#f1f5f9',
+                      color: jc.priority==='URGENT'||jc.priority==='HIGH' ? '#dc2626' : jc.priority==='LOW' ? '#16a34a' : '#475569',
+                    }}>⚡ {jc.priority}</span>
+                    {jc.elapsedSeconds>0&&<span>⏱ {fmtElapsed(jc.elapsedSeconds)}</span>}
+                  </div>
+
+                  {/* Pause Reason (if paused) */}
+                  {jc.pauseReason && jc.status==='PAUSED' && (
+                    <div style={{padding:'8px 16px',background:'#fef3c7',borderTop:'1px solid #fde68a',fontSize:12,color:'#92400e'}}>
+                      ⏸ <b>Pause Reason:</b> {jc.pauseReason}
+                      {jc.pausedAt&&<span style={{color:'#b45309',marginLeft:6,fontSize:11}}>· {fmtDt(jc.pausedAt)}</span>}
+                    </div>
+                  )}
+
+                  {/* Staff Remarks (if completed) */}
+                  {jc.remarks && jc.status==='COMPLETED' && (
+                    <div style={{padding:'8px 16px',background:'#f0fdf4',borderTop:'1px solid #bbf7d0',fontSize:12,color:'#166534'}}>
+                      📝 <b>Remarks:</b> {jc.remarks}
+                    </div>
+                  )}
+
+                  {/* Expanded Detail Panel */}
+                  {isSelected && (
+                    <div style={{borderTop:'2px solid',borderColor:meta.border,background:'#fff',padding:'16px'}}>
+                      <div style={{fontWeight:700,fontSize:13,color:'#374151',marginBottom:12}}>Job Card Details</div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
+                        {[
+                          ['Customer', jc.customerName],
+                          ['Phone', jc.customerPhone],
+                          ['Vehicle', `${jc.vehicleMake} ${jc.vehicleModel}`],
+                          ['Reg No.', jc.vehicleReg],
+                          ['Staff', jc.staffName||'Unassigned'],
+                          ['Priority', jc.priority],
+                          ['Created', fmtDt(jc.createdAt)],
+                          jc.startedAt && ['Started', fmtDt(jc.startedAt)],
+                          jc.completedAt && ['Completed', fmtDt(jc.completedAt)],
+                          jc.elapsedSeconds>0 && ['Time Spent', fmtElapsed(jc.elapsedSeconds)],
+                        ].filter(Boolean).map(([k,v])=>(
+                          <div key={k} style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'8px 10px',fontSize:12}}>
+                            <div style={{color:'#94a3b8',fontSize:11,marginBottom:2}}>{k}</div>
+                            <div style={{fontWeight:700,color:'#111827'}}>{v||'—'}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {jc.description && jc.description !== jc.problem && (
+                        <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'10px 12px',fontSize:13,color:'#374151',marginBottom:10,lineHeight:1.5}}>
+                          <div style={{fontWeight:700,fontSize:11,color:'#94a3b8',marginBottom:4}}>WORK DESCRIPTION</div>
+                          {jc.description}
+                        </div>
+                      )}
+                      {jc.pauseReason && (
+                        <div style={{background:'#fffbeb',border:'1px solid #fde68a',borderRadius:8,padding:'10px 12px',fontSize:13,color:'#92400e',marginBottom:10}}>
+                          <div style={{fontWeight:700,fontSize:11,color:'#b45309',marginBottom:4}}>⏸ PAUSE REASON FROM STAFF</div>
+                          {jc.pauseReason}
+                        </div>
+                      )}
+                      {jc.remarks && (
+                        <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:8,padding:'10px 12px',fontSize:13,color:'#166534',marginBottom:10}}>
+                          <div style={{fontWeight:700,fontSize:11,color:'#16a34a',marginBottom:4}}>📝 STAFF REMARKS</div>
+                          {jc.remarks}
+                        </div>
+                      )}
+                      <button onClick={(e)=>{e.stopPropagation();setSelectedJc(null);}} style={{
+                        width:'100%', border:'1.5px solid #e2e8f0', background:'#f8fafc', color:'#374151',
+                        borderRadius:8, padding:'8px', cursor:'pointer', fontWeight:600, fontSize:13,
+                      }}>Close Details</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {/* Quick summary bar */}
+      {allJobCards.length > 0 && (
+        <div style={{
+          display:'flex', gap:16, flexWrap:'wrap', marginTop:20,
+          padding:'12px 18px', background:'#f8fafc', border:'1px solid #e2e8f0',
+          borderRadius:12, fontSize:13, color:'#475569',
+        }}>
+          <span style={{fontWeight:700, color:'#374151'}}>Summary:</span>
+          {[
+            ['⏳ Pending',    allJobCards.filter(j=>j.status==='PENDING').length,    '#7c3aed'],
+            ['▶ In Progress', allJobCards.filter(j=>j.status==='IN_PROGRESS').length,'#2563eb'],
+            ['⏸ Paused',     allJobCards.filter(j=>j.status==='PAUSED').length,     '#d97706'],
+            ['✅ Completed',  completedJobCards.length,                               '#16a34a'],
+          ].map(([label, cnt, color])=>(
+            <span key={label} style={{display:'flex',alignItems:'center',gap:4}}>
+              <span style={{width:8,height:8,borderRadius:'50%',background:color,display:'inline-block'}}/>
+              <b style={{color}}>{cnt}</b> {label}
+            </span>
+          ))}
+          <span style={{marginLeft:'auto',fontWeight:600}}>Total: {allJobCards.length}</span>
+        </div>
+      )}
+    </>)}
+
+    {/* Modal */}
+    {selected&&(
+      <div className="modal-overlay" onClick={()=>setSelected(null)}>
+        <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(680px,100%)',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
+          {/* Modal Header */}
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Complaint: {selected.subject||selected.category||'Vehicle Complaint'}</div>
+              <div className="modal-subtitle">👤 {selected.customerId?.name||'Customer'} · 🚗 {selected.vehicleSnapshot?.make||''} {selected.vehicleSnapshot?.model||''} · {selected.vehicleSnapshot?.registrationNo||'—'}</div>
+            </div>
+            <button className="icon-btn" onClick={()=>setSelected(null)}>✕</button>
+          </div>
+
+          {/* Modal Tabs */}
+          <div style={{display:'flex',gap:4,padding:'12px 20px 0',borderBottom:'1px solid #f1f5f9',background:'#fff',flexShrink:0}}>
+            {[['details','📋 Details'],['history','🔧 Vehicle History'],['jobcard','🪪 Job Card']].map(([key,label])=>(
+              <button key={key} onClick={()=>setModalTab(key)} style={{
+                padding:'8px 14px',borderRadius:'8px 8px 0 0',border:'none',cursor:'pointer',fontWeight:600,fontSize:13,
+                background:modalTab===key?'#fff':'transparent',
+                color:modalTab===key?'#2563eb':'#64748b',
+                borderBottom:modalTab===key?'2px solid #2563eb':'2px solid transparent',
+              }}>{label}</button>
+            ))}
+          </div>
+
+          {/* Modal Body */}
+          <div className="modal-body" style={{flex:1,overflowY:'auto'}}>
+
+            {/* ── DETAILS TAB ── */}
+            {modalTab==='details'&&(
+              <div style={{display:'flex',flexDirection:'column',gap:14}}>
+                <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:10,padding:12}}>
+                  <div style={{fontWeight:700,marginBottom:6}}>📣 Complaint Message</div>
+                  <div style={{fontSize:13,color:'#374151',lineHeight:1.6}}>{selected.message}</div>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
+                  {[
+                    ['Status',selected.status],
+                    ['Category',selected.category||'—'],
+                    ['Raised On',fmtDt(selected.createdAt)],
+                    ['Vehicle',`${selected.vehicleSnapshot?.make||''} ${selected.vehicleSnapshot?.model||''}`],
+                    ['Registration',selected.vehicleSnapshot?.registrationNo||'—'],
+                    ['Customer',selected.customerId?.name||'—'],
+                    ['Phone',selected.customerId?.phone||'—'],
+                    ['Payment',selected.paymentDetails?.paymentStatus||'—'],
+                    ['Amount',`₹${Number(selected.paymentDetails?.totalAmount||0).toLocaleString('en-IN')}`],
+                    ['Assigned To',selected.assignedStaffName||'Not assigned'],
+                  ].map(([k,v])=>(
+                    <div key={k} style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,padding:'8px 12px',fontSize:12}}>
+                      <div style={{color:'#64748b',marginBottom:2}}>{k}</div>
+                      <div style={{fontWeight:700,color:'#111827'}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {!['SOLVED','CLOSED'].includes(selected.status)&&(
+                  <>
+                    <div style={{fontWeight:700,fontSize:14,marginTop:4}}>Resolve This Complaint</div>
+                    <div className="login-form" style={{gap:12}}>
+                      <label>Resolution Notes *
+                        <textarea rows={3} value={resolution} onChange={e=>setResolution(e.target.value)} placeholder="Explain how the issue was resolved…"/>
+                      </label>
+                      <label>Replacement Vehicle (optional)
+                        <select value={replaceId} onChange={e=>setReplaceId(e.target.value)}>
+                          <option value="">No replacement</option>
+                          {available.map(v=><option key={v._id} value={v._id}>{v.make} {v.model} · {v.registrationNo} · {v.quantity??1} available</option>)}
+                        </select>
+                      </label>
+                      {replaceId&&<label>Replacement Reason *
+                        <textarea rows={2} value={faultReason} onChange={e=>setFaultReason(e.target.value)} placeholder="Why is the old vehicle being replaced?"/>
+                      </label>}
+                    </div>
+                  </>
+                )}
+                {selected.resolution&&<div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:12}}>
+                  <div style={{fontWeight:700,color:'#166534',marginBottom:4}}>✅ Resolution</div>
+                  <div style={{fontSize:13,color:'#374151'}}>{selected.resolution}</div>
+                  <div style={{fontSize:11,color:'#64748b',marginTop:4}}>Solved on {fmt(selected.solvedAt)}</div>
+                </div>}
+              </div>
+            )}
+
+            {/* ── VEHICLE HISTORY TAB ── */}
+            {modalTab==='history'&&(
+              <div>
+                {vHistoryLoading?(
+                  <div style={{textAlign:'center',padding:32,color:'#64748b'}}>Loading vehicle history…</div>
+                ):(
+                  <>
+                    {/* Previous Repairs */}
+                    <div style={{fontWeight:700,fontSize:14,marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
+                      <Wrench size={16}/> Previous Repairs &amp; Jobs ({(vHistory?.jobs||[]).length})
+                    </div>
+                    {(vHistory?.jobs||[]).length===0&&<div style={{fontSize:13,color:'#94a3b8',marginBottom:16,padding:'10px 0'}}>No previous repair jobs found for this vehicle.</div>}
+                    <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:20}}>
+                      {(vHistory?.jobs||[]).map((j,i)=>(
+                        <div key={j._id||i} style={{border:'1px solid #e2e8f0',borderRadius:10,padding:'12px 14px',fontSize:12,background:j.status==='COMPLETED'?'#f0fdf4':'#fffbeb'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginBottom:6}}>
+                            <div style={{fontWeight:700}}>{j.serviceType||'Service'}</div>
+                            <span style={{padding:'2px 9px',borderRadius:99,fontSize:11,fontWeight:700,background:j.status==='COMPLETED'?'#dcfce7':'#fef3c7',color:j.status==='COMPLETED'?'#166534':'#92400e'}}>{j.status}</span>
+                          </div>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:'4px 10px',color:'#475569'}}>
+                            <span>🔑 Priority: {j.priority||'NORMAL'}</span>
+                            <span>📅 Created: {fmt(j.createdAt)}</span>
+                            {j.problem&&<span style={{gridColumn:'1/-1'}}>⚠️ Problem: {j.problem}</span>}
+                            {j.trackingStatus&&<span style={{gridColumn:'1/-1'}}>📍 Status: {j.trackingStatus}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Previous Rentals / Handover dates */}
+                    <div style={{fontWeight:700,fontSize:14,marginBottom:10,display:'flex',alignItems:'center',gap:6}}>
+                      <Car size={16}/> Rental &amp; Handover History ({(vHistory?.rentals||[]).length})
+                    </div>
+                    {(vHistory?.rentals||[]).length===0&&<div style={{fontSize:13,color:'#94a3b8',padding:'10px 0'}}>No rental history found for this vehicle.</div>}
+                    <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                      {(vHistory?.rentals||[]).map((r,i)=>(
+                        <div key={r._id||i} style={{border:'1px solid #e2e8f0',borderRadius:10,padding:'12px 14px',fontSize:12,background:'#f8fafc'}}>
+                          <div style={{display:'flex',justifyContent:'space-between',flexWrap:'wrap',gap:8,marginBottom:6}}>
+                            <div style={{fontWeight:700}}>Rental #{i+1} · {r.durationDays||0} day(s)</div>
+                            <span style={{padding:'2px 9px',borderRadius:99,fontSize:11,fontWeight:700,background:r.status==='COMPLETED'?'#dcfce7':'#dbeafe',color:r.status==='COMPLETED'?'#166534':'#1d4ed8'}}>{r.status}</span>
+                          </div>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:'4px 10px',color:'#475569'}}>
+                            <span>📅 Start: {fmt(r.startDate)}</span>
+                            <span>📅 End: {fmt(r.endDate)}</span>
+                            <span>🚗 Handover: {fmt(r.handoverDate)||'Not handed over'}</span>
+                            <span>↩ Returned: {fmt(r.returnDate)||'Not returned'}</span>
+                            <span>💳 {r.paymentStatus}</span>
+                            <span>₹{Number(r.totalAmount||0).toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* ── JOB CARD TAB ── */}
+            {modalTab==='jobcard'&&(
+              <div>
+                {/* Create New Job Card */}
+                {!['SOLVED','CLOSED'].includes(selected.status)&&(
+                  <div style={{background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:12,padding:16,marginBottom:20}}>
+                    <div style={{fontWeight:700,fontSize:14,color:'#5b21b6',marginBottom:12,display:'flex',alignItems:'center',gap:6}}>
+                      <Plus size={16}/> Create Job Card
+                    </div>
+                    <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                      <div>
+                        <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>Work Description</label>
+                        <textarea rows={3} value={jcDescription} onChange={e=>setJcDescription(e.target.value)}
+                          placeholder="Describe the work to be done…"
+                          style={{width:'100%',padding:'8px 10px',border:'1.5px solid #ddd6fe',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+                        />
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                        <div>
+                          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>Assign to Staff</label>
+                          <select value={jcStaffId} onChange={e=>setJcStaffId(e.target.value)}
+                            style={{width:'100%',padding:'8px 10px',border:'1.5px solid #ddd6fe',borderRadius:8,fontSize:13}}>
+                            <option value="">Select staff member</option>
+                            {(staffList||[]).map(s=><option key={s._id} value={s._id}>{s.name} · {s.role}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={{fontSize:12,fontWeight:600,color:'#374151',display:'block',marginBottom:4}}>Priority</label>
+                          <select value={jcPriority} onChange={e=>setJcPriority(e.target.value)}
+                            style={{width:'100%',padding:'8px 10px',border:'1.5px solid #ddd6fe',borderRadius:8,fontSize:13}}>
+                            <option value="LOW">Low</option>
+                            <option value="NORMAL">Normal</option>
+                            <option value="HIGH">High</option>
+                            <option value="URGENT">Urgent</option>
+                          </select>
+                        </div>
+                      </div>
+                      <button onClick={createJobCard} disabled={jcBusy||!jcDescription.trim()} style={{
+                        background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'10px 20px',
+                        cursor:'pointer',fontWeight:700,fontSize:13,alignSelf:'flex-start',
+                        opacity:jcBusy||!jcDescription.trim()?0.6:1,
+                      }}>{jcBusy?'Creating…':'🪪 Create &amp; Assign Job Card'}</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Existing Job Cards for this complaint */}
+                {(() => {
+                  const thisCards = allJobCards.filter(j => j.complaintId === selected._id);
+                  if (!thisCards.length) return (
+                    <div style={{textAlign:'center',padding:24,color:'#94a3b8',fontSize:13}}>
+                      No job cards created for this complaint yet.
+                    </div>
+                  );
+                  return (
+                    <div>
+                      <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:'#374151'}}>Job Cards for this Complaint ({thisCards.length})</div>
+                      <div style={{display:'flex',gap:8,marginBottom:12}}>
+                        {[['pending','⏳ Pending'],['completed','✅ Completed']].map(([key,label])=>(
+                          <button key={key} onClick={()=>setJcTab(key)} style={{
+                            padding:'5px 14px',borderRadius:99,border:'1.5px solid',cursor:'pointer',fontWeight:600,fontSize:12,
+                            borderColor:jcTab===key?'#7c3aed':'#e2e8f0',background:jcTab===key?'#7c3aed':'#fff',color:jcTab===key?'#fff':'#374151',
+                          }}>{label}</button>
+                        ))}
+                      </div>
+                      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                        {thisCards.filter(j=>jcTab==='pending'?j.status!=='COMPLETED':j.status==='COMPLETED').map(jc=>{
+                          const mBadgeBg = jc.status==='COMPLETED'?'#dcfce7':jc.status==='PAUSED'?'#fef3c7':'#f3e8ff';
+                          const mBadgeColor = jc.status==='COMPLETED'?'#166534':jc.status==='PAUSED'?'#92400e':'#7c3aed';
+                          const mStatusLabel = jc.status==='COMPLETED'?'✅ Completed':jc.status==='PAUSED'?'⏸ Paused':jc.status==='IN_PROGRESS'?'▶ In Progress':'⏳ Pending';
+                          return (
+                          <div key={jc.id} style={{border:'1px solid #e2e8f0',borderRadius:10,overflow:'hidden',background:jc.status==='COMPLETED'?'#f0fdf4':jc.status==='PAUSED'?'#fffbeb':'#fff'}}>
+                            <div style={{padding:'12px 14px'}}>
+                              <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                                <span style={{fontWeight:700,fontSize:13}}>👷 {jc.staffName||'Unassigned'}</span>
+                                <span style={{fontSize:11,fontWeight:700,padding:'2px 9px',borderRadius:99,background:mBadgeBg,color:mBadgeColor}}>{mStatusLabel}</span>
+                              </div>
+                              <div style={{fontSize:12,color:'#374151',marginBottom:6}}>{jc.description}</div>
+                              <div style={{display:'flex',gap:12,fontSize:11,color:'#64748b',flexWrap:'wrap'}}>
+                                <span>⚡ {jc.priority}</span>
+                                {jc.startedAt&&<span>▶ {fmtDt(jc.startedAt)}</span>}
+                                {jc.completedAt&&<span>✓ {fmtDt(jc.completedAt)}</span>}
+                                {jc.elapsedSeconds>0&&<span>⏱ {Math.floor(jc.elapsedSeconds/3600)}h {Math.floor((jc.elapsedSeconds%3600)/60)}m</span>}
+                              </div>
+                            </div>
+                            {jc.pauseReason&&jc.status==='PAUSED'&&(
+                              <div style={{padding:'7px 14px',background:'#fef3c7',borderTop:'1px solid #fde68a',fontSize:12,color:'#92400e'}}>
+                                ⏸ <b>Pause Reason:</b> {jc.pauseReason}
+                              </div>
+                            )}
+                            {jc.remarks&&(
+                              <div style={{padding:'7px 14px',background:'#f0fdf4',borderTop:'1px solid #bbf7d0',fontSize:12,color:'#166534'}}>
+                                📝 {jc.remarks}
+                              </div>
+                            )}
+                          </div>
+                          );
+                        })}
+                        {thisCards.filter(j=>jcTab==='pending'?j.status!=='COMPLETED':j.status==='COMPLETED').length===0&&(
+                          <div style={{textAlign:'center',padding:16,color:'#94a3b8',fontSize:13}}>No {jcTab} job cards.</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* Modal Footer */}
+          <div className="modal-footer">
+            {modalTab==='details'&&!['SOLVED','CLOSED'].includes(selected.status)&&(
+              <button className="btn-primary" onClick={solve} disabled={busy||!resolution||!!(replaceId&&!faultReason)}>
+                {busy?'Saving…':'✅ Mark as Solved'}
+              </button>
+            )}
+            {modalTab==='details'&&!['SOLVED','CLOSED'].includes(selected.status)&&(
+              <button className="btn-ghost" onClick={()=>setModalTab('jobcard')}>🪪 Create Job Card →</button>
+            )}
+            <button className="btn-ghost" onClick={()=>setSelected(null)}>Close</button>
+          </div>
+        </div>
+      </div>
+    )}
   </>;
 }
 

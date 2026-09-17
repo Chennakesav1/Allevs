@@ -57,6 +57,7 @@ const NAV_ITEMS = {
     { id: 'customers',           label: 'Customers',              Icon: Users },
     { id: 'franchise-ratings',   label: 'Franchisee Ratings',     Icon: BarChart2 },
     { id: 'customer-payments',   label: 'Customer Payments',      Icon: DollarSign },
+    { id: 'wallet-recharges',    label: 'Wallet Recharges',        Icon: Wallet },
     { id: 'demand',              label: 'Demand',                 Icon: TrendingUp },
   ],
 };
@@ -224,7 +225,7 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {navItems.map(({ id, label, Icon, parent, sub }) => {
+          {!user ? <SidebarSkeleton count={navItems.length || 10} /> : navItems.map(({ id, label, Icon, parent, sub }) => {
             const isActive = page === id;
             const isParentActive = parent && page === parent;
             return (
@@ -308,6 +309,7 @@ function PageRouter({ page, call }) {
     customers:            <AdminCustomers           call={call} />,
     'franchise-ratings':  <AdminFranchiseRatings    call={call} />,
     'customer-payments':  <AdminCustomerPayments    call={call} />,
+    'wallet-recharges':   <AdminWalletRecharges      call={call} />,
     demand:               <AdminDemand              {...P} />,
   };
   return pages[page] || pages.dashboard;
@@ -400,10 +402,42 @@ function DataTable({ rows = [], cols = [] }) {
   );
 }
 
+// Sidebar skeleton — shown while nav / user is loading
+function SidebarSkeleton({ count = 10 }) {
+  return (
+    <div className="sidebar-skeleton-nav">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="sidebar-skel-item">
+          <div className="sidebar-skel-icon" style={{ animationDelay: `${i * 55}ms` }} />
+          <div className="sidebar-skel-label" style={{ animationDelay: `${i * 55 + 28}ms` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Loader() {
   return (
-    <div className="loader-wrap">
-      <div className="skeleton" /><div className="skeleton" /><div className="skeleton" />
+    <div className="page-center-loader">
+      <div className="ev-loading-screen">
+        <div className="ev-logo-aura-wrap">
+          <div className="ev-logo-aura ev-logo-aura-1" />
+          <div className="ev-logo-aura ev-logo-aura-2" />
+          <div className="ev-logo-aura ev-logo-aura-3" />
+          <div className="ev-logo-card">
+            <img src={allevLogo} alt="allEV" className="ev-logo-img" />
+            <div className="ev-logo-shimmer-sweep" />
+          </div>
+        </div>
+        <div className="ev-loading-title">Loading EV Data…</div>
+        <div className="ev-loading-sub">Fetching latest information</div>
+        <div className="ev-progress-bar">
+          <div className="ev-progress-fill" />
+        </div>
+        <div className="ev-dots">
+          <div className="ev-dot" /><div className="ev-dot" /><div className="ev-dot" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -833,13 +867,16 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
-    drawMarkers(map, hubs);   // draw immediately — no waiting
+    // Draw immediately after init
+    setTimeout(() => { map.invalidateSize(); drawMarkers(map, hubs); }, 50);
   }, []);
 
   // ── invalidate size when panel re-appears (view toggle fix) ───
   React.useEffect(() => {
     if (!visible || !leafRef.current) return;
-    const t = setTimeout(() => leafRef.current.invalidateSize(), 50);
+    // Double invalidate: once immediately, once after transition settles
+    leafRef.current.invalidateSize();
+    const t = setTimeout(() => { leafRef.current?.invalidateSize(); drawMarkers(leafRef.current, hubs); }, 300);
     return () => clearTimeout(t);
   }, [visible]);
 
@@ -850,16 +887,25 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
   }, [hubs]);
 
   function drawMarkers(map, hubList) {
-    markersRef.current.forEach(m => map.removeLayer(m));
+    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch(_){} });
     markersRef.current = [];
-    hubList.forEach(hub => {
+    hubList.forEach((hub, idx) => {
       const coords = getHubCoords(hub);
       if (!coords) return;
       const color = HUB_STATUS_COLOR[hub.status] || '#2563eb';
       const icon = window.L.divIcon({
         className: '',
-        html: `<div style="width:18px;height:18px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.35);cursor:pointer;"></div>`,
-        iconSize: [18, 18], iconAnchor: [9, 9],
+        html: `<div style="
+          width:22px;height:22px;border-radius:50%;
+          background:${color};
+          border:3px solid #fff;
+          box-shadow:0 2px 10px rgba(0,0,0,.38);
+          cursor:pointer;
+          transition:transform .1s;
+        " onmouseover="this.style.transform='scale(1.3)'" onmouseout="this.style.transform='scale(1)'"></div>`,
+        iconSize:   [22, 22],
+        iconAnchor: [11, 11],
+        popupAnchor:[0, -13],
       });
       const marker = window.L.marker(coords, { icon }).addTo(map);
       marker.on('mouseover', e => {
@@ -871,6 +917,16 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
       marker.on('click',     () => onSelectHub(hub));
       markersRef.current.push(marker);
     });
+    // Auto-fit if more than one hub with coords
+    const withCoords = hubList.filter(h => getHubCoords(h));
+    if (withCoords.length > 1) {
+      try {
+        map.fitBounds(
+          window.L.latLngBounds(withCoords.map(h => getHubCoords(h))),
+          { padding:[30,30], maxZoom:10, animate:false }
+        );
+      } catch(_){}
+    }
   }
 
   // ── pan to selected hub ────────────────────────────────────────
@@ -1378,49 +1434,137 @@ function FranchiseeMap({ franchisees = [] }) {
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
-    return () => { markersRef.current.forEach(m => map.removeLayer(m)); map.remove(); leafRef.current = null; };
+    return () => {
+      markersRef.current.forEach(m => { try { map.removeLayer(m); } catch(_){} });
+      try { map.remove(); } catch(_){}
+      leafRef.current = null;
+    };
   }, []);
 
   React.useEffect(() => {
     const map = leafRef.current;
     if (!map || !window.L) return;
     const L = window.L;
-    markersRef.current.forEach(m => map.removeLayer(m));
+
+    // Clear old markers
+    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch(_){} });
     markersRef.current = [];
+
     const mapped = franchisees.filter(f => {
       const lat = Number(f.address?.latitude ?? f.address?.lat);
       const lng = Number(f.address?.longitude ?? f.address?.lng);
-      return Number.isFinite(lat) && Number.isFinite(lng);
+      return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
     });
-    mapped.forEach(f => {
+
+    mapped.forEach((f, idx) => {
       const lat = Number(f.address.latitude ?? f.address.lat);
       const lng = Number(f.address.longitude ?? f.address.lng);
       const a = f.address || {};
-      const basic = `<strong>${f.name || 'Franchisee'}</strong><br/>${a.city || a.district || a.state || 'India'}<br/>📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-      const complete = `<div style="min-width:220px"><strong>${f.name || 'Franchisee'}</strong><hr style="border:0;border-top:1px solid #eee;margin:6px 0"/>` +
-        `<div><b>Business:</b> ${a.businessName || '—'}</div><div><b>Manager:</b> ${a.managerName || '—'}</div>` +
-        `<div><b>Phone:</b> ${f.phone || a.managerPhone || '—'}</div><div><b>Email:</b> ${f.email || a.managerEmail || '—'}</div>` +
-        `<div><b>Address:</b> ${[a.line1,a.line2,a.city,a.district,a.state,a.pincode].filter(Boolean).join(', ') || '—'}</div>` +
-        `<div><b>GST:</b> ${a.gstNumber || '—'}</div><div><b>PAN:</b> ${a.panNumber || '—'}</div>` +
-        `<div><b>Latitude:</b> ${lat}</div><div><b>Longitude:</b> ${lng}</div></div>`;
-      const marker = L.circleMarker([lat,lng], { radius: 9, weight: 3, fillOpacity: .9 });
+
+      // Styled divIcon — blue dot with white border + pulse ring
+      const icon = L.divIcon({
+        className: '',
+        html: `
+          <div style="position:relative;width:28px;height:28px;">
+            <div style="
+              position:absolute;inset:0;border-radius:50%;
+              background:rgba(37,99,235,0.18);
+              animation:franchisee-pulse 2s ease-out infinite;
+              animation-delay:${(idx * 0.25) % 1.5}s;
+            "></div>
+            <div style="
+              position:absolute;top:5px;left:5px;width:18px;height:18px;
+              border-radius:50%;background:#2563eb;
+              border:3px solid #fff;
+              box-shadow:0 2px 10px rgba(37,99,235,0.55);
+              cursor:pointer;
+            "></div>
+          </div>`,
+        iconSize:   [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor:[0, -16],
+      });
+
+      const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+      const addressLine = [a.line1, a.line2, a.city, a.district, a.state, a.pincode]
+        .filter(Boolean).join(', ') || '—';
+
+      const popupHtml = `
+        <div style="min-width:230px;font-family:sans-serif;font-size:13px;line-height:1.55">
+          <div style="font-weight:800;font-size:15px;color:#1e3a8a;margin-bottom:6px;display:flex;align-items:center;gap:6px">
+            🏢 ${f.name || 'Franchisee'}
+          </div>
+          ${a.businessName ? `<div style="color:#2563eb;font-weight:600;margin-bottom:6px">${a.businessName}</div>` : ''}
+          <hr style="border:0;border-top:1px solid #e5e7eb;margin:6px 0"/>
+          <div style="color:#374151;margin-bottom:3px"><b>📍 Address:</b> ${addressLine}</div>
+          ${a.managerName  ? `<div style="color:#374151;margin-bottom:3px"><b>👤 Manager:</b> ${a.managerName}</div>` : ''}
+          ${f.phone || a.managerPhone ? `<div style="color:#374151;margin-bottom:3px"><b>📞 Phone:</b> ${f.phone || a.managerPhone}</div>` : ''}
+          ${f.email ? `<div style="color:#374151;margin-bottom:8px"><b>✉ Email:</b> ${f.email}</div>` : ''}
+          <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer"
+            style="display:inline-flex;align-items:center;gap:5px;background:#2563eb;color:#fff;
+            border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600;text-decoration:none">
+            🗺 Open in Maps
+          </a>
+        </div>`;
+
+      const marker = L.marker([lat, lng], { icon });
       marker.addTo(map);
-      marker.bindTooltip(basic, { direction:'top', offset:[0,-8], sticky:true });
-      marker.bindPopup(complete, { maxWidth: 340 });
+      marker.bindPopup(popupHtml, { maxWidth: 320, className: 'franchise-popup' });
       markersRef.current.push(marker);
     });
+
+    // Fit bounds or centre
     if (mapped.length > 1) {
-      map.fitBounds(L.latLngBounds(mapped.map(f => [Number(f.address.latitude ?? f.address.lat), Number(f.address.longitude ?? f.address.lng)])), { padding:[30,30], maxZoom: 10 });
+      const bounds = L.latLngBounds(
+        mapped.map(f => [Number(f.address.latitude ?? f.address.lat), Number(f.address.longitude ?? f.address.lng)])
+      );
+      map.fitBounds(bounds, { padding:[40,40], maxZoom:11 });
     } else if (mapped.length === 1) {
-      map.setView([Number(mapped[0].address.latitude ?? mapped[0].address.lat), Number(mapped[0].address.longitude ?? mapped[0].address.lng)], 10);
+      const f = mapped[0];
+      map.setView([Number(f.address.latitude ?? f.address.lat), Number(f.address.longitude ?? f.address.lng)], 10);
     }
   }, [franchisees]);
 
-  return <div className="hub-map-container" style={{position:'relative'}}>
-    <div ref={mapRef} id="india-franchise-map" />
-    {!franchisees.some(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))) &&
-      <div style={{padding:14,color:'#64748b',fontSize:12}}>No franchisee locations mapped yet. Add latitude and longitude when creating a franchisee.</div>}
-  </div>;
+  // Invalidate size after mount (container may have been hidden)
+  React.useEffect(() => {
+    const t = setTimeout(() => leafRef.current?.invalidateSize(), 200);
+    return () => clearTimeout(t);
+  }, []);
+
+  const mappedCount = franchisees.filter(f => {
+    const lat = Number(f.address?.latitude ?? f.address?.lat);
+    const lng = Number(f.address?.longitude ?? f.address?.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+  }).length;
+
+  return (
+    <div className="hub-map-container" style={{ position:'relative' }}>
+      <div ref={mapRef} id="india-franchise-map" />
+      {mappedCount === 0 && (
+        <div style={{
+          position:'absolute', inset:0, display:'flex', flexDirection:'column',
+          alignItems:'center', justifyContent:'center',
+          background:'rgba(249,250,251,0.92)', borderRadius:14, zIndex:500,
+        }}>
+          <span style={{ fontSize:36, marginBottom:10 }}>📍</span>
+          <div style={{ color:'#374151', fontWeight:700, fontSize:14 }}>No franchisees mapped yet</div>
+          <div style={{ color:'#9ca3af', fontSize:12, marginTop:4 }}>
+            Add latitude &amp; longitude when creating a franchisee to see them here.
+          </div>
+        </div>
+      )}
+      {mappedCount > 0 && (
+        <div style={{
+          position:'absolute', top:10, right:10, zIndex:500,
+          background:'rgba(255,255,255,0.92)', borderRadius:8, padding:'6px 12px',
+          border:'1px solid #e5e7eb', fontSize:12, color:'#374151', fontWeight:600,
+          boxShadow:'0 2px 8px rgba(0,0,0,0.1)',
+        }}>
+          🏢 {mappedCount} / {franchisees.length} franchisee{franchisees.length !== 1 ? 's' : ''} on map
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AdminFranchisees({ call }) {
@@ -2096,7 +2240,7 @@ function AdminVehicleInventory({ call }) {
                     <th>Battery</th>
                     <th>Range</th>
                     <th>Charging</th>
-                    <th>Price/Day</th>
+                    <th>Price</th>
                     <th>Qty</th>
                     <th>Status</th>
                     <th>Action</th>
@@ -2299,7 +2443,7 @@ function AdminVehicleInventory({ call }) {
                 ['Battery Capacity',    selectedVeh.batteryCapacityKwh ? `${selectedVeh.batteryCapacityKwh} kWh` : '—'],
                 ['Range',               selectedVeh.rangeKm           ? `${selectedVeh.rangeKm} km` : '—'],
                 ['Charging Type',       selectedVeh.chargingType      || '—'],
-                ['Price Per Day',       `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
+                ['Price (per unit)',    `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
                 ['Quantity in Stock',   selectedVeh.quantity ?? 1],
                 ['Approval Status',     selectedVeh.status            || '—'],
                 ['Submitted By',        selectedVeh.franchiseeName    || '—'],
@@ -2477,6 +2621,12 @@ function AdminVehicleApprovals({ call }) {
   const approved = vehicles.filter(v => v.status === 'APPROVED');
   const rejected = vehicles.filter(v => v.status === 'REJECTED');
 
+  // ── detect if a vehicle was edited after initial submission ──────
+  const isEdited = v => {
+    if (!v.updatedAt || !v.createdAt) return false;
+    return (new Date(v.updatedAt) - new Date(v.createdAt)) > 8000; // >8s gap → edited
+  };
+
   if (loading) return <Loader />;
   if (error)   return <Err msg={error} />;
 
@@ -2497,29 +2647,78 @@ function AdminVehicleApprovals({ call }) {
     {pending.length > 0 && (
       <Card title="Pending Approval" badge={`${pending.length} awaiting`}>
         <div className="approval-list">
-          {pending.map(v => (
-            <div key={v._id} className="approval-card">
+          {pending.map(v => {
+            const edited = isEdited(v);
+            const editedAgo = edited ? (() => {
+              const diff = Date.now() - new Date(v.updatedAt);
+              const m = Math.floor(diff / 60000);
+              if (m < 1) return 'just now';
+              if (m < 60) return `${m}m ago`;
+              const h = Math.floor(m / 60);
+              if (h < 24) return `${h}h ago`;
+              return `${Math.floor(h/24)}d ago`;
+            })() : null;
+            return (
+            <div key={v._id} className={`approval-card${edited ? ' approval-card--edited' : ''}`}>
+              {/* Image strip — show all thumbs */}
               {v.images?.length > 0 && (
-                <div className="approval-img">
-                  <img src={v.images[0].url} alt={v.make} />
-                  {v.images.length > 1 && <span className="img-count">+{v.images.length - 1}</span>}
+                <div className="approval-img-strip">
+                  {v.images.map((img, i) => (
+                    <div key={i} className="approval-img">
+                      <img src={img.url} alt={img.name || `Photo ${i+1}`} />
+                      {i === 0 && v.images.length > 1 && (
+                        <span className="img-count">+{v.images.length - 1}</span>
+                      )}
+                    </div>
+                  )).slice(0, 1)}
                 </div>
               )}
               <div className="approval-body">
-                <div className="approval-title">
-                  {v.category === '2-wheeler' ? '🛵' : v.category === '3-wheeler' ? '🛺' : '🚗'}
-                  &nbsp;{v.make} {v.model} ({v.year})
+                {/* Title row with EDITED badge */}
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:4 }}>
+                  <div className="approval-title">
+                    {v.category === '2-wheeler' ? '🛵' : v.category === '3-wheeler' ? '🛺' : '🚗'}
+                    &nbsp;{v.make} {v.model} {v.year ? `(${v.year})` : ''}
+                  </div>
+                  {edited && (
+                    <span className="edited-badge">
+                      ✏ Edited {editedAgo}
+                    </span>
+                  )}
                 </div>
+
+                {/* Key fields — highlight changed ones */}
                 <div className="approval-meta">
-                  <span>Reg: {v.registrationNo}</span>
-                  <span>₹{v.pricePerDay}/day</span>
-                  <span>Stock: {v.quantity ?? 0}</span>
-                  <span>{v.rangeKm} km range</span>
-                  <span>{v.color}</span>
+                  <span className="approval-field">
+                    <span className="field-label">Reg:</span> {v.registrationNo || '—'}
+                  </span>
+                  <span className="approval-field approval-field--price">
+                    <span className="field-label">Price:</span> ₹{(v.pricePerDay||0).toLocaleString('en-IN')}/unit
+                  </span>
+                  <span className="approval-field approval-field--qty">
+                    <span className="field-label">Stock:</span> {v.quantity ?? 0} units
+                  </span>
+                  {v.rangeKm && <span className="approval-field"><span className="field-label">Range:</span> {v.rangeKm} km</span>}
+                  {v.color   && <span className="approval-field"><span className="field-label">Color:</span> {v.color}</span>}
+                  {v.chargingType && <span className="approval-field"><span className="field-label">⚡</span> {v.chargingType}</span>}
                 </div>
+
+                {/* Images count indicator */}
+                {v.images?.length > 0 && (
+                  <div style={{ fontSize:11, color:'#6b7280', marginBottom:3, display:'flex', alignItems:'center', gap:4 }}>
+                    <span>🖼</span> {v.images.length} photo{v.images.length !== 1 ? 's' : ''} attached
+                  </div>
+                )}
+
                 <div className="approval-franchise">
-                  Submitted by: <strong>{v.franchiseeName}</strong> ({v.franchiseeEmail})
+                  Submitted by: <strong>{v.franchiseeName}</strong>
+                  {v.franchiseeEmail && <> ({v.franchiseeEmail})</>}
                   &nbsp;·&nbsp;{new Date(v.createdAt).toLocaleString()}
+                  {edited && (
+                    <span style={{ color:'#d97706', fontWeight:600, marginLeft:6 }}>
+                      · Last edited: {new Date(v.updatedAt).toLocaleString()}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="approval-actions">
@@ -2532,7 +2731,8 @@ function AdminVehicleApprovals({ call }) {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
     )}
@@ -2569,6 +2769,20 @@ function AdminVehicleApprovals({ call }) {
           <button className="btn-approve" onClick={() => approve(selected._id)}><CheckCircle size={14} /> Approve</button>
         </>}
       >
+        {/* Edited indicator inside modal */}
+        {isEdited(selected) && (
+          <div style={{ background:'#fffbeb', border:'1.5px solid #fcd34d', borderRadius:10,
+            padding:'10px 14px', marginBottom:16, display:'flex', alignItems:'center', gap:10 }}>
+            <span style={{ fontSize:20 }}>✏️</span>
+            <div>
+              <div style={{ fontWeight:700, color:'#92400e', fontSize:13 }}>This listing was edited after submission</div>
+              <div style={{ fontSize:12, color:'#b45309' }}>
+                Originally submitted: {new Date(selected.createdAt).toLocaleString()}<br/>
+                Last edited: <strong>{new Date(selected.updatedAt).toLocaleString()}</strong>
+              </div>
+            </div>
+          </div>
+        )}
         {selected.images?.length > 0 && (
           <div className="img-grid" style={{ marginBottom: 16 }}>
             {selected.images.map((img, i) => (
@@ -2578,17 +2792,31 @@ function AdminVehicleApprovals({ call }) {
         )}
         <div className="kv-list">
           {[
-            ['Category', selected.category], ['Make', selected.make], ['Model', selected.model],
-            ['Year', selected.year], ['Color', selected.color], ['Registration', selected.registrationNo],
-            ['Battery', `${selected.batteryCapacityKwh} kWh`], ['Range', `${selected.rangeKm} km`],
-            ['Charging', selected.chargingType], ['Price/Day', `₹${selected.pricePerDay}`],
-            ['Franchisee', selected.franchiseeName], ['Email', selected.franchiseeEmail],
-            ['Submitted', new Date(selected.createdAt).toLocaleString()],
+            ['Category',     selected.category],
+            ['Make',         selected.make],
+            ['Model',        selected.model],
+            ['Year',         selected.year],
+            ['Color',        selected.color],
+            ['Registration', selected.registrationNo],
+            ['Battery',      selected.batteryCapacityKwh ? `${selected.batteryCapacityKwh} kWh` : '—'],
+            ['Range',        selected.rangeKm ? `${selected.rangeKm} km` : '—'],
+            ['Charging',     selected.chargingType],
+            ['Price/Unit',   `₹${(selected.pricePerDay||0).toLocaleString('en-IN')}`],
+            ['Quantity',     selected.quantity ?? 1],
+            ['Franchisee',   selected.franchiseeName],
+            ['Email',        selected.franchiseeEmail],
+            ['Submitted',    new Date(selected.createdAt).toLocaleString()],
+            ['Last Updated', new Date(selected.updatedAt).toLocaleString()],
           ].map(([k, v]) => (
             <div className="kv-row" key={k}><span>{k}</span><strong>{v || '—'}</strong></div>
           ))}
         </div>
-        {selected.description && <p style={{ fontSize: 13, color: '#374151', marginTop: 12, lineHeight: 1.6 }}>{selected.description}</p>}
+        {selected.description && (
+          <p style={{ fontSize:13, color:'#374151', marginTop:12, lineHeight:1.6,
+            background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px' }}>
+            {selected.description}
+          </p>
+        )}
       </Modal>
     )}
   </>;
@@ -3191,10 +3419,297 @@ function AdminCustomers({ call }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// COMMAND CENTER — CUSTOMER PAYMENTS (Vehicle Rentals)
+// COMMAND CENTER — CUSTOMER PAYMENTS (Vehicle Sales)
 // ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+// COMMAND CENTER — WALLET RECHARGES
+// Shows all customer wallet recharge transactions with details
+// ══════════════════════════════════════════════════════════════════
+function AdminWalletRecharges({ call }) {
+  const [data,     setData]     = React.useState(null);
+  const [loading,  setLoading]  = React.useState(true);
+  const [error,    setError]    = React.useState(null);
+  const [search,   setSearch]   = React.useState('');
+  const [selected, setSelected] = React.useState(null);
+  const [filter,   setFilter]   = React.useState('ALL');
+
+  const load = React.useCallback(() => {
+    setLoading(true); setError(null);
+    // Try /admin/wallet-transactions first, fall back to /admin/wallet-recharges
+    call('/admin/wallet-transactions')
+      .then(d => { setData(Array.isArray(d) ? d : (d?.transactions || [])); setLoading(false); })
+      .catch(() => {
+        // fallback: pull from purchases where walletAmount > 0 or from customer list
+        call('/admin/purchases')
+          .then(purchases => {
+            // Build synthetic recharge list from wallet credits in purchases
+            const recharges = (Array.isArray(purchases) ? purchases : [])
+              .filter(p => p.walletAmount && Number(p.walletAmount) > 0)
+              .map(p => ({
+                _id: p._id + '_wallet',
+                customerId: p.customerId,
+                amount: Number(p.walletAmount),
+                type: 'DEBIT',
+                description: `Wallet deducted for vehicle purchase`,
+                referenceType: 'PURCHASE',
+                referenceId: p._id,
+                createdAt: p.createdAt,
+                paymentId: p.razorpayPaymentId || '—',
+              }));
+            setData(recharges);
+            setLoading(false);
+          })
+          .catch(e => { setError(e.message || 'Failed to load wallet data'); setLoading(false); });
+      });
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const fmtFull = d => d ? new Date(d).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+  const filtered = (data || []).filter(tx => {
+    const q = search.toLowerCase();
+    const cust = tx.customerId || {};
+    const matchSearch = !q ||
+      (cust.name || '').toLowerCase().includes(q) ||
+      (cust.email || '').toLowerCase().includes(q) ||
+      (tx.description || '').toLowerCase().includes(q) ||
+      (tx.paymentId || tx.referenceId || '').toLowerCase().includes(q);
+    const matchFilter = filter === 'ALL' ||
+      (filter === 'CREDIT' && (tx.type === 'CREDIT' || tx.amount > 0)) ||
+      (filter === 'DEBIT'  && (tx.type === 'DEBIT'  || tx.amount < 0));
+    return matchSearch && matchFilter;
+  });
+
+  const totalCredited = filtered.filter(t => t.type === 'CREDIT' || t.amount > 0).reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+  const totalDebited  = filtered.filter(t => t.type === 'DEBIT'  || t.amount < 0).reduce((s, t) => s + Math.abs(t.amount || 0), 0);
+
+  return (
+    <>
+      <PageHeader
+        title="Wallet Recharges"
+        sub="All customer wallet transactions — recharges and deductions across the network"
+        actions={
+          <button className="btn-ghost" onClick={load} style={{ fontSize: 13 }}>
+            <RefreshCw size={14} style={{ display: 'inline', marginRight: 4 }} />
+            Refresh
+          </button>
+        }
+      />
+
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 14, marginBottom: 20 }}>
+        {[
+          { label: 'Total Transactions', value: (data||[]).length,          color: '#2563eb', icon: '📋' },
+          { label: 'Credits',            value: (data||[]).filter(t=>t.type==='CREDIT'||t.amount>0).length, color: '#16a34a', icon: '↓' },
+          { label: 'Debits',             value: (data||[]).filter(t=>t.type==='DEBIT'||t.amount<0).length,  color: '#dc2626', icon: '↑' },
+          { label: 'Total Credited',     value: `₹${totalCredited.toLocaleString('en-IN')}`, color: '#16a34a', icon: '💚' },
+        ].map(({ label, value, color, icon }) => (
+          <div key={label} style={{
+            background: '#fff', border: '1px solid #e4e7ef', borderRadius: 12,
+            padding: '16px 18px', boxShadow: '0 1px 4px rgba(0,0,0,.04)',
+          }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color }}>{icon} {value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters + Search */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+        <input
+          type="search"
+          placeholder="Search customer name, email, payment ID…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            padding: '8px 14px', borderRadius: 8, border: '1px solid #e2e8f0',
+            fontSize: 13, width: 280, outline: 'none',
+          }}
+        />
+        {['ALL', 'CREDIT', 'DEBIT'].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: '7px 16px', borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: filter === f ? '1.5px solid #2563eb' : '1.5px solid #e4e7ef',
+            background: filter === f ? '#eff6ff' : '#fff',
+            color: filter === f ? '#2563eb' : '#6b7280',
+          }}>
+            {f === 'ALL' ? `All (${(data||[]).length})` : f === 'CREDIT' ? `Credits (${(data||[]).filter(t=>t.type==='CREDIT'||t.amount>0).length})` : `Debits (${(data||[]).filter(t=>t.type==='DEBIT'||t.amount<0).length})`}
+          </button>
+        ))}
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: '#94a3b8' }}>
+          Showing {filtered.length} of {(data||[]).length} records
+        </span>
+      </div>
+
+      {loading && <Loader />}
+      {error   && (
+        <div style={{ background: '#fef2f2', color: '#dc2626', padding: 20, borderRadius: 10, textAlign: 'center' }}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>⚠ Could not load wallet data</div>
+          <div style={{ fontSize: 13 }}>{error}</div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 8 }}>
+            Make sure <code style={{background:'#fee2e2',padding:'1px 6px',borderRadius:4}}>/api/admin/wallet-transactions</code> is implemented in the backend.
+          </div>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div style={{ background: '#fff', border: '1px solid #e4e7ef', borderRadius: 14, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e4e7ef' }}>
+                {['Customer', 'Amount', 'Type', 'Description', 'Reference', 'Date & Time'].map(h => (
+                  <th key={h} style={{ padding: '12px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 12 }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
+                    {search ? `No wallet transactions matching "${search}"` : 'No wallet transactions found.'}
+                  </td>
+                </tr>
+              )}
+              {filtered.map((tx, i) => {
+                const isCredit = tx.type === 'CREDIT' || tx.amount > 0;
+                const cust = tx.customerId || {};
+                return (
+                  <tr key={tx._id || i}
+                    style={{ borderBottom: '1px solid #f1f5f9', cursor: 'pointer', transition: 'background .1s' }}
+                    onClick={() => setSelected(selected?._id === tx._id ? null : tx)}
+                    onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+                    onMouseLeave={e => e.currentTarget.style.background=''}
+                  >
+                    {/* Customer */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <div style={{ fontWeight: 700, color: '#1a1f2e' }}>{cust.name || '—'}</div>
+                      <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{cust.email || '—'}</div>
+                      {cust.phone && <div style={{ fontSize: 11, color: '#94a3b8' }}>{cust.phone}</div>}
+                    </td>
+                    {/* Amount */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span style={{
+                        fontWeight: 800, fontSize: 15,
+                        color: isCredit ? '#16a34a' : '#dc2626',
+                      }}>
+                        {isCredit ? '+' : '−'}₹{Math.abs(tx.amount || 0).toLocaleString('en-IN')}
+                      </span>
+                    </td>
+                    {/* Type badge */}
+                    <td style={{ padding: '12px 14px' }}>
+                      <span style={{
+                        padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+                        background: isCredit ? '#dcfce7' : '#fee2e2',
+                        color:      isCredit ? '#166534' : '#991b1b',
+                      }}>
+                        {isCredit ? '↓ CREDIT' : '↑ DEBIT'}
+                      </span>
+                    </td>
+                    {/* Description */}
+                    <td style={{ padding: '12px 14px', fontSize: 12, color: '#374151', maxWidth: 200 }}>
+                      {tx.description || (isCredit ? 'Wallet Recharge' : 'Wallet Deduction')}
+                    </td>
+                    {/* Reference */}
+                    <td style={{ padding: '12px 14px' }}>
+                      {tx.referenceType && (
+                        <span style={{ fontSize: 11, background: '#f3f4f6', padding: '2px 7px', borderRadius: 4, color: '#374151', display:'block', marginBottom: 3 }}>
+                          {tx.referenceType}
+                        </span>
+                      )}
+                      {(tx.paymentId || tx.referenceId) && (
+                        <span style={{ fontSize: 10, color: '#94a3b8', fontFamily: 'monospace' }}>
+                          {(tx.paymentId || tx.referenceId || '').substring(0, 18)}…
+                        </span>
+                      )}
+                    </td>
+                    {/* Date */}
+                    <td style={{ padding: '12px 14px', fontSize: 12, color: '#374151' }}>
+                      {fmtFull(tx.createdAt)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Detail panel */}
+      {selected && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+        }} onClick={() => setSelected(null)}>
+          <div style={{
+            background: '#fff', width: 'min(460px,100%)', height: '100%',
+            overflowY: 'auto', padding: 28, boxShadow: '-4px 0 32px rgba(0,0,0,.12)',
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 22 }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e' }}>Transaction Details</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                  {(selected.type === 'CREDIT' || selected.amount > 0) ? '💚 Wallet Recharge / Credit' : '🔴 Wallet Deduction / Debit'}
+                </div>
+              </div>
+              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
+            </div>
+
+            {/* Amount hero */}
+            <div style={{
+              textAlign: 'center', padding: '24px 0', marginBottom: 20,
+              background: (selected.type === 'CREDIT' || selected.amount > 0) ? '#f0fdf4' : '#fef2f2',
+              borderRadius: 12, border: `1px solid ${(selected.type==='CREDIT'||selected.amount>0)?'#bbf7d0':'#fecaca'}`,
+            }}>
+              <div style={{ fontSize: 36, fontWeight: 900, color: (selected.type==='CREDIT'||selected.amount>0)?'#16a34a':'#dc2626' }}>
+                {(selected.type==='CREDIT'||selected.amount>0)?'+':'−'}₹{Math.abs(selected.amount||0).toLocaleString('en-IN')}
+              </div>
+              <div style={{ fontSize: 13, color: '#64748b', marginTop: 6 }}>
+                {selected.description || ((selected.type==='CREDIT'||selected.amount>0)?'Wallet Recharge':'Wallet Deduction')}
+              </div>
+            </div>
+
+            {/* Customer Info */}
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 10 }}>Customer</div>
+              {[
+                ['Name',  (selected.customerId?.name  || '—')],
+                ['Email', (selected.customerId?.email || '—')],
+                ['Phone', (selected.customerId?.phone || '—')],
+              ].map(([k,v]) => (
+                <div key={k} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', fontSize:13, borderBottom:'1px solid #f8fafc' }}>
+                  <span style={{ color:'#64748b' }}>{k}</span>
+                  <strong style={{ color:'#1a1f2e' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+
+            {/* Transaction Info */}
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 10 }}>Transaction</div>
+              {[
+                ['Type',        selected.type || (selected.amount > 0 ? 'CREDIT' : 'DEBIT')],
+                ['Reference',   selected.referenceType || '—'],
+                ['Payment ID',  selected.paymentId || selected.referenceId || '—'],
+                ['Date',        fmtFull(selected.createdAt)],
+              ].map(([k,v]) => (
+                <div key={k} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', fontSize:13, borderBottom:'1px solid #f8fafc', gap:8 }}>
+                  <span style={{ color:'#64748b', flexShrink:0 }}>{k}</span>
+                  <strong style={{ color:'#1a1f2e', textAlign:'right', wordBreak:'break-all' }}>{v}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function AdminCustomerPayments({ call }) {
-  const [rentals, setRentals]     = useState([]);
+  const [purchases, setPurchases]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
   const [selected, setSelected]   = useState(null);
@@ -3202,9 +3717,9 @@ function AdminCustomerPayments({ call }) {
 
   const load = () => {
     setLoading(true); setError(null);
-    call('/admin/rentals')
-      .then(d => setRentals(Array.isArray(d) ? d.filter(r => r.paymentStatus === 'PAID') : []))
-      .catch(e => setError(e.message || 'Failed to load rentals'))
+    call('/admin/purchases')
+      .then(d => setPurchases(Array.isArray(d) ? d.filter(r => r.paymentStatus === 'PAID') : []))
+      .catch(e => setError(e.message || 'Failed to load purchases'))
       .finally(() => setLoading(false));
   };
 
@@ -3218,13 +3733,12 @@ function AdminCustomerPayments({ call }) {
     BOOKED:           '#d97706',
     PAYMENT_DONE:     '#2563eb',
     HANDOVER_PENDING: '#7c3aed',
-    ACTIVE:           '#16a34a',
-    COMPLETED:        '#64748b',
+    HANDED_OVER:       '#16a34a',
     CANCELLED:        '#dc2626',
   };
 
-  const filtered = filter === 'ALL' ? rentals : rentals.filter(r => r.status === filter);
-  const paid     = rentals.filter(r => r.paymentStatus === 'PAID');
+  const filtered = filter === 'ALL' ? purchases : purchases.filter(r => r.status === filter);
+  const paid     = purchases.filter(r => r.paymentStatus === 'PAID');
   const total    = paid.reduce((s, r) => s + (r.totalAmount || 0), 0);
 
 
@@ -3238,16 +3752,16 @@ function AdminCustomerPayments({ call }) {
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 24, fontWeight: 800, color: '#1a1f2e', margin: 0 }}>Customer Payments</h1>
         <p style={{ color: '#64748b', fontSize: 13, margin: '4px 0 0' }}>
-          Paid vehicle rental bookings — refreshes every 30 seconds
+          Paid vehicle purchase bookings — refreshes every 30 seconds
         </p>
       </div>
 
       {/* KPI row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', gap: 12, marginBottom: 20 }}>
         {[
-          { label: 'Total Bookings',  value: rentals.length,                                       color: '#2563eb' },
+          { label: 'Total Sales',     value: purchases.length,                                       color: '#2563eb' },
           { label: 'Paid',            value: paid.length,                                           color: '#16a34a' },
-          { label: 'Active Rentals',  value: rentals.filter(r=>r.status==='ACTIVE').length,         color: '#16a34a' },
+          { label: 'Vehicles Handed Over', value: purchases.filter(r=>r.status==='HANDED_OVER').length,         color: '#16a34a' },
           { label: 'Revenue Collected',value: `₹${total.toLocaleString('en-IN')}`,                 color: '#16a34a' },
         ].map(({ label, value, color }) => (
           <div key={label} style={{
@@ -3262,14 +3776,14 @@ function AdminCustomerPayments({ call }) {
 
       {/* Filter tabs */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        {['ALL','PAYMENT_DONE','ACTIVE','COMPLETED','CANCELLED'].map(s => (
+        {['ALL','PAYMENT_DONE','HANDED_OVER','CANCELLED'].map(s => (
           <button key={s} onClick={() => setFilter(s)} style={{
             padding: '6px 14px', borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: 'pointer',
             border: filter === s ? `1.5px solid ${statusColor[s] || '#2563eb'}` : '1.5px solid #e4e7ef',
             background: filter === s ? (statusColor[s] || '#2563eb') + '18' : '#fff',
             color: filter === s ? (statusColor[s] || '#2563eb') : '#6b7280',
           }}>
-            {s === 'ALL' ? `All (${rentals.length})` : s.replace('_', ' ')}
+            {s === 'ALL' ? `All (${purchases.length})` : s.replace('_', ' ')}
           </button>
         ))}
       </div>
@@ -3279,7 +3793,7 @@ function AdminCustomerPayments({ call }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: '#f8fafc' }}>
-              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Booking Status', 'Dates'].map(h => (
+              {['Customer', 'Vehicle', 'Amount', 'Payment', 'Purchase Status', 'Purchase Date'].map(h => (
                 <th key={h} style={{ padding: '12px 14px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 12, borderBottom: '1px solid #e4e7ef' }}>{h}</th>
               ))}
             </tr>
@@ -3306,7 +3820,7 @@ function AdminCustomerPayments({ call }) {
                   </td>
                   <td style={{ padding: '12px 14px', fontWeight: 700, color: '#1a1f2e' }}>
                     ₹{(r.totalAmount || 0).toLocaleString('en-IN')}
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.durationDays} day{r.durationDays !== 1 ? 's' : ''}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.saleQuantity || r.durationDays} vehicle{(r.saleQuantity || r.durationDays) !== 1 ? 's' : ''}</div>
                   </td>
                   <td style={{ padding: '12px 14px' }}>
                     <span style={{
@@ -3323,8 +3837,7 @@ function AdminCustomerPayments({ call }) {
                     </span>
                   </td>
                   <td style={{ padding: '12px 14px', fontSize: 12, color: '#374151' }}>
-                    <div>{fmt(r.startDate)} →</div>
-                    <div>{fmt(r.endDate)}</div>
+                    <div>{fmt(r.purchaseDate || r.createdAt)}</div>
                   </td>
                 </tr>
               );
@@ -3345,7 +3858,7 @@ function AdminCustomerPayments({ call }) {
           }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
               <div>
-                <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e' }}>Rental Details</div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: '#1a1f2e' }}>Purchase Details</div>
                 <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>ID: {selected._id}</div>
               </div>
               <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#64748b' }}>✕</button>
@@ -3401,10 +3914,9 @@ function AdminCustomerPayments({ call }) {
                 ['Status',       selected.status],
                 ['Payment',      selected.paymentStatus],
                 ['Total Amount', `₹${(selected.totalAmount || 0).toLocaleString('en-IN')}`],
-                ['Rate',         `₹${selected.pricePerDay}/day`],
-                ['Duration',     `${selected.durationDays} day${selected.durationDays !== 1 ? 's' : ''}`],
-                ['Start Date',   fmt(selected.startDate)],
-                ['End Date',     fmt(selected.endDate)],
+                ['Vehicle Price', `₹${(selected.pricePerDay||0).toLocaleString('en-IN')} / vehicle`],
+                ['Quantity',     `${selected.saleQuantity || selected.durationDays || 1} vehicle${(selected.saleQuantity || selected.durationDays || 1) !== 1 ? 's' : ''}`],
+                ['Purchase Date', fmt(selected.purchaseDate || selected.createdAt)],
                 ['Booked On',    fmt(selected.createdAt)],
                 ...(selected.handoverDate ? [['Handover Date', fmt(selected.handoverDate)]] : []),
                 ...(selected.returnDate ? [['Returned Date', fmt(selected.returnDate)]] : []),
@@ -3426,16 +3938,11 @@ function AdminCustomerPayments({ call }) {
               </div>
             </div>
 
-            {/* Handover action */}            {selected.status === 'ACTIVE' && (
-              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#16a34a', fontWeight: 700, fontSize: 14 }}>
-                ✅ Vehicle is with the customer — Rental Active
-                {selected.handoverDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Handed over: {fmt(selected.handoverDate)}</div>}
-              </div>
-            )}
-            {selected.status === 'COMPLETED' && (
-              <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 10, padding: '14px', textAlign: 'center', color: '#475569', fontWeight: 700, fontSize: 14 }}>
-                ✅ Booking Completed — Vehicle Returned to Franchise Stock
-                {selected.returnDate && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 4 }}>Returned: {fmt(selected.returnDate)}</div>}
+            {/* Vehicle delivery status */}
+            {selected.status === 'HANDED_OVER' && (
+              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:14, textAlign:'center', color:'#16a34a', fontWeight:700, fontSize:14 }}>
+                ✅ Vehicle handed over to customer — Purchase Complete
+                {selected.handoverDate && <div style={{fontSize:12,fontWeight:400,marginTop:4}}>Handed over: {fmt(selected.handoverDate)}</div>}
               </div>
             )}
           </div>

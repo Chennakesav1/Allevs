@@ -7,7 +7,7 @@ const St  = require('../controllers/staff');
 const Fr  = require('../controllers/franchise');
 const Ad  = require('../controllers/admin');
 const Ap  = require('../controllers/approvals');   // ← NEW
-const Rn  = require('../controllers/rental');      // ← RENTAL
+const Rn  = require('../controllers/rental');      // Vehicle sales / purchase payments
 const upload = require('../middleware/upload');
 const { localSave } = require('../services/storage');
 const { Expansion } = require('../models');
@@ -50,9 +50,13 @@ cr.get( '/services',              P.customer.services);
 cr.post('/services',              P.customer.book);
 cr.get( '/bookings',              P.customer.bookings);
 cr.get( '/tracking/:id',          P.customer.tracking);
-cr.get( '/wallet',                P.customer.wallet);
-cr.get( '/wallet/transactions',   P.customer.walletTx);
-cr.post('/wallet/add-money',      P.customer.addMoney);
+cr.get( '/wallet',                    P.customer.wallet);
+cr.get( '/wallet/transactions',       P.customer.walletTx);
+cr.post('/wallet/add-money',          P.customer.addMoney);
+cr.post('/wallet/recharge-order',     P.customer.walletRechargeOrder);
+cr.post('/wallet/verify-recharge',    P.customer.walletVerifyRecharge);
+cr.get( '/wallet/recharge/:orderId/status', P.customer.walletRechargeStatus);
+cr.post('/wallet/recharge/:orderId/cancel', P.customer.walletCancelRecharge);
 cr.post('/payment',               P.customer.pay);
 cr.get( '/invoices',              P.customer.invoices);
 cr.post('/review',                P.customer.review);
@@ -66,14 +70,12 @@ cr.get( '/notifications',         P.customer.notifications);
 cr.get( '/available-vehicles',    Ap.availableVehicles);
 // Public hub list for the customer charging-stations map (avoids 403 on /admin/hubs)
 cr.get( '/hubs',                  Ad.hubs);
-// Vehicle Rental
-cr.post('/rentals/create-order',           Rn.createOrder);
-cr.post('/rentals/verify-payment',         Rn.verifyPayment);
-cr.get( '/rentals',                        Rn.myRentals);
-cr.get( '/rentals/invoices',               Rn.myRentalInvoices);
-cr.get( '/rentals/invoices/:id/download',  Rn.downloadInvoice);
-cr.post('/rentals/:id/extend/create-order', Rn.createExtensionOrder);
-cr.post('/rentals/:id/extend/verify-payment', Rn.verifyExtensionPayment);
+// Vehicle Purchase
+cr.post('/purchases/create-order',           Rn.createOrder);
+cr.post('/purchases/verify-payment',         Rn.verifyPayment);
+cr.get( '/purchases',                        Rn.myRentals);
+cr.get( '/purchases/invoices',               Rn.myRentalInvoices);
+cr.get( '/purchases/invoices/:id/download',  Rn.downloadInvoice);
 r.use('/customer', cr);
 
 // ── Staff ─────────────────────────────────────────────────────────
@@ -108,14 +110,26 @@ fr.get( '/inventory',          Fr.inventory);
 fr.post('/inventory',          Fr.addInventoryPart);
 fr.get( '/staff',              Fr.staff);
 fr.get( '/jobs',               Fr.jobs);
-fr.get( '/rentals',             Rn.franchiseRentals);
-fr.put( '/rentals/:id/handover', Rn.franchiseHandover);
-fr.put( '/rentals/:id/return',   Rn.franchiseReturn);
+fr.get( '/purchases',             Rn.franchisePurchases);
+fr.put( '/purchases/:id/handover', Rn.handover);
 fr.get( '/complaints',          P.franchise.complaints);
 fr.get( '/fault-vehicles',       P.franchise.faultVehicles);
 fr.put( '/complaints/:id/solve',      P.franchise.solveComplaint);
 fr.put( '/complaints/:id/assign',     P.franchise.assignComplaint);
 fr.post('/complaints/:id/work-order', P.franchise.createWorkOrder);
+fr.get( '/complaints/:id/vehicle-history', async (req, res) => {
+  try {
+    const M = require('../models');
+    const c = await M.Complaint.findOne({ _id: req.params.id, franchiseeId: req.user._id }).lean();
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    const vehicleId = c.vehicleId;
+    const [jobs, rentals] = await Promise.all([
+      M.Job.find({ vehicleId }).sort('-createdAt').limit(20).lean(),
+      M.VehicleRental.find({ vehicleId }).sort('-createdAt').limit(10).lean(),
+    ]);
+    return res.json({ jobs, rentals });
+  } catch (e) { return res.status(500).json({ message: e.message }); }
+});
 fr.get( '/staff-list', async (req, res) => {
   try {
     const M = require('../models');
@@ -128,11 +142,14 @@ fr.get( '/staff-list', async (req, res) => {
   } catch (e) { return res.status(500).json({ message: e.message }); }
 });
 // ── NEW: vehicle & staff approval submissions ─────────────────────
-fr.post('/pending-vehicles',   Ap.submitVehicle);
-fr.get( '/pending-vehicles',   Ap.myVehicles);
-fr.post('/pending-staff',      Ap.submitStaff);
-fr.get( '/pending-staff',      Ap.myStaff);
+fr.post('/pending-vehicles',        Ap.submitVehicle);
+fr.get( '/pending-vehicles',        Ap.myVehicles);
+fr.put( '/pending-vehicles/:id',    Ap.updateVehicle);   // ← EDIT vehicle
+fr.post('/pending-staff',           Ap.submitStaff);
+fr.get( '/pending-staff',           Ap.myStaff);
 fr.put( '/pending-staff/:id/remove', Ap.removeStaffFromFranchisee);
+// ── Part inventory CRUD ───────────────────────────────────────────
+fr.put( '/inventory/:id',           Fr.updateInventoryPart); // ← EDIT part
 r.use('/franchise', fr);
 
 // ── Admin / Central Command ───────────────────────────────────────
@@ -322,11 +339,12 @@ dr.post('/franchisees', async (req, res) => {
 });
 
 // Customer management
+dr.get('/wallet-transactions', Ad.walletTransactions);
 dr.get('/customers',         Ad.customers);
 dr.get('/customers/:id',     Ad.customerDetail);
 
-// Vehicle Rentals (Command Center)
-dr.get('/rentals',              Rn.allRentals);
+// Vehicle Purchases (Command Center)
+dr.get('/purchases',              Rn.allRentals);
 
 r.use('/admin', dr);
 

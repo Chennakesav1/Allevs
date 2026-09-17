@@ -52,26 +52,6 @@ function navigate(path) {
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 
-/* ── Loading Screen ─────────────────────────────────── */
-function LoadingScreen({ onDone }) {
-  useEffect(() => {
-    const timer = setTimeout(onDone, 1400);
-    return () => clearTimeout(timer);
-  }, [onDone]);
-
-  return (
-    <div className="loader">
-      <div className="loader-logo">
-        {/* No filter — logo colours render correctly on white background */}
-        <img src={allevLogo} alt="allEV" />
-      </div>
-      <div className="loader-bar-track">
-        <div className="loader-bar-fill" />
-      </div>
-    </div>
-  );
-}
-
 /* ── Portal Chooser ─────────────────────────────────── */
 function PortalChooser() {
   const [ready, setReady] = useState(false);
@@ -134,7 +114,6 @@ function PortalChooser() {
 
 /* ── App Root ─────────────────────────────────────────── */
 function App() {
-  const [loading, setLoading] = useState(true);
   const [path, setPath] = useState(
     window.location.pathname.toLowerCase().replace(/\/$/, '') || '/'
   );
@@ -146,7 +125,6 @@ function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  if (loading) return <LoadingScreen onDone={() => setLoading(false)} />;
   if (path === '/customer')                    return <CustomerApp />;
   if (path === '/staff')                       return <StaffApp />;
   if (path === '/franchisee')                  return <FranchiseeApp />;

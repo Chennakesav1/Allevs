@@ -91,3 +91,21 @@ exports.addInventoryPart = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to add part.' });
   }
 };
+exports.updateInventoryPart = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const allowed = ['name','category','quantity','reorderLevel','unitPrice','description','manufacturer','compatibleVehicles','location','partType'];
+    const updates = {};
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+    if (updates.quantity !== undefined)    updates.quantity    = Number(updates.quantity);
+    if (updates.reorderLevel !== undefined) updates.reorderLevel = Number(updates.reorderLevel);
+    if (updates.unitPrice !== undefined)   updates.unitPrice   = Number(updates.unitPrice);
+
+    const part = await Inventory.findByIdAndUpdate(id, updates, { new: true });
+    if (!part) return res.status(404).json({ message: 'Part not found.' });
+    res.json(part);
+  } catch (err) {
+    console.error('updateInventoryPart error:', err);
+    res.status(500).json({ message: err.message || 'Failed to update part.' });
+  }
+};

@@ -439,7 +439,9 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
         </div>
 
         <nav className="sidebar-nav">
-          {NAV_ITEMS.map(({ id, labelKey, Icon }) => (
+          {!user ? (
+            !sidebarCollapsed ? <SidebarSkeleton count={NAV_ITEMS.length} /> : null
+          ) : NAV_ITEMS.map(({ id, labelKey, Icon }) => (
             <button
               key={id}
               className={'sidebar-nav-item' + (page === id ? ' active' : '')}
@@ -507,7 +509,7 @@ function PageRouter({ page, call, user, setUser, setPage }) {
   const P = { call, user, setUser, setPage };
   const pages = {
     dashboard: <StaffDashboard {...P} />,
-    'my-works': <MyWorks {...P} />,
+    'my-works': <MyWorks user={user} {...P} />,
     holidays: <Holidays {...P} />,
     leave: <Leave {...P} />,
     profile: <Profile {...P} />,
@@ -600,10 +602,42 @@ function DataTable({ rows = [], cols = [] }) {
   );
 }
 
+// Sidebar skeleton — shown while nav / user is loading
+function SidebarSkeleton({ count = 5 }) {
+  return (
+    <div className="sidebar-skeleton-nav">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="sidebar-skel-item">
+          <div className="sidebar-skel-icon" style={{ animationDelay: `${i * 60}ms` }} />
+          <div className="sidebar-skel-label" style={{ animationDelay: `${i * 60 + 30}ms` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Loader() {
   return (
-    <div className="loader-wrap">
-      <div className="skeleton" /><div className="skeleton" /><div className="skeleton" />
+    <div className="page-center-loader">
+      <div className="ev-loading-screen">
+        <div className="ev-logo-aura-wrap">
+          <div className="ev-logo-aura ev-logo-aura-1" />
+          <div className="ev-logo-aura ev-logo-aura-2" />
+          <div className="ev-logo-aura ev-logo-aura-3" />
+          <div className="ev-logo-card">
+            <img src={allevLogo} alt="allEV" className="ev-logo-img" />
+            <div className="ev-logo-shimmer-sweep" />
+          </div>
+        </div>
+        <div className="ev-loading-title">Loading EV Data…</div>
+        <div className="ev-loading-sub">Fetching latest information</div>
+        <div className="ev-progress-bar">
+          <div className="ev-progress-fill" />
+        </div>
+        <div className="ev-dots">
+          <div className="ev-dot" /><div className="ev-dot" /><div className="ev-dot" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -846,16 +880,192 @@ function StaffDashboard({ call, user, setPage }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// MY WORKS — PENDING + COMPLETED
+// MY WORKS — PENDING + COMPLETED + COMPLAINT JOB CARDS
 // ══════════════════════════════════════════════════════════════════
-function MyWorks() {
+function MyWorks({ user, call }) {
   const { t } = useTranslation();
   const [works, setWorks] = useState(() => store.get('ev_staff_works') || []);
-  const [tab, setTab] = useState('all');
+  const [tab, setTab] = useState('jobcards'); // 'jobcards' | 'all' | 'all-tasks' | 'pending-tasks' | 'completed-tasks'
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ title:'', description:'', priority:'medium', dueDate:'', notes:'' });
+  const [jcTab, setJcTab] = useState('pending'); // 'pending' | 'completed'
+  const [remarksModal, setRemarksModal] = useState(null); // jobCard being remarked
+  const [remarksText, setRemarksText] = useState('');
+  const [tick, setTick] = useState(0);
+  const [pauseModal, setPauseModal] = useState(null);   // jobCard being paused
+  const [pauseReasonText, setPauseReasonText] = useState('');
 
+  // Live tick for elapsed timer
+  useEffect(() => {
+    const id = setInterval(() => setTick(x => x + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Load job cards assigned to this staff member from API ──
+  const [jobCards, setJobCards] = useState([]);
+  const [jcLoading, setJcLoading] = useState(false);
+
+  const fetchMyJobCards = async () => {
+    if (!call) return;
+    try {
+      setJcLoading(true);
+      const staffId = user?._id || user?.id || '';
+      const allJobs = await call('/staff/jobs');
+      // Filter jobs assigned to this staff member
+      const myCards = (allJobs || []).filter(j =>
+        j.technicianId === staffId ||
+        (j.technicianId && (j.technicianId._id === staffId || j.technicianId.id === staffId))
+      );
+      setJobCards(myCards);
+    } catch (e) {
+      console.error('Failed to fetch job cards:', e);
+    } finally {
+      setJcLoading(false);
+    }
+  };
+
+  // Initial fetch only — no auto-refresh polling
+  useEffect(() => {
+    fetchMyJobCards();
+  }, [user]);
+
+  const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', {day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+  const fmtElapsed = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h > 0 ? h+'h ' : ''}${m}m ${s}s`;
+  };
+  const getLiveElapsed = (jc) => {
+    if (jc.status === 'IN_PROGRESS' && jc.startedAt && !jc.pausedAt) {
+      const base = jc.elapsedSeconds || 0;
+      const elapsed = Math.floor((Date.now() - new Date(jc.startedAt).getTime()) / 1000);
+      return base + elapsed;
+    }
+    return jc.elapsedSeconds || 0;
+  };
+
+  const updateJobCard = async (id, updates) => {
+    // Optimistic local update
+    setJobCards(prev => prev.map(jc => (jc._id || jc.id) === id ? { ...jc, ...updates } : jc));
+    // Persist to backend
+    try {
+      await call(`/staff/jobs/${id}`, { method: 'put', data: updates });
+    } catch (e) {
+      console.error('Failed to update job card:', e);
+      // Re-fetch to restore correct state on error
+      fetchMyJobCards();
+    }
+  };
+
+  const startWork = (jc) => {
+    const id = jc._id || jc.id;
+    const resuming = jc.status === 'PAUSED';
+    updateJobCard(id, {
+      status: 'IN_PROGRESS',
+      // On first start use now; on resume keep original startedAt but reset it
+      // to now so getLiveElapsed accumulates correctly from saved elapsedSeconds
+      startedAt: new Date().toISOString(),
+      elapsedSeconds: jc.elapsedSeconds || 0,
+      pausedAt: null,
+      pauseReason: resuming ? (jc.pauseReason || null) : null,
+    });
+  };
+
+  // Pause step 1: open reason modal
+  const openPauseModal = (jc) => {
+    setPauseModal(jc);
+    setPauseReasonText('');
+  };
+
+  // Pause step 2: confirm with reason → save & notify franchisee + customer
+  const confirmPause = () => {
+    if (!pauseModal) return;
+    const id = pauseModal._id || pauseModal.id;
+    const elapsed = getLiveElapsed(pauseModal);
+    const reason = pauseReasonText.trim() || 'No reason provided';
+    updateJobCard(id, {
+      status: 'PAUSED',
+      pausedAt: new Date().toISOString(),
+      elapsedSeconds: elapsed,
+      pauseReason: reason,
+    });
+    // Notify franchisee via localStorage (franchisee portal reads ev_franchise_job_cards)
+    try {
+      const stored = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+      const updated = stored.map(j =>
+        (j.id === id || j.jobId === id)
+          ? { ...j, status: 'PAUSED', pauseReason: reason, pausedAt: new Date().toISOString(), elapsedSeconds: elapsed }
+          : j
+      );
+      localStorage.setItem('ev_franchise_job_cards', JSON.stringify(updated));
+    } catch (_) {}
+    // Notify customer via localStorage (customer portal reads ev_customer_job_updates)
+    try {
+      const custUpdates = JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]');
+      custUpdates.push({
+        jobId: id,
+        event: 'PAUSED',
+        reason,
+        timestamp: new Date().toISOString(),
+        vehicleMake: pauseModal.vehicleMake || pauseModal.vehicleId?.make || '',
+        vehicleReg: pauseModal.vehicleReg || pauseModal.vehicleId?.registrationNo || '—',
+        customerName: pauseModal.customerName || '',
+      });
+      localStorage.setItem('ev_customer_job_updates', JSON.stringify(custUpdates));
+    } catch (_) {}
+    setPauseModal(null);
+    setPauseReasonText('');
+  };
+
+  const markComplete = (jc) => {
+    const elapsed = getLiveElapsed(jc);
+    setRemarksModal({ ...jc, elapsedSeconds: elapsed });
+    setRemarksText('');
+  };
+
+  const submitRemarks = () => {
+    if (!remarksModal) return;
+    const id = remarksModal._id || remarksModal.id;
+    const elapsed = remarksModal.elapsedSeconds || 0;
+    const completedAt = new Date().toISOString();
+    updateJobCard(id, {
+      status: 'COMPLETED',
+      completedAt,
+      elapsedSeconds: elapsed,
+      remarks: remarksText,
+    });
+    // Sync COMPLETED status to franchisee job cards in localStorage
+    try {
+      const stored = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+      const updated = stored.map(j =>
+        (j.id === id || j.jobId === id)
+          ? { ...j, status: 'COMPLETED', completedAt, elapsedSeconds: elapsed, remarks: remarksText }
+          : j
+      );
+      localStorage.setItem('ev_franchise_job_cards', JSON.stringify(updated));
+    } catch (_) {}
+    // Push completion event so customer portal can show it
+    try {
+      const custUpdates = JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]');
+      custUpdates.push({
+        jobId: id,
+        event: 'COMPLETED',
+        remarks: remarksText,
+        timestamp: completedAt,
+        vehicleMake: remarksModal.vehicleMake || remarksModal.vehicleId?.make || '',
+        vehicleReg: remarksModal.vehicleReg || remarksModal.vehicleId?.registrationNo || '—',
+        customerName: remarksModal.customerName || '',
+      });
+      localStorage.setItem('ev_customer_job_updates', JSON.stringify(custUpdates));
+    } catch (_) {}
+    setRemarksModal(null);
+    setRemarksText('');
+    setJcTab('completed');
+  };
+
+  // ── General Works ──
   const save = () => {
     if (!form.title.trim()) return;
     let updated;
@@ -868,115 +1078,356 @@ function MyWorks() {
     setForm({ title:'', description:'', priority:'medium', dueDate:'', notes:'' });
     setShowAdd(false); setEditId(null);
   };
-
   const markDone = id => {
     const updated = works.map(w => w.id === id ? { ...w, status: w.status === 'completed' ? 'pending' : 'completed', completedAt: new Date().toISOString() } : w);
     setWorks(updated); store.set('ev_staff_works', updated);
   };
-
   const deleteWork = id => {
     const updated = works.filter(w => w.id !== id);
     setWorks(updated); store.set('ev_staff_works', updated);
   };
-
   const startEdit = w => {
     setForm({ title: w.title, description: w.description, priority: w.priority, dueDate: w.dueDate || '', notes: w.notes || '' });
     setEditId(w.id); setShowAdd(true);
   };
 
-  const filtered = tab === 'pending' ? works.filter(w => w.status === 'pending')
-    : tab === 'completed' ? works.filter(w => w.status === 'completed')
+  const filtered = tab === 'pending-tasks' ? works.filter(w => w.status === 'pending')
+    : tab === 'completed-tasks' ? works.filter(w => w.status === 'completed')
     : works;
 
-  const PRIO_COLOR = { high:'#dc2626', medium:'#d97706', low:'#16a34a' };
+  const PRIO_COLOR = { high:'#dc2626', medium:'#d97706', low:'#16a34a', HIGH:'#dc2626', NORMAL:'#2563eb', LOW:'#16a34a', URGENT:'#dc2626' };
+  const pendingCards = jobCards.filter(jc => jc.status !== 'COMPLETED');
+  const completedCards = jobCards.filter(jc => jc.status === 'COMPLETED');
 
   return <>
-    <PageHeader title="My Works" sub="Track your pending and completed tasks." />
+    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8, marginBottom:4}}>
+      <PageHeader title="My Works" sub="Complaint job cards assigned to you and your personal task list." />
+      <button onClick={fetchMyJobCards} disabled={jcLoading} style={{
+        display:'flex', alignItems:'center', gap:6, padding:'8px 16px', borderRadius:8,
+        background:'#f8fafc', border:'1.5px solid #e2e8f0', cursor:'pointer', fontWeight:600, fontSize:13,
+        color:'#374151', marginTop:4, opacity: jcLoading ? 0.6 : 1,
+      }}>
+        {jcLoading ? '⏳ Refreshing…' : '↻ Refresh'}
+      </button>
+    </div>
 
-    <div className="works-tabs">
-      {[['all','All',works.length],['pending','Pending',works.filter(w=>w.status==='pending').length],['completed','Completed',works.filter(w=>w.status==='completed').length]].map(([key,label,count]) => (
-        <button key={key} className={'works-tab'+(tab===key?' active':'')} onClick={() => setTab(key)}>
+    {/* Top-level tabs */}
+    <div className="works-tabs" style={{marginBottom:16}}>
+      {[
+        ['jobcards', `🪪 Job Cards`, jobCards.length],
+        ['all', 'All Tasks', works.length],
+        ['pending-tasks', 'Pending', works.filter(w=>w.status==='pending').length],
+        ['completed-tasks', 'Completed', works.filter(w=>w.status==='completed').length],
+      ].map(([key, label, count]) => (
+        <button key={key} className={'works-tab' + (tab === key ? ' active' : '')} onClick={() => setTab(key)}>
           {label} <span className="tab-count">{count}</span>
         </button>
       ))}
     </div>
 
-    {showAdd && editId && (
-      <div className="card work-form-card">
-        <div className="card-head">
-          <div className="card-title">Edit Work</div>
-          <button className="icon-btn" onClick={() => { setShowAdd(false); setEditId(null); }}><X size={17} /></button>
+    {/* ── JOB CARDS TAB ── */}
+    {tab === 'jobcards' && (
+      <div>
+        {/* Sub-tabs */}
+        <div style={{display:'flex', gap:8, marginBottom:16}}>
+          {[['pending', '⏳ Pending', pendingCards.length], ['completed', '✅ Completed', completedCards.length]].map(([key,label,cnt]) => (
+            <button key={key} onClick={() => setJcTab(key)} style={{
+              padding:'7px 18px', borderRadius:99, border:'2px solid', cursor:'pointer', fontWeight:700, fontSize:13,
+              borderColor: jcTab===key ? '#7c3aed' : '#e2e8f0',
+              background: jcTab===key ? '#7c3aed' : '#fff',
+              color: jcTab===key ? '#fff' : '#374151',
+            }}>
+              {label} <span style={{marginLeft:4, background: jcTab===key?'rgba(255,255,255,.25)':'#f1f5f9', borderRadius:99, padding:'1px 8px', fontSize:11}}>{cnt}</span>
+            </button>
+          ))}
         </div>
-        <div className="work-form-grid">
-          <div className="form-field full">
-            <label>Work Title *</label>
-            <input value={form.title} onChange={e => setForm({...form, title:e.target.value})} placeholder="e.g. Replace battery unit on EV-0042" />
+
+        {jcLoading && (
+          <div className="empty-state">
+            <div className="empty-icon">⏳</div>
+            <div className="empty-title">Loading job cards…</div>
           </div>
-          <div className="form-field full">
-            <label>Description</label>
-            <textarea value={form.description} onChange={e => setForm({...form, description:e.target.value})} rows={2} placeholder="What needs to be done…" />
+        )}
+        {!jcLoading && (jcTab==='pending' ? pendingCards : completedCards).length === 0 && (
+          <div className="empty-state">
+            <div className="empty-icon">{jcTab==='pending'?'🪪':'✅'}</div>
+            <div className="empty-title">No {jcTab} job cards</div>
+            <div className="empty-sub">{jcTab==='pending' ? 'Job cards assigned by the franchisee will appear here.' : 'Completed job cards will appear here.'}</div>
           </div>
-          <div className="form-field">
-            <label>Priority</label>
-            <select value={form.priority} onChange={e => setForm({...form, priority:e.target.value})}>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </div>
-          <div className="form-field">
-            <label>Due Date</label>
-            <input type="date" value={form.dueDate} onChange={e => setForm({...form, dueDate:e.target.value})} />
-          </div>
-          <div className="form-field full">
-            <label>Notes</label>
-            <textarea value={form.notes} onChange={e => setForm({...form, notes:e.target.value})} rows={2} placeholder="Any additional notes…" />
-          </div>
-        </div>
-        <div style={{ display:'flex', gap:10, marginTop:14 }}>
-          <button className="btn-primary" onClick={save}><Save size={14} /> {editId ? 'Update' : 'Save Work'}</button>
-          <button className="btn-ghost" onClick={() => { setShowAdd(false); setEditId(null); }}>Cancel</button>
+        )}
+
+        <div style={{display:'flex', flexDirection:'column', gap:14}}>
+          {(jcTab==='pending' ? pendingCards : completedCards).map(jc => {
+            const isRunning = jc.status === 'IN_PROGRESS';
+            const liveElapsed = tick >= 0 ? getLiveElapsed(jc) : 0; // tick dependency for re-render
+            const prioColor = PRIO_COLOR[jc.priority] || '#64748b';
+            return (
+              <div key={jc._id || jc.id} style={{
+                border:`1.5px solid ${isRunning?'#2563eb':'#e2e8f0'}`,
+                borderRadius:14,
+                background: isRunning ? '#eff6ff' : jc.status==='COMPLETED' ? '#f0fdf4' : '#fff',
+                boxShadow: isRunning ? '0 0 0 3px #bfdbfe' : 'none',
+                overflow:'hidden',
+              }}>
+                {/* Card header */}
+                <div style={{padding:'14px 16px', borderBottom:'1px solid #f1f5f9'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:8, marginBottom:8}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:800, fontSize:15}}>🚗 {jc.vehicleMake || jc.vehicleId?.make || ''} {jc.vehicleModel || jc.vehicleId?.model || ''}</div>
+                      <div style={{fontSize:12, color:'#64748b', marginTop:2}}>Reg: {jc.vehicleReg || jc.vehicleId?.registrationNo || '—'} · Customer: {jc.customerName || jc.customerId?.name || 'Customer'} · {jc.customerPhone || jc.customerId?.phone || '—'}</div>
+                    </div>
+                    <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4}}>
+                      <span style={{fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99,
+                        background: isRunning?'#dbeafe':jc.status==='COMPLETED'?'#dcfce7':jc.status==='PAUSED'?'#fef3c7':'#f3e8ff',
+                        color: isRunning?'#1d4ed8':jc.status==='COMPLETED'?'#166534':jc.status==='PAUSED'?'#92400e':'#7c3aed',
+                      }}>
+                        {isRunning ? '▶ In Progress' : jc.status==='PAUSED' ? '⏸ Paused' : jc.status==='COMPLETED' ? '✅ Completed' : '⏳ Pending'}
+                      </span>
+                      <span style={{fontSize:11, fontWeight:600, padding:'2px 8px', borderRadius:99, background:prioColor+'18', color:prioColor}}>
+                        {jc.priority}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Problem & Description */}
+                  <div style={{fontSize:13, color:'#374151', marginBottom:6}}>
+                    <span style={{fontWeight:600}}>Problem: </span>{jc.problem || jc.message || '—'}
+                  </div>
+                  {jc.description && jc.description !== (jc.problem || jc.message) && (
+                    <div style={{fontSize:12, color:'#475569', marginBottom:6}}>
+                      <span style={{fontWeight:600}}>Work to do: </span>{jc.description}
+                    </div>
+                  )}
+
+                  {/* Time info */}
+                  <div style={{display:'flex', gap:12, fontSize:11, color:'#64748b', flexWrap:'wrap', marginTop:6}}>
+                    <span>📅 Created: {fmtDt(jc.createdAt)}</span>
+                    {jc.startedAt && <span>▶ Started: {fmtDt(jc.startedAt)}</span>}
+                    {jc.completedAt && <span>✓ Completed: {fmtDt(jc.completedAt)}</span>}
+                  </div>
+                </div>
+
+                {/* Timer bar */}
+                <div style={{padding:'10px 16px', background: isRunning?'#dbeafe':'#f8fafc', display:'flex', alignItems:'center', gap:12, justifyContent:'space-between', flexWrap:'wrap'}}>
+                  <div style={{display:'flex', alignItems:'center', gap:8}}>
+                    {isRunning && <span style={{width:8,height:8,borderRadius:'50%',background:'#2563eb',display:'inline-block',animation:'pulse 1s infinite'}}/>}
+                    <span style={{fontSize:isRunning?15:13, fontWeight:700, color:isRunning?'#1d4ed8':'#374151', fontVariantNumeric:'tabular-nums', letterSpacing:'0.5px'}}>
+                      ⏱ {fmtElapsed(liveElapsed)}
+                    </span>
+                    {isRunning && <span style={{fontSize:11,color:'#64748b'}}>running…</span>}
+                  </div>
+
+                  {/* Action Buttons */}
+                  {jc.status !== 'COMPLETED' && (
+                    <div style={{display:'flex', gap:8}}>
+                      {!isRunning && jc.status !== 'PAUSED' && (
+                        <button onClick={() => startWork(jc)} style={{
+                          background:'#16a34a', color:'#fff', border:'none', borderRadius:8,
+                          padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
+                        }}>▶ Start Work</button>
+                      )}
+                      {jc.status === 'PAUSED' && (
+                        <button onClick={() => startWork(jc)} style={{
+                          background:'#2563eb', color:'#fff', border:'none', borderRadius:8,
+                          padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
+                        }}>▶ Resume</button>
+                      )}
+                      {isRunning && (
+                        <button onClick={() => openPauseModal(jc)} style={{
+                          background:'#d97706', color:'#fff', border:'none', borderRadius:8,
+                          padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
+                        }}>⏸ Pause</button>
+                      )}
+                      <button onClick={() => markComplete(jc)} style={{
+                        background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
+                        padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
+                      }}>✅ Mark Complete</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Pause Reason */}
+                {jc.pauseReason && jc.status === 'PAUSED' && (
+                  <div style={{padding:'10px 16px', borderTop:'1px solid #fef3c7', background:'#fffbeb'}}>
+                    <span style={{fontSize:12, color:'#92400e'}}><b>⏸ Pause Reason:</b> {jc.pauseReason}</span>
+                    <span style={{fontSize:11, color:'#b45309', marginLeft:8}}>· Franchisee &amp; customer notified</span>
+                  </div>
+                )}
+                {/* Remarks (completed) */}
+                {jc.remarks && (
+                  <div style={{padding:'10px 16px', borderTop:'1px solid #f1f5f9', background:'#f0fdf4'}}>
+                    <span style={{fontSize:12, color:'#166534'}}><b>📝 My Remarks:</b> {jc.remarks}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     )}
 
-    <div className="works-list">
-      {filtered.length === 0 && (
-        <div className="empty-state">
-          <div className="empty-icon">📋</div>
-          <div className="empty-title">No {tab === 'all' ? '' : tab} works</div>
-          <div className="empty-sub">{tab === 'all' ? 'Add your first work item to get started.' : `No ${tab} works right now.`}</div>
-        </div>
-      )}
-      {filtered.map(w => (
-        <div key={w.id} className={'work-card' + (w.status === 'completed' ? ' done' : '')}>
-          <div className="work-card-left">
-            <button className={'work-check' + (w.status === 'completed' ? ' checked' : '')} onClick={() => markDone(w.id)}>
-              {w.status === 'completed' ? <CheckCircle size={20} /> : <div className="check-circle" />}
-            </button>
-          </div>
-          <div className="work-card-body">
-            <div className="work-card-top">
-              <span className="work-title">{w.title}</span>
-              <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                <span className="prio-tag" style={{ background: PRIO_COLOR[w.priority]+'18', color: PRIO_COLOR[w.priority] }}>{w.priority}</span>
-                {w.dueDate && <span className="due-tag">📅 {new Date(w.dueDate).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>}
+    {/* ── GENERAL WORKS TABS ── */}
+    {(tab === 'all' || tab === 'pending-tasks' || tab === 'completed-tasks') && (
+      <>
+        {showAdd && editId && (
+          <div className="card work-form-card">
+            <div className="card-head">
+              <div className="card-title">Edit Work</div>
+              <button className="icon-btn" onClick={() => { setShowAdd(false); setEditId(null); }}><X size={17} /></button>
+            </div>
+            <div className="work-form-grid">
+              <div className="form-field full">
+                <label>Work Title *</label>
+                <input value={form.title} onChange={e => setForm({...form, title:e.target.value})} placeholder="e.g. Replace battery unit on EV-0042" />
+              </div>
+              <div className="form-field full">
+                <label>Description</label>
+                <textarea value={form.description} onChange={e => setForm({...form, description:e.target.value})} rows={2} placeholder="What needs to be done…" />
+              </div>
+              <div className="form-field">
+                <label>Priority</label>
+                <select value={form.priority} onChange={e => setForm({...form, priority:e.target.value})}>
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label>Due Date</label>
+                <input type="date" value={form.dueDate} onChange={e => setForm({...form, dueDate:e.target.value})} />
+              </div>
+              <div className="form-field full">
+                <label>Notes</label>
+                <textarea value={form.notes} onChange={e => setForm({...form, notes:e.target.value})} rows={2} placeholder="Any additional notes…" />
               </div>
             </div>
-            {w.description && <div className="work-desc">{w.description}</div>}
-            {w.notes && <div className="work-notes">📝 {w.notes}</div>}
-            <div className="work-meta">
-              Added {new Date(w.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
-              {w.completedAt && ` · Completed ${new Date(w.completedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}`}
+            <div style={{ display:'flex', gap:10, marginTop:14 }}>
+              <button className="btn-primary" onClick={save}><Save size={14} /> {editId ? 'Update' : 'Save Work'}</button>
+              <button className="btn-ghost" onClick={() => { setShowAdd(false); setEditId(null); }}>Cancel</button>
             </div>
           </div>
-          <div className="work-card-actions">
-            <button className="icon-btn" onClick={() => startEdit(w)}><Edit2 size={15} /></button>
-            <button className="icon-btn danger" onClick={() => deleteWork(w.id)}><X size={15} /></button>
+        )}
+
+        <div className="works-list">
+          {filtered.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-icon">📋</div>
+              <div className="empty-title">No {tab === 'all' ? '' : tab === 'pending-tasks' ? 'pending' : 'completed'} works</div>
+              <div className="empty-sub">{tab === 'all' ? 'Add your first work item to get started.' : `No ${tab === 'pending-tasks' ? 'pending' : 'completed'} works right now.`}</div>
+            </div>
+          )}
+          {filtered.map(w => (
+            <div key={w.id} className={'work-card' + (w.status === 'completed' ? ' done' : '')}>
+              <div className="work-card-left">
+                <button className={'work-check' + (w.status === 'completed' ? ' checked' : '')} onClick={() => markDone(w.id)}>
+                  {w.status === 'completed' ? <CheckCircle size={20} /> : <div className="check-circle" />}
+                </button>
+              </div>
+              <div className="work-card-body">
+                <div className="work-card-top">
+                  <span className="work-title">{w.title}</span>
+                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                    <span className="prio-tag" style={{ background: (PRIO_COLOR[w.priority]||'#64748b')+'18', color: PRIO_COLOR[w.priority]||'#64748b' }}>{w.priority}</span>
+                    {w.dueDate && <span className="due-tag">📅 {new Date(w.dueDate).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</span>}
+                  </div>
+                </div>
+                {w.description && <div className="work-desc">{w.description}</div>}
+                {w.notes && <div className="work-notes">📝 {w.notes}</div>}
+                <div className="work-meta">
+                  Added {new Date(w.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}
+                  {w.completedAt && ` · Completed ${new Date(w.completedAt).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}`}
+                </div>
+              </div>
+              <div className="work-card-actions">
+                <button className="icon-btn" onClick={() => startEdit(w)}><Edit2 size={15} /></button>
+                <button className="icon-btn danger" onClick={() => deleteWork(w.id)}><X size={15} /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    )}
+
+    {/* ── Pause Reason Modal ── */}
+    {pauseModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+        <div style={{background:'#fff',borderRadius:16,padding:24,width:'min(460px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+          <div style={{fontWeight:800,fontSize:17,marginBottom:4,color:'#92400e'}}>⏸ Pause Work</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>
+            🚗 {pauseModal.vehicleMake||''} {pauseModal.vehicleModel||''} · {pauseModal.vehicleReg||'—'}
+          </div>
+          <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:10,padding:'10px 12px',marginBottom:14,fontSize:12,color:'#78350f'}}>
+            ⚠️ Your pause reason will be sent to the franchisee and the customer.
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:6}}>Why are you pausing? *</label>
+            <textarea
+              rows={3}
+              value={pauseReasonText}
+              onChange={e => setPauseReasonText(e.target.value)}
+              placeholder="e.g. Waiting for spare part, taking a break, customer approval needed…"
+              style={{width:'100%',padding:'10px 12px',border:'1.5px solid #fde68a',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+              autoFocus
+            />
+          </div>
+          <div style={{display:'flex',gap:10}}>
+            <button
+              onClick={confirmPause}
+              disabled={!pauseReasonText.trim()}
+              style={{flex:1,background:'#d97706',color:'#fff',border:'none',borderRadius:8,padding:'11px',cursor:'pointer',fontWeight:700,fontSize:14,opacity:pauseReasonText.trim()?1:0.5}}
+            >⏸ Confirm Pause</button>
+            <button
+              onClick={() => { setPauseModal(null); setPauseReasonText(''); }}
+              style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'11px 18px',cursor:'pointer',fontWeight:600,fontSize:13}}
+            >Cancel</button>
           </div>
         </div>
-      ))}
-    </div>
+      </div>
+    )}
+
+    {/* Remarks Modal */}
+    {remarksModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+        <div style={{background:'#fff',borderRadius:16,padding:24,width:'min(480px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+          <div style={{fontWeight:800,fontSize:17,marginBottom:4}}>✅ Mark Work as Completed</div>
+          <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>
+            ⏱ Total time: <b>{fmtElapsed(remarksModal.elapsedSeconds||0)}</b>
+          </div>
+
+          {/* Summary of work done */}
+          <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:12,marginBottom:14,fontSize:13}}>
+            <div style={{fontWeight:700,marginBottom:6}}>Job Summary</div>
+            <div><b>Vehicle:</b> {remarksModal.vehicleMake || remarksModal.vehicleId?.make || ''} {remarksModal.vehicleModel || remarksModal.vehicleId?.model || ''} · {remarksModal.vehicleReg || remarksModal.vehicleId?.registrationNo || '—'}</div>
+            <div><b>Problem:</b> {remarksModal.problem}</div>
+            <div><b>Work Assigned:</b> {remarksModal.description}</div>
+          </div>
+
+          <div style={{marginBottom:14}}>
+            <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:6}}>Work Remarks / What was done *</label>
+            <textarea
+              rows={4}
+              value={remarksText}
+              onChange={e => setRemarksText(e.target.value)}
+              placeholder="Describe what you did, parts replaced, issues found, etc…"
+              style={{width:'100%',padding:'10px 12px',border:'1.5px solid #e2e8f0',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+            />
+            <div style={{fontSize:11,color:'#94a3b8',marginTop:4}}>These remarks will be sent to the franchisee as job card details.</div>
+          </div>
+
+          <div style={{display:'flex',gap:10}}>
+            <button
+              onClick={submitRemarks}
+              disabled={!remarksText.trim()}
+              style={{flex:1,background:'#16a34a',color:'#fff',border:'none',borderRadius:8,padding:'11px',cursor:'pointer',fontWeight:700,fontSize:14,opacity:remarksText.trim()?1:0.5}}
+            >✅ Submit &amp; Complete</button>
+            <button
+              onClick={() => setRemarksModal(null)}
+              style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'11px 18px',cursor:'pointer',fontWeight:600,fontSize:13}}
+            >Cancel</button>
+          </div>
+        </div>
+      </div>
+    )}
   </>;
 }
 

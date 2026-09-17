@@ -1,7 +1,7 @@
 const mongoose=require('mongoose'); const {Schema}=mongoose;
 const id=Schema.Types.ObjectId;
 const userSchema=new Schema({name:{type:String,required:true},email:{type:String,unique:true,sparse:true,lowercase:true},phone:{type:String,unique:true,sparse:true},address:Schema.Types.Mixed,passwordHash:{type:String},role:{type:String,enum:['CUSTOMER','TECHNICIAN','STAFF','HUB_MANAGER','FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'],required:true},franchiseeId:id,hubId:id,active:{type:Boolean,default:true},refreshTokenHash:String,otpHash:String,otpExpiry:Date,otpVerified:{type:Boolean,default:false},isPasswordSet:{type:Boolean,default:false}},{timestamps:true});
-const vehicleSchema=new Schema({customerId:{type:id,ref:'User',required:true},vin:{type:String,unique:true,required:true},registrationNo:String,model:String,batterySoc:{type:Number,default:0},batterySoh:{type:Number,default:100},status:{type:String,default:'ACTIVE'}},{timestamps:true});
+const vehicleSchema=new Schema({customerId:{type:id,ref:'User',required:true},vin:{type:String,unique:true,required:true},registrationNo:String,model:String,batterySoc:{type:Number,default:0},batterySoh:{type:Number,default:100},status:{type:String,default:'ACTIVE'},sourcePurchaseId:{type:id,ref:'VehicleRental'}},{timestamps:true});
 const hubSchema=new Schema({name:String,code:{type:String,unique:true},city:String,address:String,lat:Number,lng:Number,status:{type:String,default:'ONLINE'},chargerCount:{type:Number,default:0},franchiseeId:id},{timestamps:true});
 const chargerSchema=new Schema({hubId:{type:id,ref:'Hub'},code:{type:String,unique:true},status:{type:String,default:'AVAILABLE'},powerKw:{type:Number,default:7.2},connectorType:{type:String,default:'AC'},pricePerKwh:{type:Number,default:12},lastHeartbeat:Date,lastTelemetry:Schema.Types.Mixed},{timestamps:true});
 const jobSchema=new Schema({customerId:{type:id,ref:'User'},vehicleId:{type:id,ref:'Vehicle'},rentalId:{type:id,ref:'VehicleRental'},franchiseeId:{type:id,ref:'User'},hubId:{type:id,ref:'Hub'},technicianId:{type:id,ref:'User'},serviceType:{type:String,default:'REPAIR'},problem:String,priority:{type:String,default:'NORMAL'},status:{type:String,enum:['PENDING','ASSIGNED','EN_ROUTE','REACHED','INSPECTION','IN_PROGRESS','WAITING_FOR_PARTS','QC','COMPLETED','CANCELLED','EMERGENCY'],default:'PENDING'},location:Schema.Types.Mixed,parts:[{partId:id,qty:Number,unitPrice:Number}],labourAmount:{type:Number,default:0},totalAmount:{type:Number,default:0},trackingStatus:{type:String,default:'Technician Assigned'},slaDueAt:Date},{timestamps:true});
@@ -12,7 +12,39 @@ const purchaseOrderSchema=new Schema({hubId:id,supplierId:id,items:[{sku:String,
 const paymentSchema=new Schema({customerId:id,jobId:id,invoiceId:id,amount:Number,method:String,status:{type:String,default:'PENDING'},provider:String,providerRef:String,orderId:String,signature:String},{timestamps:true});
 const invoiceSchema=new Schema({invoiceNo:{type:String,unique:true},customerId:id,jobId:id,rentalId:id,items:[{description:String,qty:Number,rate:Number,amount:Number}],subtotal:Number,tax:Number,total:Number,status:{type:String,default:'UNPAID'},paidAt:Date,pdfUrl:String},{timestamps:true});
 const walletSchema=new Schema({customerId:{type:id,unique:true},balance:{type:Number,default:0},currency:{type:String,default:'INR'}},{timestamps:true});
-const walletTxSchema=new Schema({customerId:id,type:{type:String,enum:['CREDIT','DEBIT']},amount:Number,referenceType:String,referenceId:id,description:String,balanceAfter:Number},{timestamps:true});
+const walletTxSchema=new Schema({
+  customerId:{type:id,ref:'User',index:true},
+  type:{type:String,enum:['CREDIT','DEBIT']},
+  amount:Number,
+  referenceType:String,
+  referenceId:id,
+  description:String,
+  balanceAfter:Number,
+  status:{type:String,enum:['SUCCESS','PENDING','FAILED','CANCELLED'],default:'SUCCESS'},
+  razorpayOrderId:{type:String,index:true},
+  razorpayPaymentId:{type:String,index:true},
+  provider:String,
+  providerRef:String,
+  customerName:String,
+  customerEmail:String,
+  customerPhone:String,
+},{timestamps:true});
+walletTxSchema.index({ razorpayPaymentId: 1 }, { unique: true, sparse: true });
+
+const walletRechargeSchema=new Schema({
+  customerId:{type:id,ref:'User',required:true,index:true},
+  orderId:{type:String,required:true,unique:true,index:true},
+  amount:{type:Number,required:true},
+  amountPaise:{type:Number,required:true},
+  currency:{type:String,default:'INR'},
+  status:{type:String,enum:['CREATED','AUTHORIZED','PAID','FAILED','CANCELLED'],default:'CREATED',index:true},
+  paymentId:{type:String,index:true},
+  signature:String,
+  failureReason:String,
+  creditedAt:Date,
+  cancelledAt:Date,
+  provider:{type:String,default:'RAZORPAY'},
+},{timestamps:true});
 const chargingSchema=new Schema({chargerId:id,customerId:id,vehicleId:id,energyKwh:{type:Number,default:0},amount:{type:Number,default:0},ratePerKwh:Number,status:{type:String,default:'PENDING'},startAt:Date,endAt:Date,meterStart:Number,meterEnd:Number,providerRef:String},{timestamps:true});
 const telemetrySchema=new Schema({vehicleId:id,chargerId:id,soc:Number,soh:Number,temperature:Number,voltage:Number,current:Number,powerKw:Number,faultCodes:[String],source:String,recordedAt:{type:Date,default:Date.now}},{timestamps:true});
 const diagnosticSchema=new Schema({vehicleId:id,faultCodes:[String],healthScore:Number,summary:String,raw:Schema.Types.Mixed,createdAt:{type:Date,default:Date.now}});
@@ -92,7 +124,7 @@ const pendingStaffSchema = new Schema({
   userId:           { type: id, ref: 'User' }, // set when User record is created on approval
 }, { timestamps: true });
 
-// ── Vehicle Rental (customer books an approved vehicle) ──────────────
+// ── Vehicle Sale (customer purchases an approved vehicle) ──────────────
 const vehicleRentalSchema = new Schema({
   customerId:       { type: id, ref: 'User', required: true },
   vehicleId:        { type: id, ref: 'PendingVehicle', required: true },
@@ -123,21 +155,25 @@ const vehicleRentalSchema = new Schema({
     lat: Number,
     lng: Number,
   },
-  // Booking dates
+  // Purchase details
+  purchaseDate:     { type: Date, default: Date.now },
+  saleQuantity:     { type: Number, default: 1, min: 1 },
+  // Legacy field names retained for existing MongoDB documents/API compatibility.
   startDate:        Date,
   endDate:          Date,
   durationDays:     Number,
   pricePerDay:      Number,
+  price:            Number,
   totalAmount:      Number,
   // Razorpay payment fields
   razorpayOrderId:  String,
   razorpayPaymentId:String,
   razorpaySignature:String,
   paymentStatus:    { type: String, enum: ['PENDING','PAID','FAILED'], default: 'PENDING' },
-  // Rental lifecycle
+  // Sale lifecycle
   status: {
     type: String,
-    enum: ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING','ACTIVE','COMPLETED','CANCELLED'],
+    enum: ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING','HANDED_OVER','CANCELLED','ACTIVE','COMPLETED'],
     default: 'BOOKED',
   },
   handoverDate:     Date,
@@ -170,6 +206,7 @@ const models={
   Invoice:mongoose.model('Invoice',invoiceSchema),
   Wallet:mongoose.model('Wallet',walletSchema),
   WalletTransaction:mongoose.model('WalletTransaction',walletTxSchema),
+  WalletRecharge:mongoose.model('WalletRecharge',walletRechargeSchema),
   ChargingSession:mongoose.model('ChargingSession',chargingSchema),
   Telemetry:mongoose.model('Telemetry',telemetrySchema),
   Diagnostic:mongoose.model('Diagnostic',diagnosticSchema),

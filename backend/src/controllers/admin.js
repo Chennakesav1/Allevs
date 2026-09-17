@@ -153,6 +153,28 @@ exports.customers = async (req, res) => {
   }
 };
 
+
+// Wallet recharge / debit ledger for Command Center.
+exports.walletTransactions = async (req, res) => {
+  try {
+    const { WalletTransaction } = require('../models');
+    const limit = Math.min(Math.max(parseInt(req.query.limit || 500), 1), 2000);
+    const rows = await WalletTransaction.find()
+      .populate('customerId', 'name email phone')
+      .sort('-createdAt')
+      .limit(limit)
+      .lean();
+    res.json(rows.map(tx => ({
+      ...tx,
+      customerId: tx.customerId || { name: tx.customerName, email: tx.customerEmail, phone: tx.customerPhone },
+      paymentId: tx.razorpayPaymentId || tx.providerRef || null,
+      referenceId: tx.razorpayOrderId || tx.referenceId || null,
+    })));
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
 exports.customerDetail = async (req, res) => {
   try {
     const { Job, Payment, Vehicle } = require('../models');
