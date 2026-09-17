@@ -6,7 +6,7 @@ import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal
+  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal
 } from 'lucide-react';
 import './customer.css';
 
@@ -768,13 +768,14 @@ function Shell({ user, page, setPage, call, logout }) {
               </button>
             </div>
 
-            <div className="mobile-menu-user">
+            <button className="mobile-menu-user mobile-menu-profile-card" onClick={() => navigate('profile')} aria-label="Open profile details">
               <div className="mobile-menu-avatar">{user?.name?.[0] ?? '?'}</div>
               <div className="mobile-menu-user-copy">
                 <strong>{user?.name || 'Customer'}</strong>
                 <span>{user?.email || 'Customer account'}</span>
               </div>
-            </div>
+              <span className="mobile-menu-profile-arrow">›</span>
+            </button>
 
             <nav className="mobile-menu-nav">
               {!user ? <SidebarSkeleton count={navItems.length} /> : navItems.map(({ id, label, Icon }) => (
@@ -829,7 +830,7 @@ function Shell({ user, page, setPage, call, logout }) {
       </aside>
 
       <div className="main-wrap">
-        <header className="topbar">
+        <header className="topbar customer-mobile-profile-header">
           <button
             className="hamburger-btn"
             onClick={() => setMenuOpen(true)}
@@ -837,17 +838,18 @@ function Shell({ user, page, setPage, call, logout }) {
           >
             <Menu size={22} />
           </button>
-          <div className="topbar-brand">
-            <div className="topbar-sub">{cfg.accent}</div>
-            <div className="topbar-title">{cfg.title}</div>
+
+          <div className="topbar-brand customer-mobile-logo-brand">
+            <img src={allevLogo} alt="allEV" className="customer-mobile-brand-logo" />
           </div>
-          <div className="topbar-user">
-            <div className="avatar">{user?.name?.[0] ?? '?'}</div>
+
+          <button className="topbar-user topbar-profile-trigger" onClick={() => { setPage('profile'); setMenuOpen(false); }} aria-label="Open profile">
+            <div className="avatar">{user?.profileImage ? <img src={user.profileImage} alt="Profile" /> : (user?.name?.[0] ?? 'C')}</div>
             <div className="topbar-user-info">
               <div className="user-name">{user?.name}</div>
               <div className="user-role">{user?.role}</div>
             </div>
-          </div>
+          </button>
         </header>
 
         <main className="page-body customer-page-body">
@@ -876,9 +878,32 @@ function PageRouter({ page, call, setPage }) {
       wallet:               <CustWallet            {...P} />,
       invoices:             <CustInvoices          {...P} />,
       complaints:           <CustComplaints        {...P} />,
+      profile:               <CustProfile            {...P} />,
       'charging-stations':  <CustChargingStations  {...P} />,
     };
-    return <ErrorBoundary key={page}>{pages[page] || pages.dashboard}</ErrorBoundary>;
+    const sectionLabels = {
+      'available-vehicles': 'Available Vehicles',
+      vehicles: 'My Vehicles',
+      purchases: 'Purchases',
+      wallet: 'Wallet',
+      invoices: 'Invoices',
+      complaints: 'Support',
+      'charging-stations': 'Charging Stations',
+    };
+    const showSectionBack = page !== 'dashboard' && page !== 'profile';
+    return (
+      <ErrorBoundary key={page}>
+        {showSectionBack && (
+          <div className="customer-section-backbar">
+            <button className="customer-section-back" onClick={() => setPage('dashboard')} aria-label="Back to dashboard">
+              <ArrowLeft size={19} />
+            </button>
+            <div className="customer-section-back-title">{sectionLabels[page] || 'Customer'}</div>
+          </div>
+        )}
+        {pages[page] || pages.dashboard}
+      </ErrorBoundary>
+    );
   }
   if (kind === 'staff') {
     const pages = {
@@ -1180,7 +1205,8 @@ function CustDashboard({ call, setPage }) {
   const handedOver = purchases.filter(p => p.status === 'HANDED_OVER');
   const pending = purchases.filter(p => ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING'].includes(p.status));
   const recent = [...purchases].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
-  const openTickets = (complaints || []).filter(c => !['SOLVED','CLOSED'].includes(c.status));
+  const complaintList = Array.isArray(complaints) ? complaints : (Array.isArray(complaints?.complaints) ? complaints.complaints : []);
+  const openTickets = complaintList.filter(c => !['SOLVED','CLOSED'].includes(c.status));
   const walletBal = w?.balance ?? 0;
 
   const STATUS_CFG = {
@@ -1236,6 +1262,35 @@ function CustDashboard({ call, setPage }) {
         ))}
       </div>
 
+      {/* ── App launcher: PhonePe-style service icons ── */}
+      <section className="cust-app-launcher" aria-label="Customer services">
+        <div className="cust-app-launcher-head">
+          <div>
+            <h2>All services</h2>
+            <p>Everything you need, one tap away</p>
+          </div>
+          <span className="cust-app-launcher-badge">allEV</span>
+        </div>
+        <div className="cust-app-icon-grid">
+          {[
+            { icon: Car, label: 'Buy EV', sub: 'Browse vehicles', page: 'available-vehicles', tone: 'blue' },
+            { icon: Wallet, label: 'Wallet', sub: 'Recharge & pay', page: 'wallet', tone: 'violet' },
+            { icon: MapPin, label: 'Charging', sub: 'Find stations', page: 'charging-stations', tone: 'green' },
+            { icon: ClipboardList, label: 'Purchases', sub: 'Track orders', page: 'purchases', tone: 'orange' },
+            { icon: Car, label: 'My Vehicles', sub: 'Your EVs', page: 'vehicles', tone: 'cyan' },
+            { icon: FileText, label: 'Invoices', sub: 'Bills & receipts', page: 'invoices', tone: 'indigo' },
+            { icon: Bell, label: 'Support', sub: 'Get help', page: 'complaints', tone: 'rose' },
+            { icon: Users, label: 'Profile', sub: 'Account details', page: 'profile', tone: 'slate' },
+          ].map(({ icon: Icon, label, sub, page, tone }) => (
+            <button key={page} className={`cust-app-icon-tile tone-${tone}`} onClick={() => setPage(page)}>
+              <span className="cust-app-icon-wrap"><Icon size={22} strokeWidth={2.2} /></span>
+              <span className="cust-app-icon-copy"><strong>{label}</strong><small>{sub}</small></span>
+              <span className="cust-app-icon-arrow">›</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <div className="cust-dash-grid">
         {/* ── Recent Activity ── */}
         <div className="cust-dash-card">
@@ -1271,30 +1326,6 @@ function CustDashboard({ call, setPage }) {
           )}
         </div>
 
-        {/* ── Quick Actions ── */}
-        <div className="cust-dash-card">
-          <div className="cust-dash-card-head">
-            <div className="cust-dash-card-title">⚡ Quick Actions</div>
-          </div>
-          <div className="cust-quick-actions">
-            {[
-              { icon: '🚗', label: 'Available Vehicles', desc: 'Browse & buy EVs', page: 'available-vehicles', color: '#2563eb' },
-              { icon: '📍', label: 'Charging Stations', desc: 'Find nearby chargers', page: 'charging-stations', color: '#16a34a' },
-              { icon: '💰', label: 'Add Wallet Balance', desc: `Current: ₹${walletBal.toLocaleString('en-IN')}`, page: 'wallet', color: '#d97706' },
-              { icon: '📄', label: 'My Invoices', desc: 'Download receipts', page: 'invoices', color: '#7c3aed' },
-              { icon: '🔔', label: 'Support', desc: `${openTickets.length} open ticket${openTickets.length !== 1 ? 's' : ''}`, page: 'complaints', color: '#dc2626' },
-            ].map(a => (
-              <button key={a.page} className="cust-qa-item" onClick={() => setPage(a.page)} style={{'--qa-color': a.color}}>
-                <div className="cust-qa-icon">{a.icon}</div>
-                <div className="cust-qa-text">
-                  <div className="cust-qa-label">{a.label}</div>
-                  <div className="cust-qa-desc">{a.desc}</div>
-                </div>
-                <div className="cust-qa-arrow">›</div>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* ── Pending Orders Alert ── */}
@@ -1303,7 +1334,7 @@ function CustDashboard({ call, setPage }) {
           <div className="cust-pending-icon">⏳</div>
           <div className="cust-pending-text">
             <strong>You have {pending.length} pending order{pending.length !== 1 ? 's' : ''}</strong>
-            <span> — {pending.filter(p=>p.status==='BOOKED').length} awaiting payment, {pending.filter(p=>p.status==='PAYMENT_DONE').length} awaiting handover</span>
+            <span> — {pending.filter(p => p.status === 'BOOKED').length} awaiting payment, {pending.filter(p => p.status === 'PAYMENT_DONE').length} awaiting handover</span>
           </div>
           <span className="cust-pending-arrow">→</span>
         </div>
@@ -1405,6 +1436,7 @@ function CustVehicles({ call, setPage }) {
     )}
   </>;
 }
+
 
 function CustBookings({ call, setPage }) {
   const { data: purchasesRaw, loading } = useFetch(call, '/customer/purchases');
@@ -3543,4 +3575,139 @@ function AdminExpansion({ call }) {
       </div>
     </Card>
   </>;
+}
+
+function CustProfile({ call, setPage }) {
+  const { data: user, loading, refresh } = useFetch(call, '/customer/profile');
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [showAadhar, setShowAadhar] = useState(false);
+  const [showPan, setShowPan] = useState(false);
+  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({ name:'', email:'', phone:'', aadharNumber:'', panNumber:'', address:'' });
+
+  useEffect(() => {
+    if (!user) return;
+    setForm({
+      name: user.name || '', email: user.email || '', phone: user.phone || '',
+      aadharNumber: user.aadharNumber || user.aadhar || '', panNumber: user.panNumber || user.pan || '',
+      address: typeof user.address === 'string' ? user.address : (user.address?.line1 || user.address?.street || ''),
+    });
+  }, [user]);
+
+  if (loading && !user) return <Loader />;
+  const name = user?.name || 'Customer';
+  const initial = name.trim().charAt(0).toUpperCase() || 'C';
+  const profileImage = user?.profileImage;
+  const masked = (value, visible) => {
+    if (!value) return 'Not added';
+    if (visible) return value;
+    return value.length > 4 ? `${'•'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}` : '••••';
+  };
+  const setField = (key, value) => setForm(f => ({...f, [key]: value}));
+
+  const saveProfile = async () => {
+    setSaving(true); setMessage('');
+    try {
+      await call('/customer/profile', { method:'PATCH', data: form });
+      setEditing(false); setMessage('Profile updated successfully'); refresh();
+    } catch (e) { setMessage(e?.message || 'Could not update profile'); }
+    finally { setSaving(false); }
+  };
+
+  const uploadPhoto = async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setMessage('Please choose an image file');
+    setUploading(true); setMessage('');
+    try {
+      const fd = new FormData(); fd.append('profileImage', file);
+      await call('/customer/profile/image', { method:'POST', data:fd, headers:{'Content-Type':'multipart/form-data'} });
+      setMessage('Profile photo updated'); refresh();
+    } catch (e) { setMessage(e?.message || 'Could not upload photo'); }
+    finally { setUploading(false); }
+  };
+
+  const settings = user?.settings || {};
+  const toggleSetting = async (key) => {
+    try {
+      await call('/customer/profile', { method:'PATCH', data:{ settings:{ ...settings, [key]: settings[key] !== true } } });
+      refresh();
+    } catch (e) { setMessage(e?.message || 'Could not update setting'); }
+  };
+
+  return (
+    <div className="cust-profile-page premium-profile-page">
+      <div className="profile-mobile-topbar">
+        <button className="profile-back-icon" onClick={() => setPage('dashboard')} aria-label="Back to dashboard"><ArrowLeft size={21}/></button>
+        <div><strong>Profile</strong><span>Account & settings</span></div>
+        <div className="profile-topbar-spacer" />
+      </div>
+
+      <div className="profile-cover-card">
+        <div className="profile-cover-glow" />
+        <div className="profile-photo-wrap">
+          <div className="profile-photo">
+            {profileImage ? <img src={profileImage} alt="Profile" /> : <span>{initial}</span>}
+          </div>
+          <label className="profile-photo-edit" title="Change profile photo">
+            <Camera size={15}/>
+            <input type="file" accept="image/*" onChange={e => uploadPhoto(e.target.files?.[0])} />
+          </label>
+          {uploading && <div className="profile-photo-loading">Updating…</div>}
+        </div>
+        <div className="profile-cover-copy">
+          <span className="profile-kicker"><ShieldCheck size={13}/> VERIFIED CUSTOMER</span>
+          <h1>{name}</h1>
+          <p>{user?.email || 'Add your email address'}</p>
+          <div className="profile-cover-chips"><span>allEV Member</span><span>{user?.role || 'CUSTOMER'}</span></div>
+        </div>
+        <button className={`profile-edit-btn${editing ? ' active' : ''}`} onClick={() => setEditing(v => !v)}>
+          <Pencil size={15}/>{editing ? 'Cancel' : 'Edit profile'}
+        </button>
+      </div>
+
+      {message && <div className={`profile-message ${message.toLowerCase().includes('success') || message.toLowerCase().includes('updated') ? 'success' : 'error'}`}><Check size={16}/>{message}</div>}
+
+      <section className="profile-section-card">
+        <div className="profile-section-head"><div><span className="profile-section-eyebrow">PERSONAL INFORMATION</span><h2>Basic details</h2></div>{editing && <button className="profile-save-btn" onClick={saveProfile} disabled={saving}><Save size={16}/>{saving ? 'Saving…' : 'Save changes'}</button>}</div>
+        <div className="profile-form-grid">
+          {[
+            ['name','Full name',user?.name,'Your full name',Users],
+            ['email','Email address',user?.email,'Your email address',Mail],
+            ['phone','Phone number',user?.phone,'Your phone number',Phone],
+          ].map(([key,label,value,placeholder,Icon]) => (
+            <label className="profile-input-field" key={key}><span>{label}</span><div className="profile-input-shell"><Icon size={17}/><input disabled={!editing || key==='email'} value={form[key] || ''} placeholder={placeholder} onChange={e=>setField(key,e.target.value)} /></div></label>
+          ))}
+          <label className="profile-input-field profile-field-wide"><span>Address</span><div className="profile-input-shell"><MapPinned size={17}/><input disabled={!editing} value={form.address || ''} placeholder="Add your address" onChange={e=>setField('address',e.target.value)} /></div></label>
+        </div>
+      </section>
+
+      <section className="profile-section-card">
+        <div className="profile-section-head"><div><span className="profile-section-eyebrow">KYC & IDENTITY</span><h2>Identity details</h2></div><span className="profile-secure-pill"><ShieldCheck size={14}/> Secure</span></div>
+        <div className="profile-kyc-grid">
+          <div className="profile-kyc-card"><div className="profile-kyc-icon blue"><CreditCard size={19}/></div><div><span>Aadhaar number</span><strong>{masked(user?.aadharNumber || user?.aadhar, showAadhar)}</strong></div><button onClick={()=>setShowAadhar(v=>!v)} aria-label="Show Aadhaar"><>{showAadhar?<EyeOff size={17}/>:<Eye size={17}/>}</></button></div>
+          <div className="profile-kyc-card"><div className="profile-kyc-icon violet"><CreditCard size={19}/></div><div><span>PAN card</span><strong>{masked(user?.panNumber || user?.pan, showPan)}</strong></div><button onClick={()=>setShowPan(v=>!v)} aria-label="Show PAN"><>{showPan?<EyeOff size={17}/>:<Eye size={17}/>}</></button></div>
+        </div>
+        {editing && <div className="profile-kyc-edit-grid"><label className="profile-input-field"><span>Aadhaar number</span><input value={form.aadharNumber} onChange={e=>setField('aadharNumber',e.target.value)} placeholder="12-digit Aadhaar" maxLength={12}/></label><label className="profile-input-field"><span>PAN card</span><input value={form.panNumber} onChange={e=>setField('panNumber',e.target.value.toUpperCase())} placeholder="PAN number" maxLength={10}/></label></div>}
+      </section>
+
+      <section className="profile-section-card">
+        <div className="profile-section-head"><div><span className="profile-section-eyebrow">PREFERENCES</span><h2>Settings</h2></div><SlidersHorizontal size={19} className="profile-muted-icon"/></div>
+        <div className="profile-setting-list">
+          {[
+            ['notifications','Notifications','Get updates about orders, payments and charging.','🔔',BellRing],
+            ['securityAlerts','Security alerts','Receive important account and login alerts.','🛡️',ShieldCheck],
+            ['offers','EV offers','Receive useful EV offers and service updates.','✨',Sparkles],
+          ].map(([key,title,sub,emoji,Icon]) => <button className="profile-setting-row" key={key} onClick={()=>toggleSetting(key)}><span className="profile-setting-icon">{emoji}</span><span className="profile-setting-copy"><strong>{title}</strong><small>{sub}</small></span><span className={`profile-switch ${settings[key] !== false ? 'on' : ''}`}><i/></span></button>)}
+        </div>
+      </section>
+
+      <section className="profile-section-card profile-account-card">
+        <div className="profile-account-row"><div className="profile-account-icon"><LockKeyhole size={18}/></div><div><strong>Account security</strong><span>Password, login protection and account access</span></div><span className="profile-arrow">›</span></div>
+        <div className="profile-account-row"><div className="profile-account-icon"><FileText size={18}/></div><div><strong>Documents & invoices</strong><span>Your purchase records and billing documents</span></div><span className="profile-arrow">›</span></div>
+        <div className="profile-account-row"><div className="profile-account-icon"><Bell size={18}/></div><div><strong>Notification centre</strong><span>View all account notifications</span></div><span className="profile-arrow">›</span></div>
+      </section>
+    </div>
+  );
 }

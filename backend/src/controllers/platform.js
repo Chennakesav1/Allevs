@@ -28,6 +28,8 @@ const creditWalletRecharge=async({customerId,recharge,paymentId,signature})=>{
 
 exports.customer={
  profile:async(req,res)=>ok(res,await M.User.findById(req.user._id).select('-passwordHash -refreshTokenHash')),
+ updateProfile:async(req,res)=>{try{const allowed=['name','phone','aadharNumber','panNumber','address','settings'];const data={};for(const k of allowed)if(req.body[k]!==undefined)data[k]=req.body[k];if(data.name!==undefined&&!String(data.name).trim())throw Error('Name is required');if(data.phone!==undefined)data.phone=String(data.phone).trim();if(data.aadharNumber!==undefined)data.aadharNumber=String(data.aadharNumber).replace(/\s/g,'');if(data.panNumber!==undefined)data.panNumber=String(data.panNumber).trim().toUpperCase();const user=await M.User.findByIdAndUpdate(req.user._id,data,{new:true,runValidators:true}).select('-passwordHash -refreshTokenHash');return ok(res,user)}catch(e){fail(res,e)}},
+ uploadProfileImage:async(req,res)=>{try{if(!req.file)throw Error('Profile image is required');const url=`/uploads/${req.file.filename}`;const user=await M.User.findByIdAndUpdate(req.user._id,{profileImage:url},{new:true}).select('-passwordHash -refreshTokenHash');return ok(res,user)}catch(e){fail(res,e)}},
  vehicles:async(req,res)=>ok(res,await M.Vehicle.find({customerId:req.user._id})),
  addVehicle:async(req,res)=>{try{return ok(res,await M.Vehicle.create({...req.body,customerId:req.user._id}),201)}catch(e){fail(res,e)}},
  services:async(req,res)=>ok(res,[{type:'REPAIR',name:'Repair'},{type:'RECHARGE',name:'Recharge'},{type:'RECYCLE',name:'Recycle'},{type:'BATTERY_SERVICE',name:'Battery Service'},{type:'INSPECTION',name:'Vehicle Inspection'},{type:'OTHER',name:'Other'}]),

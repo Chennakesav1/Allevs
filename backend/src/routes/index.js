@@ -44,6 +44,8 @@ r.post('/franchise/staff-otp/verify', auth, Ap.verifyStaffEmailOtp);
 const cr = express.Router();
 cr.use(auth, allow('CUSTOMER'));
 cr.get( '/profile',               P.customer.profile);
+cr.patch('/profile',               P.customer.updateProfile);
+cr.post('/profile/image',          upload.single('profileImage'), P.customer.uploadProfileImage);
 cr.get( '/vehicles',              P.customer.vehicles);
 cr.post('/vehicles',              P.customer.addVehicle);
 cr.get( '/services',              P.customer.services);
