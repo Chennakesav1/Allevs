@@ -192,6 +192,68 @@ const vehicleRentalSchema = new Schema({
   vehicleSnapshot:  Schema.Types.Mixed,
 }, { timestamps: true });
 
+// ── CommandVehicle: vehicles created by Command Center and assigned to fleet operators ──
+const commandVehicleSchema = new Schema({
+  // Core vehicle details
+  category:           String,
+  make:               { type: String, required: true },
+  model:              { type: String, required: true },
+  year:               String,
+  color:              String,
+  registrationNo:     String,
+  batteryCapacityKwh: Number,
+  rangeKm:            Number,
+  chargingType:       String,
+  pricePerDay:        Number,
+  quantity:           { type: Number, default: 1 },
+  description:        String,
+  images:             [{ name: String, url: String }],
+  // Assignment to fleet operator
+  fleetOperatorId:    { type: id, ref: 'User' },
+  fleetOperatorName:  String,
+  fleetOperatorEmail: String,
+  assignedAt:         Date,
+  assignedBy:         { type: id, ref: 'User' },
+  // Status in fleet operator inventory
+  status: {
+    type: String,
+    enum: ['UNASSIGNED', 'ASSIGNED', 'ACTIVE', 'INACTIVE'],
+    default: 'UNASSIGNED',
+  },
+  // Created by
+  createdBy:  { type: id, ref: 'User' },
+}, { timestamps: true });
+
+
+
+// ── Staff Portal v3 feature models ────────────────────────────────
+const attendanceSchema = new Schema({
+  userId:{type:id,ref:'User',required:true,index:true}, dateKey:{type:String,index:true},
+  clockIn:Date, clockOut:Date, breaks:[{startedAt:Date,endedAt:Date}],
+  status:{type:String,default:'PRESENT'}, lateMinutes:{type:Number,default:0}, earlyMinutes:{type:Number,default:0},
+  location:{lat:Number,lng:Number,accuracy:Number,updatedAt:Date}, dutyArea:String,
+},{timestamps:true});
+attendanceSchema.index({userId:1,dateKey:1},{unique:true});
+const leaveRequestSchema = new Schema({
+  userId:{type:id,ref:'User',required:true,index:true}, leaveType:{type:String,default:'CASUAL'},
+  startDate:Date,endDate:Date,days:{type:Number,default:1},reason:String,
+  status:{type:String,enum:['PENDING','APPROVED','REJECTED','CANCELLED'],default:'PENDING'},
+  reviewedBy:{type:id,ref:'User'},reviewedAt:Date,reviewerNote:String,
+},{timestamps:true});
+const supportTicketSchema = new Schema({
+  userId:{type:id,ref:'User',required:true,index:true}, ticketNo:{type:String,unique:true,index:true},
+  category:{type:String,default:'GENERAL'},subject:String,description:String,
+  priority:{type:String,default:'NORMAL'},status:{type:String,enum:['OPEN','IN_PROGRESS','RESOLVED','CLOSED'],default:'OPEN'},
+  messages:[{senderId:id,senderRole:String,message:String,createdAt:{type:Date,default:Date.now}}],
+  assignedTo:{type:id,ref:'User'},resolvedAt:Date,
+},{timestamps:true});
+const staffDocumentSchema = new Schema({userId:{type:id,ref:'User',index:true},title:String,type:String,url:String,fileName:String,status:{type:String,default:'AVAILABLE'},expiresAt:Date},{timestamps:true});
+const payslipSchema = new Schema({userId:{type:id,ref:'User',index:true},month:String,gross:Number,earnings:{type:Schema.Types.Mixed,default:{}},deductions:{type:Schema.Types.Mixed,default:{}},net:Number,url:String,status:{type:String,default:'PUBLISHED'}},{timestamps:true});
+const shiftSchema = new Schema({userId:{type:id,ref:'User',index:true},dateKey:String,startTime:String,endTime:String,location:String,hubId:id,status:{type:String,default:'SCHEDULED'}},{timestamps:true});
+const recognitionSchema = new Schema({userId:{type:id,ref:'User',index:true},title:String,description:String,badge:String,awardedBy:{type:id,ref:'User'},awardedAt:{type:Date,default:Date.now}},{timestamps:true});
+const staffChecklistSchema = new Schema({userId:{type:id,ref:'User',index:true},jobId:{type:id,ref:'Job'},dateKey:String,title:String,items:[{label:String,done:{type:Boolean,default:false}}]},{timestamps:true});
+const jobProofSchema = new Schema({jobId:{type:id,ref:'Job',required:true,index:true},userId:{type:id,ref:'User',required:true},photos:[{name:String,url:String}],documents:[{name:String,url:String}],signatureData:String,report:{notes:String,issue:String,completionSummary:String},submittedAt:Date},{timestamps:true});
+
 const models={
   User:mongoose.model('User',userSchema),
   Vehicle:mongoose.model('Vehicle',vehicleSchema),
@@ -224,5 +286,15 @@ const models={
   PendingVehicle:mongoose.model('PendingVehicle',pendingVehicleSchema),
   PendingStaff:mongoose.model('PendingStaff',pendingStaffSchema),
   VehicleRental:mongoose.model('VehicleRental',vehicleRentalSchema),
+  CommandVehicle:mongoose.model('CommandVehicle',commandVehicleSchema),
+  Attendance:mongoose.model('Attendance',attendanceSchema),
+  LeaveRequest:mongoose.model('LeaveRequest',leaveRequestSchema),
+  SupportTicket:mongoose.model('SupportTicket',supportTicketSchema),
+  StaffDocument:mongoose.model('StaffDocument',staffDocumentSchema),
+  Payslip:mongoose.model('Payslip',payslipSchema),
+  Shift:mongoose.model('Shift',shiftSchema),
+  Recognition:mongoose.model('Recognition',recognitionSchema),
+  StaffChecklist:mongoose.model('StaffChecklist',staffChecklistSchema),
+  JobProof:mongoose.model('JobProof',jobProofSchema),
 };
 module.exports=models;

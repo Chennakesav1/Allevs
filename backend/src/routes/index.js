@@ -4,6 +4,7 @@ const A   = require('../controllers/auth');
 const CA  = require('../controllers/customerAuth');
 const P   = require('../controllers/platform');
 const St  = require('../controllers/staff');
+const SP  = require('../controllers/staffPortal');
 const Fr  = require('../controllers/franchise');
 const Ad  = require('../controllers/admin');
 const Ap  = require('../controllers/approvals');   // ← NEW
@@ -19,6 +20,7 @@ r.post('/auth/register', A.register);
 r.post('/auth/login',    A.login);
 r.get( '/auth/me',       auth, A.me);
 r.post('/auth/refresh',  A.refreshToken); // silent token renewal
+r.post('/auth/change-password', auth, A.changePassword);
 
 // ── Customer self-registration / OTP auth ─────────────────────────
 r.post('/auth/customer/register',          CA.register);
@@ -39,6 +41,9 @@ r.post('/auth/staff/reset-password',       Ap.staffResetPassword);
 // ── Staff Email OTP Verification (Franchisee form) ────────────────
 r.post('/franchise/staff-otp/send',   auth, Ap.sendStaffEmailOtp);
 r.post('/franchise/staff-otp/verify', auth, Ap.verifyStaffEmailOtp);
+
+// ── Shared hub list — any authenticated role (customer, franchisee, staff, admin) ──
+r.get( '/hubs', auth, Ad.hubs);
 
 // ── Customer ──────────────────────────────────────────────────────
 const cr = express.Router();
@@ -98,6 +103,31 @@ sr.get( '/diagnostics/:vehicleId', P.staff.diagnostics);
 sr.get( '/technicians',            P.staff.technicians);
 sr.get( '/suppliers',              P.staff.suppliers);
 sr.get( '/purchase-orders',        P.staff.purchaseOrders);
+// ── Staff Portal services ────────────────────────────────────────
+sr.get( '/notifications',              SP.notifications);
+sr.put( '/notifications/:id/read',     SP.readNotification);
+sr.put( '/notifications/read-all',     SP.readAllNotifications);
+sr.get( '/attendance',                 SP.attendance);
+sr.post('/attendance/clock-in',       SP.clockIn);
+sr.post('/attendance/clock-out',      SP.clockOut);
+sr.post('/attendance/break',          SP.breakToggle);
+sr.post('/attendance/location',       SP.location);
+sr.get( '/leave-requests',             SP.leaves);
+sr.post('/leave-requests',             SP.createLeave);
+sr.put( '/leave-requests/:id/cancel',  SP.cancelLeave);
+sr.get( '/checklists',                 SP.checklists);
+sr.put( '/checklists/:id',              SP.saveChecklist);
+sr.get( '/documents',                  SP.documents);
+sr.get( '/payslips',                   SP.payslips);
+sr.get( '/shifts',                     SP.shifts);
+sr.get( '/recognition',                SP.recognition);
+sr.get( '/performance',                SP.performance);
+sr.get( '/support',                    SP.support);
+sr.post('/support',                    SP.createSupport);
+sr.post('/support/:id/messages',      SP.supportMessage);
+sr.get( '/jobs/:id/timeline',          SP.jobTimeline);
+sr.post('/jobs/:id/proof',             SP.jobProof);
+
 r.use('/staff', sr);
 
 // ── Franchise ─────────────────────────────────────────────────────
@@ -109,7 +139,6 @@ fr.get( '/roi',                Fr.roi);
 fr.get( '/capex',              Fr.capex);
 fr.get( '/emi',                Fr.emi);
 fr.get( '/inventory',          Fr.inventory);
-fr.post('/inventory',          Fr.addInventoryPart);
 fr.get( '/staff',              Fr.staff);
 fr.get( '/jobs',               Fr.jobs);
 fr.get( '/purchases',             Rn.franchisePurchases);
@@ -143,16 +172,163 @@ fr.get( '/staff-list', async (req, res) => {
     return res.json(staff || []);
   } catch (e) { return res.status(500).json({ message: e.message }); }
 });
-// ── NEW: vehicle & staff approval submissions ─────────────────────
-fr.post('/pending-vehicles',        Ap.submitVehicle);
-fr.get( '/pending-vehicles',        Ap.myVehicles);
-fr.put( '/pending-vehicles/:id',    Ap.updateVehicle);   // ← EDIT vehicle
+// ── Staff approval submissions ────────────────────────────────────
+// Note: vehicle submission removed from franchisee portal
 fr.post('/pending-staff',           Ap.submitStaff);
 fr.get( '/pending-staff',           Ap.myStaff);
 fr.put( '/pending-staff/:id/remove', Ap.removeStaffFromFranchisee);
-// ── Part inventory CRUD ───────────────────────────────────────────
-fr.put( '/inventory/:id',           Fr.updateInventoryPart); // ← EDIT part
+// ── Command Center assigned vehicles (fleet operator view) ────────
+fr.get( '/assigned-vehicles',       Ad.assignedVehicles);
+// ── Hub list for Charge Hubs map (reuses same Ad.hubs controller) ─
+fr.get( '/hubs',                    Ad.hubs);
+// ── Pending vehicles (fleet operator submissions) ─────────────────
+fr.get( '/pending-vehicles',        Ap.myVehicles);
+fr.post('/pending-vehicles',        Ap.submitVehicle);
+fr.put( '/pending-vehicles/:id',    Ap.updateVehicle);
+
 r.use('/franchise', fr);
+
+// ── Platform (Command Center portal) ─────────────────────────────
+const pr = express.Router();
+pr.use(auth, allow('CENTRAL_ADMIN', 'SUPER_ADMIN'));
+
+// Complaints (all franchisees)
+pr.get('/complaints', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const list = await Complaint.find()
+      .populate('customerId', 'name email phone')
+      .sort('-createdAt').lean();
+    res.json(list);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/complaints/:id/assign', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const { staffId, staffName } = req.body;
+    const c = await Complaint.findByIdAndUpdate(req.params.id,
+      { assignedStaffId: staffId, assignedStaffName: staffName, status: 'IN_PROGRESS' },
+      { new: true });
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    res.json(c);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/complaints/:id/start-work', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const c = await Complaint.findByIdAndUpdate(req.params.id,
+      { status: 'IN_PROGRESS', workStartedAt: new Date() }, { new: true });
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    res.json(c);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/complaints/:id/pause-work', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const c = await Complaint.findByIdAndUpdate(req.params.id,
+      { pauseReason: req.body.pauseReason }, { new: true });
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    res.json(c);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/complaints/:id/resume-work', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const c = await Complaint.findByIdAndUpdate(req.params.id,
+      { status: 'IN_PROGRESS', pauseReason: null }, { new: true });
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    res.json(c);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/complaints/:id/resolve', async (req, res) => {
+  try {
+    const { Complaint } = require('../models');
+    const c = await Complaint.findByIdAndUpdate(req.params.id,
+      { status: 'SOLVED', resolution: req.body.resolution, solvedAt: new Date() },
+      { new: true });
+    if (!c) return res.status(404).json({ message: 'Complaint not found' });
+    res.json(c);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Staff list (for assign dropdowns)
+pr.get('/staff-list', async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const staff = await User.find({
+      role: { $in: ['STAFF', 'TECHNICIAN', 'HUB_MANAGER'] },
+      active: true,
+    }).select('_id name role email').lean();
+    res.json(staff || []);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// All staff (staff management page)
+pr.get('/all-staff', async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const staff = await User.find({
+      role: { $in: ['STAFF', 'TECHNICIAN', 'HUB_MANAGER'] },
+    }).select('_id name role email phone active franchiseeId createdAt').lean();
+    res.json(staff || []);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Pending staff approvals
+pr.get('/pending-staff',               Ap.allStaff);
+pr.put('/pending-staff/:id/approve',   Ap.approveStaff);
+pr.put('/pending-staff/:id/reject',    Ap.rejectStaff);
+
+// All jobs (cross-franchisee)
+pr.get('/all-jobs', async (req, res) => {
+  try {
+    const { Job } = require('../models');
+    const jobs = await Job.find()
+      .populate('customerId',   'name email phone')
+      .populate('technicianId', 'name role')
+      .populate('franchiseeId', 'name email')
+      .sort('-createdAt').lean();
+    res.json(jobs || []);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Staff attendance (stub — return empty if no Attendance model)
+pr.get('/staff-attendance', async (req, res) => {
+  try {
+    const M = require('../models');
+    if (M.Attendance) {
+      const records = await M.Attendance.find().sort('-date').limit(500).lean();
+      return res.json(records);
+    }
+    res.json([]);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// Leave requests (stub — return empty if no LeaveRequest model)
+pr.get('/leave-requests', async (req, res) => {
+  try {
+    const M = require('../models');
+    if (M.LeaveRequest) {
+      const records = await M.LeaveRequest.find().sort('-createdAt').lean();
+      return res.json(records);
+    }
+    res.json([]);
+  } catch (e) { res.status(500).json({ message: e.message }); }
+});
+pr.put('/leave-requests/:id/:action', SP.commandLeaveAction);
+
+// ── Staff communications / HR services for Command Center ───────
+pr.get( '/staff-notifications',                    SP.commandNotifications);
+pr.post('/staff-notifications',                    SP.commandSendNotification);
+pr.get( '/support-tickets',                        SP.commandSupport);
+pr.put( '/support-tickets/:id',                    SP.commandSupportUpdate);
+pr.post('/staff-documents',                        SP.commandCreateDocument);
+pr.post('/staff-payslips',                         SP.commandCreatePayslip);
+pr.post('/staff-shifts',                           SP.commandCreateShift);
+pr.post('/staff-recognition',                      SP.commandCreateRecognition);
+pr.post('/staff-checklists',                       SP.commandCreateChecklist);
+
+r.use('/platform', pr);
 
 // ── Admin / Central Command ───────────────────────────────────────
 const dr = express.Router();
@@ -200,42 +376,48 @@ dr.get('/franchise-ratings', Ad.franchiseRatings);
 // Per-franchisee vehicle + part inventory summary for Command Center
 dr.get('/franchisee-stats', async (req, res) => {
   try {
-    const { User, Inventory } = require('../models');
-    const { PendingVehicle } = require('../models');
+    const { User, Inventory, PendingVehicle, CommandVehicle } = require('../models');
     const franchisees = await User.find({ role: 'FRANCHISEE' }).select('_id name email').lean();
     const ids = franchisees.map(f => f._id);
 
-    // Vehicles per franchisee
+    // Fleet-operator submitted vehicles (pending approval flow)
     const vehicleAgg = await PendingVehicle.aggregate([
       { $match: { franchiseeId: { $in: ids } } },
       { $group: {
           _id: '$franchiseeId',
-          totalVehicles: { $sum: 1 },
+          totalVehicles:    { $sum: 1 },
           approvedVehicles: { $sum: { $cond: [{ $eq: ['$status', 'APPROVED'] }, 1, 0] } },
           pendingVehicles:  { $sum: { $cond: [{ $eq: ['$status', 'PENDING_APPROVAL'] }, 1, 0] } },
       }},
     ]);
     const vehicleMap = new Map(vehicleAgg.map(v => [String(v._id), v]));
 
-    // Parts inventory (shared Inventory collection — group by category for totals)
+    // Command Center assigned vehicles per fleet operator
+    const cmdAgg = await CommandVehicle.aggregate([
+      { $match: { fleetOperatorId: { $in: ids }, status: { $in: ['ASSIGNED', 'ACTIVE'] } } },
+      { $group: { _id: '$fleetOperatorId', assignedVehicles: { $sum: 1 } } },
+    ]);
+    const cmdMap = new Map(cmdAgg.map(v => [String(v._id), v.assignedVehicles]));
+
+    // Parts inventory totals
     const partTotals = await Inventory.aggregate([
       { $group: { _id: null, totalSkus: { $sum: 1 }, totalQty: { $sum: '$quantity' }, totalValue: { $sum: { $multiply: ['$quantity', '$unitPrice'] } } } }
     ]);
 
-    // Build per-franchisee response
     const stats = franchisees.map(f => {
-      const vs = vehicleMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+      const vs  = vehicleMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+      const cmd = cmdMap.get(String(f._id)) || 0;
       return {
         franchiseeId:     String(f._id),
         name:             f.name,
         email:            f.email,
-        totalVehicles:    vs.totalVehicles,
-        approvedVehicles: vs.approvedVehicles,
+        totalVehicles:    vs.totalVehicles + cmd,
+        approvedVehicles: vs.approvedVehicles + cmd,
         pendingVehicles:  vs.pendingVehicles,
+        assignedVehicles: cmd,
       };
     });
 
-    // Attach global inventory summary
     const inv = partTotals[0] || { totalSkus: 0, totalQty: 0, totalValue: 0 };
     res.json({ franchisees: stats, inventory: inv });
   } catch (e) {
@@ -251,6 +433,16 @@ dr.put('/pending-vehicles/:id/reject', Ap.rejectVehicle);
 dr.get('/pending-staff',               Ap.allStaff);
 dr.put('/pending-staff/:id/approve',   Ap.approveStaff);
 dr.put('/pending-staff/:id/reject',    Ap.rejectStaff);
+
+// ── Command Center Vehicle Inventory (new flow) ───────────────────
+dr.get(   '/vehicles',             Ad.listVehicles);
+dr.post(  '/vehicles',             Ad.createVehicle);
+dr.put(   '/vehicles/:id',         Ad.updateVehicle);
+dr.delete('/vehicles/:id',         Ad.deleteVehicle);
+dr.put(   '/vehicles/:id/assign',  Ad.assignVehicle);
+
+// ── Command Center Spare Parts ────────────────────────────────────
+dr.post('/parts', Ad.createPart);
 
 // All parts inventory for Command Center
 dr.get('/all-parts', async (req, res) => {

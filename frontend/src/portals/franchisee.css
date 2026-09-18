@@ -156,6 +156,36 @@ button, input { font: inherit; }
 }
 .nav-item.nav-sub.active svg:first-child { color: #1d4ed8; }
 
+/* ── Nav Category Groups ── */
+.nav-group {
+  margin-bottom: 2px;
+}
+.nav-group + .nav-group {
+  margin-top: 6px;
+}
+.nav-category-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #b0b7c3;
+  padding: 8px 12px 3px;
+  user-select: none;
+  pointer-events: none;
+}
+.nav-group:first-child .nav-category-label {
+  padding-top: 2px;
+}
+
+/* ── Sidebar divider between groups ── */
+.nav-group + .nav-group::before {
+  content: '';
+  display: block;
+  height: 1px;
+  background: #f0f2f7;
+  margin: 4px 10px 8px;
+}
+
 .logout-btn {
   margin-top: auto;
   color: #ef4444 !important;
@@ -879,3 +909,69 @@ select.fld-input { cursor: pointer; }
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+/* ══════════════════════════════════════════════════════════════════
+   CHARGE HUBS MAP STYLES (mirrored from command portal)
+══════════════════════════════════════════════════════════════════ */
+.hub-map-container {
+  position: relative;
+  height: 480px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e4e7ef;
+  box-shadow: 0 2px 12px rgba(0,0,0,.07);
+}
+#fran-hub-map {
+  width: 100%;
+  height: 100%;
+}
+.map-tooltip {
+  position: absolute;
+  z-index: 9999;
+  pointer-events: none;
+  background: #fff;
+  border: 1px solid #e4e7ef;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.14);
+  padding: 12px 14px;
+  min-width: 200px;
+  font-size: 13px;
+  transform: translate(-50%, -110%);
+}
+.map-tooltip-name { font-weight: 700; font-size: 14px; color: #1a1f2e; margin-bottom: 4px; }
+.map-tooltip-row  { display: flex; gap: 6px; color: #6b7280; margin-top: 3px; }
+.map-tooltip-row strong { color: #1a1f2e; }
+.map-tooltip-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 6px;
+}
+.map-legend {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: rgba(255,255,255,.92);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 11px;
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot  { width: 10px; height: 10px; border-radius: 50%; }
+.hub-map-label {
+  background: #fff !important;
+  border: none !important;
+  border-radius: 5px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.22) !important;
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #1e293b !important;
+  white-space: nowrap !important;
+}
+.hub-map-label::before { display: none !important; }

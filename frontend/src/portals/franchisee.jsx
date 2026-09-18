@@ -18,10 +18,10 @@ const kind = 'franchisee';
 const ALLOWED_ROLES = ['FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'];
 
 const PORTAL_CFG = {
-  customer:   { title: 'Customer Portal',    accent: 'Customer Operations' },
-  staff:      { title: 'Staff Portal',       accent: 'Service Operations' },
-  franchisee: { title: 'Franchisee Portal',  accent: 'Business Intelligence', email: 'franchise@ev.local' },
-  command:    { title: 'Central Command',    accent: 'Enterprise Control' },
+  customer:   { title: 'Customer Portal',       accent: 'Customer Operations' },
+  staff:      { title: 'Staff Portal',          accent: 'Service Operations' },
+  franchisee: { title: 'Fleet Operator Portal', accent: 'Fleet Operations', email: 'franchise@ev.local' },
+  command:    { title: 'Central Command',        accent: 'Enterprise Control' },
 };
 const cfg = PORTAL_CFG[kind];
 
@@ -33,16 +33,22 @@ const store = {
 
 const NAV_ITEMS = {
   franchisee: [
-    { id: 'dashboard',        label: 'Dashboard',        Icon: LayoutDashboard },
-    { id: 'financials',       label: 'Financials',       Icon: DollarSign },
-    { id: 'inventory',        label: 'Inventory',        Icon: Package },
-    { id: 'staff',            label: 'Staff Management', Icon: Users },
-    { id: 'attendance',       label: 'Attendance',       Icon: Clock },
-    { id: 'leave-approval',   label: 'Leave Approvals',  Icon: FileText },
-    { id: 'jobs',             label: 'Jobs',             Icon: ClipboardList },
-    { id: 'rentals',           label: 'Vehicle Sales', Icon: Car },
-    { id: 'complaints',       label: 'Customer Complaints', Icon: Bell },
-    { id: 'fault-vehicles',   label: 'Fault Vehicles',      Icon: AlertTriangle },
+    // ── Overview ──
+    { id: 'dashboard',        label: 'Dashboard',           Icon: LayoutDashboard, cat: 'Overview'   },
+
+    // ── Fleet ──
+    { id: 'inventory',        label: 'Inventory',           Icon: Package,         cat: 'Fleet'      },
+    { id: 'rentals',          label: 'Vehicle Sales',       Icon: Car,             cat: 'Fleet'      },
+    { id: 'fault-vehicles',   label: 'Fault Vehicles',      Icon: AlertTriangle,   cat: 'Fleet'      },
+
+    // ── Customers ──
+    { id: 'complaints',       label: 'Customer Complaints', Icon: Bell,            cat: 'Customers'  },
+
+    // ── Network ──
+    { id: 'charge-hubs',      label: 'Charge Hubs',         Icon: MapPin,          cat: 'Network'    },
+
+    // ── Finance ──
+    { id: 'financials',       label: 'Financials',          Icon: DollarSign,      cat: 'Finance'    },
   ],
 };
 
@@ -210,24 +216,38 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {!user ? <SidebarSkeleton count={navItems.length || 7} /> : navItems.map(({ id, label, Icon, parent, sub }) => {
-            const isActive = activePage === id;
-            const isParentActive = parent && activePage === parent;
-            return (
-              <button key={id}
-                className={
-                  'nav-item' +
-                  (sub ? ' nav-sub' : '') +
-                  (isActive ? ' active' : '') +
-                  (isParentActive ? ' parent-active' : '')
-                }
-                onClick={() => setPage(id)}>
-                <Icon size={sub ? 14 : 17} />
-                <span>{label}</span>
-                {sub && <ChevronRight size={12} style={{ marginLeft: 'auto', opacity: 0.4 }} />}
-              </button>
-            );
-          })}
+          {!user ? <SidebarSkeleton count={navItems.length || 7} /> : (() => {
+            const catOrder = [...new Set(navItems.map(item => item.cat || 'Other'))];
+            const grouped  = navItems.reduce((acc, item) => {
+              const c = item.cat || 'Other';
+              if (!acc[c]) acc[c] = [];
+              acc[c].push(item);
+              return acc;
+            }, {});
+            return catOrder.map(cat => (
+              <div key={cat} className="nav-group">
+                <div className="nav-category-label">{cat}</div>
+                {grouped[cat].map(({ id, label, Icon, parent, sub }) => {
+                  const isActive       = activePage === id;
+                  const isParentActive = parent && activePage === parent;
+                  return (
+                    <button key={id}
+                      className={
+                        'nav-item' +
+                        (sub ? ' nav-sub' : '') +
+                        (isActive ? ' active' : '') +
+                        (isParentActive ? ' parent-active' : '')
+                      }
+                      onClick={() => setPage(id)}>
+                      <Icon size={sub ? 14 : 17} />
+                      <span>{label}</span>
+                      {sub && <ChevronRight size={12} style={{ marginLeft: 'auto', opacity: 0.4 }} />}
+                    </button>
+                  );
+                })}
+              </div>
+            ));
+          })()}
         </nav>
         <button className="nav-item logout-btn" onClick={logout}>
           <LogOut size={17} /><span>Sign out</span>
@@ -263,13 +283,10 @@ function PageRouter({ page, call, user, setPage }) {
     dashboard:        <FranDashboard  call={call} />,
     financials:       <FranFinancials call={call} />,
     inventory:        <FranInventory  call={call} user={user} setPage={setPage} />,
-    staff:            <FranStaff     call={call} user={user} setPage={setPage} />,
-    attendance:       <FranAttendance />,
-    'leave-approval': <FranLeaveApproval />,
-    jobs:             <FranJobs      call={call} />,
     rentals:          <FranRentals   call={call} />,
     complaints:       <FranComplaints call={call} />,
     'fault-vehicles': <FaultVehicles call={call} />,
+    'charge-hubs':    <FranChargeHubs call={call} />,
   };
   return pages[page] || pages.dashboard;
 }
@@ -527,7 +544,7 @@ function FranDashboard({ call }) {
 
   if (ld || lf) return <Loader />;
   return <>
-    <PageHeader title="Franchise Dashboard" sub="Revenue, jobs and performance overview." />
+    <PageHeader title="Fleet Operator Dashboard" sub="Revenue, jobs and performance overview." />
     {(vPending > 0 || sPending > 0) && (
       <InfoBanner type="warning" Icon={Clock}>
         You have {vPending} vehicle(s) and {sPending} staff entry(s) awaiting Command Center approval.
@@ -574,88 +591,33 @@ function FranFinancials({ call }) {
 // FRAN INVENTORY PAGE
 // ══════════════════════════════════════════════════════════════════
 function FranInventory({ call, user, setPage }) {
-  const { data: apiInv, loading, error, refresh: refreshParts } = useFetch(call, '/franchise/inventory');
-  const { data: pendingVehicles, loading: pvLoading, refresh } = useFetch(call, '/franchise/pending-vehicles');
-  const [vehicleDrawerOpen, setVehicleDrawerOpen] = useState(false);
-  const [partDrawerOpen,    setPartDrawerOpen]    = useState(false);
-  const [selectedPart,      setSelectedPart]      = useState(null);
-  const [selectedVehicle,   setSelectedVehicle]   = useState(null);
-  const [editVehicle,       setEditVehicle]       = useState(null);   // vehicle being edited
-  const [editPart,          setEditPart]          = useState(null);   // part being edited
-  const [activeTab,         setActiveTab]         = useState('vehicles');
+  const { data: assignedVehicles, loading: avLoading, refresh: refreshAssigned } = useFetch(call, '/franchise/assigned-vehicles');
+  const [activeTab, setActiveTab] = useState('assigned');
   const { toast, show } = useToast();
 
-  const onVehicleAdded = () => {
-    refresh();
-    show('Vehicle submitted for Command Center approval!');
-  };
+  if (avLoading) return <Loader />;
 
-  const onPartAdded = () => {
-    refreshParts();
-    show('New part added to inventory!');
-  };
-
-  const onVehicleUpdated = (msg) => {
-    refresh();
-    setEditVehicle(null);
-    show(msg || 'Vehicle updated successfully!');
-  };
-
-  const onPartUpdated = (msg) => {
-    refreshParts();
-    setEditPart(null);
-    show(msg || 'Part updated successfully!');
-  };
-
-  if (loading || pvLoading) return <Loader />;
-  if (error) return <Err msg={error} />;
-
-  const vehicles  = pendingVehicles || [];
-  const parts     = apiInv || [];
-  const approved  = vehicles.filter(v => v.status === 'APPROVED');
-  const pending   = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
-  const lowStock  = parts.filter(p => p.quantity <= p.reorderLevel);
+  // Command Center assigned vehicles
+  const cmdVehicles   = (assignedVehicles || []).map(v => ({ ...v, _source: 'command_center' }));
+  const totalVehicles = cmdVehicles.length;
 
   const INV_TABS = [
-    { id: 'vehicles', label: 'My Vehicles', Icon: Car,     count: vehicles.length },
-    { id: 'parts',    label: 'Parts Inventory', Icon: Package, count: parts.length },
+    { id: 'assigned',  label: 'Assigned by Command', Icon: Truck,    count: cmdVehicles.length },
   ];
 
   return <>
     <Toast toast={toast} />
     <PageHeader
       title="Inventory"
-      sub="Manage your EV fleet vehicles and spare parts inventory."
-      actions={
-        <div style={{ display:'flex', gap:8 }}>
-          <button className="btn-ghost" onClick={() => setPartDrawerOpen(true)}>
-            <Package size={15} /> Add Part
-          </button>
-          <button className="btn-primary" onClick={() => setVehicleDrawerOpen(true)}>
-            <Plus size={15} /> Add Vehicle
-          </button>
-        </div>
-      }
+      sub="Vehicles assigned by Command Center appear here as your inventory — visible to customers."
     />
 
     <MetricGrid metrics={[
-      { label: 'Total Vehicles',   value: vehicles.length, Icon: Car,           color: '#2563eb' },
-      { label: 'Pending Approval', value: pending.length,  Icon: Clock,         color: '#d97706' },
-      { label: 'Approved & Live',  value: approved.length, Icon: CheckCircle,   color: '#16a34a' },
-      { label: 'Parts SKUs',       value: parts.length,    Icon: Package,       color: '#7c3aed' },
-      { label: 'Low Stock Parts',  value: lowStock.length, Icon: AlertTriangle, color: '#dc2626' },
+      { label: 'Total Vehicles',      value: totalVehicles,      Icon: Car,   color: '#2563eb' },
+      { label: 'Assigned by Command', value: cmdVehicles.length, Icon: Truck, color: '#16a34a' },
     ]} />
 
-    {pending.length > 0 && (
-      <InfoBanner type="warning" Icon={Clock}>
-        {pending.length} vehicle(s) sent to Command Center — awaiting approval before they appear in Customer Portal.
-      </InfoBanner>
-    )}
-    {lowStock.length > 0 && (
-      <InfoBanner type="warning" Icon={AlertTriangle}>
-        {lowStock.length} part(s) are at or below reorder level — consider restocking soon.
-      </InfoBanner>
-    )}
+
 
     {/* ── Subtab Bar ── */}
     <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
@@ -680,197 +642,74 @@ function FranInventory({ call, user, setPage }) {
       ))}
     </div>
 
-    {/* ── Vehicles Tab ── */}
-    {activeTab === 'vehicles' && (
-      <Card title="My Vehicles" badge={`${vehicles.length} vehicles`}>
-        {vehicles.length === 0
+    {/* ── Assigned by Command Center Tab ── */}
+    {activeTab === 'assigned' && (
+      <Card title="Assigned by Command Center" badge={`${cmdVehicles.length} vehicles`}>
+        {cmdVehicles.length === 0
           ? <div className="empty-state" style={{ padding: '40px 24px' }}>
-              <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
-              <p>No vehicles added yet. Click <strong>Add Vehicle</strong> to get started.</p>
+              <Truck size={40} style={{ opacity: .25, marginBottom: 12 }} />
+              <p style={{ color:'#6b7280', lineHeight:1.6 }}>
+                No vehicles assigned to you yet.<br />
+                The Command Center will assign vehicles here — they will be visible to your customers automatically.
+              </p>
             </div>
-          : <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Make</th>
-                    <th>Model</th>
-                    <th>Registration No</th>
-                    <th>Color</th>
-                    <th>Price</th>
-                    <th>Quantity</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehicles.map((v, i) => {
-                    const sc = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
-                    return (
+          : <>
+              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'12px 16px', marginBottom:16, fontSize:13, color:'#166534', display:'flex', alignItems:'center', gap:8 }}>
+                <CheckCircle size={16} /> These vehicles are assigned by Command Center and are <strong>live in your customer portal</strong>.
+              </div>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th>
+                      <th>Category</th>
+                      <th>Reg. No.</th>
+                      <th>Battery / Range</th>
+                      <th>Charging</th>
+                      <th>Price / Unit</th>
+                      <th>Qty</th>
+                      <th>Assigned On</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cmdVehicles.map((v, i) => (
                       <tr key={v._id || i}>
-                        <td>{v.category || '—'}</td>
-                        <td style={{ fontWeight:600 }}>{v.make || '—'}</td>
-                        <td>{v.model || '—'}</td>
-                        <td style={{ fontFamily:'monospace', fontSize:12 }}>{v.registrationNo || '—'}</td>
-                        <td>{v.color || '—'}</td>
-                        <td style={{fontWeight:700}}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
-                        <td style={{ fontWeight:700, textAlign:'center' }}>{v.quantity ?? 1}</td>
                         <td>
-                          <span className="status-pill" style={{ background: sc + '18', color: sc }}>
-                            {v.status === 'APPROVED' ? '✓ Approved' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending'}
+                          <div style={{ fontWeight:700, fontSize:13 }}>{v.make} {v.model}</div>
+                          <div style={{ fontSize:11, color:'#9ca3af' }}>{v.year}{v.year && v.color ? ' · ' : ''}{v.color}</div>
+                        </td>
+                        <td style={{ fontSize:12 }}>{v.category || '—'}</td>
+                        <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
+                        <td style={{ fontSize:12 }}>
+                          {v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}
+                          {v.rangeKm ? ` / ${v.rangeKm} km` : ''}
+                        </td>
+                        <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
+                        <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                        <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
+                        <td style={{ fontSize:11, color:'#6b7280' }}>
+                          {v.assignedAt ? new Date(v.assignedAt).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—'}
+                        </td>
+                        <td>
+                          <span className="status-pill" style={{ background:'#dcfce7', color:'#166534', fontSize:11 }}>
+                            ✓ Active
                           </span>
                         </td>
-                        <td>
-                          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                            <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
-                              onClick={() => setSelectedVehicle(v)}>
-                              View Details
-                            </button>
-                            <button style={{ padding:'3px 10px', fontSize:12, display:'flex', alignItems:'center', gap:4,
-                              border:'1px solid #bfdbfe', borderRadius:6, background:'#eff6ff', color:'#2563eb', cursor:'pointer', fontWeight:600 }}
-                              onClick={() => setEditVehicle(v)}>
-                              <Edit2 size={12} /> Edit
-                            </button>
-                          </div>
-                        </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
         }
       </Card>
     )}
 
-    {/* ── Parts Tab ── */}
-    {activeTab === 'parts' && (
-      <Card
-        title="Parts Inventory"
-        badge={`${parts.length} SKUs`}
-        action={
-          <button className="btn-ghost" style={{ fontSize:12, padding:'4px 12px' }} onClick={() => setPartDrawerOpen(true)}>
-            <Plus size={13} /> Add Part
-          </button>
-        }
-      >
-        {parts.length === 0
-          ? <div className="empty-state" style={{ padding:'32px 24px' }}>
-              <Package size={38} style={{ opacity:.2, marginBottom:10 }} />
-              <p>No parts added yet. Click <strong>Add Part</strong> to begin tracking spare parts.</p>
-            </div>
-          : <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Part Code (SKU)</th>
-                    <th>Part Name</th>
-                    <th>Category</th>
-                    <th>Quantity</th>
-                    <th>Reorder Level</th>
-                    <th>Unit Price</th>
-                    <th>Stock Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parts.map((p, i) => {
-                    const isLow = p.quantity <= p.reorderLevel;
-                    return (
-                      <tr key={p._id || p.sku || i}>
-                        <td>
-                          <span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8',
-                            background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>
-                            {p.sku || '—'}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
-                        <td>
-                          <span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px',
-                            borderRadius:4, color:'#374151' }}>
-                            {p.category || 'General'}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>
-                          {p.quantity ?? 0}
-                        </td>
-                        <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
-                        <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
-                        <td>
-                          <span className="status-pill" style={{
-                            background: isLow ? '#fee2e2' : '#dcfce7',
-                            color:      isLow ? '#991b1b' : '#166534',
-                          }}>
-                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
-                          </span>
-                        </td>
-                        <td>
-                          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                            <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
-                              onClick={() => setSelectedPart(p)}>
-                              View Details
-                            </button>
-                            <button style={{ padding:'3px 10px', fontSize:12, display:'flex', alignItems:'center', gap:4,
-                              border:'1px solid #bfdbfe', borderRadius:6, background:'#eff6ff', color:'#2563eb', cursor:'pointer', fontWeight:600 }}
-                              onClick={() => setEditPart(p)}>
-                              <Edit2 size={12} /> Edit
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-        }
-      </Card>
-    )}
 
-    {/* Part Detail Modal */}
-    {selectedPart && (
-      <PartDetailModal part={selectedPart} onClose={() => setSelectedPart(null)} />
-    )}
 
-    {/* Vehicle Detail Modal */}
-    {selectedVehicle && (
-      <VehicleDetailModal vehicle={selectedVehicle} onClose={() => setSelectedVehicle(null)} />
-    )}
 
-    {/* ── EDIT Vehicle Modal ── */}
-    {editVehicle && (
-      <EditVehicleModal
-        vehicle={editVehicle}
-        call={call}
-        onClose={() => setEditVehicle(null)}
-        onSaved={onVehicleUpdated}
-      />
-    )}
 
-    {/* ── EDIT Part Modal ── */}
-    {editPart && (
-      <EditPartModal
-        part={editPart}
-        call={call}
-        onClose={() => setEditPart(null)}
-        onSaved={onPartUpdated}
-      />
-    )}
-
-    <AddInventoryDrawer
-      open={vehicleDrawerOpen}
-      onClose={() => setVehicleDrawerOpen(false)}
-      call={call}
-      user={user}
-      onAdded={onVehicleAdded}
-    />
-
-    <AddPartDrawer
-      open={partDrawerOpen}
-      onClose={() => setPartDrawerOpen(false)}
-      call={call}
-      onAdded={onPartAdded}
-    />
   </>;
 }
 
@@ -2077,7 +1916,7 @@ function FranStaff({ call, user, setPage }) {
   const onStaffAdded = () => { refresh(); show('Staff entry submitted for Command Center approval!'); };
 
   const handleRemove = async (staffId, name) => {
-    if (!window.confirm(`Remove ${name} from franchisee? Their login will be disabled.`)) return;
+    if (!window.confirm(`Remove ${name} from fleet? Their login will be disabled.`)) return;
     try {
       await call(`/franchise/pending-staff/${staffId}/remove`, { method: 'put' });
       show(`${name} removed successfully.`);
@@ -2122,7 +1961,7 @@ function FranStaff({ call, user, setPage }) {
 
     <PageHeader
       title="Staff Management"
-      sub="Manage your franchise staff. New entries require Command Center approval."
+      sub="Manage your fleet staff. New entries require Command Center approval."
       actions={
         <button className="btn-primary" onClick={() => setDrawerOpen(true)}>
           <Plus size={15} /> Add Staff
@@ -2300,7 +2139,7 @@ function FranStaffDirectory({ call, filter, setPage }) {
   const { toast, show } = useToast();
 
   const handleRemove = async (staffId, name) => {
-    if (!window.confirm(`Remove ${name} from franchisee? Their login will be disabled.`)) return;
+    if (!window.confirm(`Remove ${name} from fleet? Their login will be disabled.`)) return;
     try {
       await call(`/franchise/pending-staff/${staffId}/remove`, { method: 'put' });
       show(`${name} removed successfully.`);
@@ -2341,7 +2180,7 @@ function FranStaffDirectory({ call, filter, setPage }) {
     <PageHeader
       title={isActive ? 'Active Staff Directory' : 'Removed Staff Records'}
       sub={isActive
-        ? 'All currently active & approved staff members in your franchise.'
+        ? 'All currently active & approved staff members in your fleet.'
         : 'History of removed staff — data preserved for audit purposes.'}
       actions={
         <button className="btn-ghost" onClick={() => setPage('staff')}>
@@ -2957,7 +2796,7 @@ function FranJobs({ call }) {
   const jobs = Array.isArray(data) ? data : [];
   const completed = jobs.filter(j => j.status === 'COMPLETED');
   return <>
-    <PageHeader title="Jobs" sub="Completed vehicle-delivery tasks and service jobs for this franchise." />
+    <PageHeader title="Jobs" sub="Completed vehicle-delivery tasks and service jobs for this fleet." />
     <MetricGrid metrics={[
       { label: 'Total Jobs', value: jobs.length, Icon: ClipboardList, color: '#2563eb' },
       { label: 'Completed Tasks', value: completed.length, Icon: CheckCircle, color: '#16a34a' },
@@ -3040,7 +2879,7 @@ function FranRentals({ call }) {
           </div>
         </div>;
       })}
-      {!rows.length&&<div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer vehicle purchases for this franchisee.</p></div></div>}
+      {!rows.length&&<div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer vehicle purchases for this fleet operator.</p></div></div>}
     </div>
     {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}>
       <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}>
@@ -3181,7 +3020,7 @@ function FranComplaints({ call }) {
   const resolvedComplaints = complaints.filter(c => ['SOLVED','CLOSED'].includes(c.status));
   const displayList = tab === 'open' ? openComplaints : resolvedComplaints;
 
-  // Job cards from localStorage tied to this franchisee
+  // Job cards from localStorage tied to this fleet operator
   const allJobCards = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
   const pendingJobCards = allJobCards.filter(j => j.status !== 'COMPLETED');
   const completedJobCards = allJobCards.filter(j => j.status === 'COMPLETED');
@@ -3823,6 +3662,392 @@ function FranComplaints({ call }) {
       </div>
     )}
   </>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// FRAN CHARGE HUBS — Network hub map (read-only, mirrors Command Center)
+// ══════════════════════════════════════════════════════════════════
+
+const FRAN_HUB_STATUS_COLOR = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
+
+const FRAN_CITY_COORDS = {
+  'hyderabad':  [17.3850,  78.4867], 'bangalore':  [12.9716,  77.5946],
+  'bengaluru':  [12.9716,  77.5946], 'mumbai':     [19.0760,  72.8777],
+  'delhi':      [28.6139,  77.2090], 'new delhi':  [28.6139,  77.2090],
+  'chennai':    [13.0827,  80.2707], 'kolkata':    [22.5726,  88.3639],
+  'pune':       [18.5204,  73.8567], 'ahmedabad':  [23.0225,  72.5714],
+  'jaipur':     [26.9124,  75.7873], 'lucknow':    [26.8467,  80.9462],
+  'surat':      [21.1702,  72.8311], 'kochi':      [ 9.9312,  76.2673],
+  'vizag':      [17.6868,  83.2185], 'visakhapatnam': [17.6868, 83.2185],
+  'nagpur':     [21.1458,  79.0882], 'indore':     [22.7196,  75.8577],
+  'coimbatore': [11.0168,  76.9558], 'vadodara':   [22.3072,  73.1812],
+  'patna':      [25.5941,  85.1376], 'bhopal':     [23.2599,  77.4126],
+  'thane':      [19.2183,  72.9781], 'noida':      [28.5355,  77.3910],
+  'gurgaon':    [28.4595,  77.0266], 'gurugram':   [28.4595,  77.0266],
+  'chandigarh': [30.7333,  76.7794], 'mysore':     [12.2958,  76.6394],
+  'mysuru':     [12.2958,  76.6394], 'bhubaneswar':[20.2961,  85.8245],
+  'kurnool':    [15.8281,  78.0373], 'vijayawada': [16.5062,  80.6480],
+  'guntur':     [16.3067,  80.4365], 'tirupati':   [13.6288,  79.4192],
+  'warangal':   [17.9784,  79.5941], 'nellore':    [14.4426,  79.9865],
+  'rajkot':     [22.3039,  70.8022], 'amritsar':   [31.6340,  74.8723],
+  'jodhpur':    [26.2389,  73.0243], 'guwahati':   [26.1445,  91.7362],
+  'agra':       [27.1767,  78.0081], 'varanasi':   [25.3176,  82.9739],
+};
+
+function franGetCoords(hub) {
+  if (hub.lat && hub.lng) return [hub.lat, hub.lng];
+  const key = (hub.city || '').toLowerCase().trim();
+  return FRAN_CITY_COORDS[key] || null;
+}
+
+async function franGeocodeHub(hub) {
+  const q = [hub.address, hub.city, 'India'].filter(Boolean).join(', ');
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, {
+      headers: { 'Accept-Language': 'en' }
+    });
+    const data = await r.json();
+    if (data && data[0]) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch (_) {}
+  return null;
+}
+
+function FranHubMap({ hubs, selectedHub, onSelectHub }) {
+  const mapRef          = React.useRef(null);
+  const leafRef         = React.useRef(null);
+  const markersRef      = React.useRef([]);
+  const tooltipTimerRef = React.useRef(null);
+  const hubsRef         = React.useRef(hubs);
+  const drawScheduled   = React.useRef(false);
+  const [tooltip, setTooltip] = React.useState(null);
+
+  hubsRef.current = hubs;
+
+  function scheduleDraw() {
+    if (drawScheduled.current) return;
+    drawScheduled.current = true;
+    setTimeout(() => {
+      drawScheduled.current = false;
+      if (leafRef.current && hubsRef.current && hubsRef.current.length > 0) {
+        leafRef.current.invalidateSize();
+        drawFranMarkers(leafRef.current, hubsRef.current);
+      }
+    }, 50);
+  }
+
+  React.useEffect(() => {
+    if (leafRef.current || !mapRef.current || !window.L) return;
+    const L = window.L;
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+      .setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    map.getPane('markerPane').style.zIndex = 650;
+    map.getPane('tooltipPane').style.zIndex = 700;
+    delete window.L.Icon.Default.prototype._getIconUrl;
+    window.L.Icon.Default.mergeOptions({ iconUrl: '', shadowUrl: '', iconRetinaUrl: '' });
+    leafRef.current = map;
+    setTimeout(() => scheduleDraw(), 400);
+  }, []);
+
+  React.useEffect(() => { scheduleDraw(); }, [hubs]);
+
+  function placeFranMarker(map, hub, coords) {
+    const color = FRAN_HUB_STATUS_COLOR[hub.status] || '#2563eb';
+    const marker = window.L.circleMarker(coords, {
+      radius: 13,
+      fillColor: color,
+      color: '#ffffff',
+      weight: 3,
+      opacity: 1,
+      fillOpacity: 1,
+      pane: 'markerPane',
+    }).addTo(map);
+    marker.bindTooltip(hub.name || '', {
+      permanent: true,
+      direction: 'bottom',
+      offset: [0, 10],
+      className: 'hub-map-label',
+    }).openTooltip();
+    marker.on('mouseover', e => {
+      clearTimeout(tooltipTimerRef.current);
+      const pt = map.latLngToContainerPoint(e.latlng);
+      setTooltip({ hub, x: pt.x, y: pt.y });
+    });
+    marker.on('mouseout', () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
+    marker.on('click', () => onSelectHub(hub));
+    markersRef.current.push(marker);
+    return coords;
+  }
+
+  async function drawFranMarkers(map, hubList) {
+    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+    markersRef.current = [];
+    const allCoords = [];
+    for (const hub of hubList) {
+      let coords = franGetCoords(hub);
+      if (!coords) coords = await franGeocodeHub(hub);
+      if (!coords) continue;
+      placeFranMarker(map, hub, coords);
+      allCoords.push(coords);
+    }
+    if (allCoords.length === 0) return;
+    if (allCoords.length === 1) {
+      map.setView(allCoords[0], 15, { animate: false });
+    } else {
+      map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 13, animate: false });
+    }
+    map.invalidateSize();
+  }
+
+  React.useEffect(() => {
+    if (!selectedHub || !leafRef.current) return;
+    (async () => {
+      let c = franGetCoords(selectedHub);
+      if (!c) c = await franGeocodeHub(selectedHub);
+      if (c && leafRef.current) leafRef.current.setView(c, 15, { animate: true });
+    })();
+  }, [selectedHub]);
+
+  const sc = tooltip ? (FRAN_HUB_STATUS_COLOR[tooltip.hub.status] || '#2563eb') : '#16a34a';
+
+  return (
+    <div className="hub-map-container" style={{ position: 'relative' }}>
+      <div ref={mapRef} id="fran-hub-map" style={{ height: 480, borderRadius: 12, overflow: 'hidden' }} />
+      {tooltip && (() => {
+        const coords  = franGetCoords(tooltip.hub);
+        const mapsUrl = coords
+          ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((tooltip.hub.address ? tooltip.hub.address + ', ' : '') + (tooltip.hub.city || ''))}`;
+        return (
+          <div
+            className="map-tooltip"
+            style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'auto' }}
+            onMouseEnter={() => clearTimeout(tooltipTimerRef.current)}
+            onMouseLeave={() => setTooltip(null)}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+              <div className="map-tooltip-name">{tooltip.hub.name}</div>
+              <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Open in Google Maps"
+                 style={{ color: '#2563eb', flexShrink: 0, display: 'flex', alignItems: 'center', textDecoration: 'none', padding: '2px 0' }}>
+                <MapPin size={16} />
+              </a>
+            </div>
+            <div className="map-tooltip-row"><span>📍</span><strong>{tooltip.hub.city}</strong></div>
+            {tooltip.hub.address && <div className="map-tooltip-row" style={{ fontSize: 11 }}>{tooltip.hub.address}</div>}
+            <div className="map-tooltip-row"><span>⚡ Chargers:</span><strong>{tooltip.hub.chargerCount ?? 0}</strong></div>
+            {tooltip.hub.code && <div className="map-tooltip-row"><span>🔖 Code:</span><strong>{tooltip.hub.code}</strong></div>}
+            <div><span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>● {tooltip.hub.status}</span></div>
+          </div>
+        );
+      })()}
+      <div className="map-legend">
+        {Object.entries(FRAN_HUB_STATUS_COLOR).map(([s, c]) => (
+          <div key={s} className="legend-item">
+            <div className="legend-dot" style={{ background: c }} />
+            <span style={{ fontSize: 11, color: '#374151' }}>{s}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FranChargeHubs({ call }) {
+  const { data: hubs, loading, error } = useFetch(call, '/hubs');
+  const [selectedHub,  setSelectedHub]  = useState(null);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [viewMode,     setViewMode]     = useState('map');
+
+  if (loading && !hubs) return <Loader />;
+  if (error   && !hubs) return <Err msg={error} />;
+
+  const hubList    = hubs || [];
+  const filtered   = statusFilter === 'ALL' ? hubList : hubList.filter(h => h.status === statusFilter);
+  const onlineCount  = hubList.filter(h => h.status === 'ONLINE').length;
+  const offlineCount = hubList.filter(h => h.status === 'OFFLINE').length;
+  const maintCount   = hubList.filter(h => h.status === 'MAINTENANCE').length;
+  const totalChargers = hubList.reduce((s, h) => s + (h.chargerCount || 0), 0);
+
+  const STATUS_CFG = {
+    ONLINE:      { color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', dot: '#22c55e', label: 'Online'      },
+    OFFLINE:     { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', dot: '#ef4444', label: 'Offline'     },
+    MAINTENANCE: { color: '#d97706', bg: '#fffbeb', border: '#fde68a', dot: '#f59e0b', label: 'Maintenance' },
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Charge Hubs"
+        sub={`${hubList.length} hubs across the allEV network · ${totalChargers} total charger slots`}
+      />
+
+      {/* ── Stats row ── */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+        {[
+          { label: 'Total Hubs',   value: hubList.length,  color: '#2563eb' },
+          { label: 'Online',       value: onlineCount,      color: '#16a34a' },
+          { label: 'Offline',      value: offlineCount,     color: '#dc2626' },
+          { label: 'Maintenance',  value: maintCount,       color: '#d97706' },
+          { label: 'Charger Slots',value: totalChargers,    color: '#7c3aed' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+            padding: '10px 18px', flex: '1 1 120px', minWidth: 100,
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color }}>{value}</div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2, fontWeight: 600 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Controls: filter pills + view toggle ── */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { id: 'ALL',         label: `All (${hubList.length})`,   color: '#2563eb' },
+            { id: 'ONLINE',      label: `Online (${onlineCount})`,   color: '#16a34a' },
+            { id: 'OFFLINE',     label: `Offline (${offlineCount})`, color: '#dc2626' },
+            { id: 'MAINTENANCE', label: `Maintenance (${maintCount})`, color: '#d97706' },
+          ].map(f => (
+            <button
+              key={f.id}
+              onClick={() => setStatusFilter(f.id)}
+              style={{
+                padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                border: statusFilter === f.id ? `2px solid ${f.color}` : '2px solid #e5e7eb',
+                background: statusFilter === f.id ? f.color : '#fff',
+                color: statusFilter === f.id ? '#fff' : '#374151',
+                transition: 'all .15s',
+              }}
+            >{f.label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 8, padding: 3, gap: 2, marginLeft: 'auto' }}>
+          {[
+            { id: 'map',   icon: '🗺',  label: 'Map'   },
+            { id: 'table', icon: '📋', label: 'Table' },
+          ].map(v => (
+            <button
+              key={v.id}
+              onClick={() => setViewMode(v.id)}
+              style={{
+                padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                background: viewMode === v.id ? '#fff' : 'transparent',
+                color: viewMode === v.id ? '#2563eb' : '#6b7280',
+                boxShadow: viewMode === v.id ? '0 1px 4px rgba(0,0,0,.1)' : 'none',
+                transition: 'all .15s',
+              }}
+            >{v.icon} {v.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Map View ── */}
+      {viewMode === 'map' && (
+        <Card title="Hub Network Map" badge={`${filtered.length} hubs`}>
+          <FranHubMap
+            hubs={filtered}
+            selectedHub={selectedHub}
+            onSelectHub={h => setSelectedHub(s => s?._id === h._id ? null : h)}
+          />
+          {selectedHub && (() => {
+            const sc = STATUS_CFG[selectedHub.status] || STATUS_CFG.OFFLINE;
+            const coords = franGetCoords(selectedHub);
+            const mapsUrl = coords
+              ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+              : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedHub.address ? selectedHub.address + ', ' : '') + (selectedHub.city || ''))}`;
+            return (
+              <div style={{
+                marginTop: 16, background: '#f9fafb', border: '1px solid #e5e7eb',
+                borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 16,
+                flexWrap: 'wrap', alignItems: 'center',
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e' }}>{selectedHub.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    📍 {selectedHub.city}{selectedHub.address ? ` · ${selectedHub.address}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                    ● {sc.label}
+                  </span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>⚡ {selectedHub.chargerCount ?? 0} chargers</span>
+                  {selectedHub.code && <span style={{ fontSize: 12, color: '#6b7280' }}>🔖 {selectedHub.code}</span>}
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                     style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <MapPin size={13} /> Open Maps
+                  </a>
+                  <button onClick={() => setSelectedHub(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16 }}>✕</button>
+                </div>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
+
+      {/* ── Table View ── */}
+      {viewMode === 'table' && (
+        <Card title="Hub List" badge={`${filtered.length} hubs`}>
+          {filtered.length === 0 ? (
+            <div className="empty-state">
+              <MapPin size={36} style={{ opacity: .2 }} />
+              <p>No hubs found for this filter.</p>
+            </div>
+          ) : (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th><th>City</th><th>Status</th>
+                    <th>Chargers</th><th>Code</th><th>Address</th><th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(h => {
+                    const sc = STATUS_CFG[h.status] || STATUS_CFG.OFFLINE;
+                    const coords  = franGetCoords(h);
+                    const mapsUrl = coords
+                      ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((h.address ? h.address + ', ' : '') + (h.city || ''))}`;
+                    return (
+                      <tr key={h._id}>
+                        <td style={{ fontWeight: 600 }}>{h.name || '—'}</td>
+                        <td>{h.city || '—'}</td>
+                        <td>
+                          <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            ● {sc.label}
+                          </span>
+                        </td>
+                        <td>{h.chargerCount ?? 0}</td>
+                        <td>{h.code || '—'}</td>
+                        <td style={{ fontSize: 12, color: '#6b7280', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.address || '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                               style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <MapPin size={12} /> Maps
+                            </a>
+                            <button onClick={() => { setSelectedHub(h); setViewMode('map'); }}
+                              style={{ fontSize: 11, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                              📍 Map
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+    </>
+  );
 }
 
 function FaultVehicles({ call }) {

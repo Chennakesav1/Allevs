@@ -149,7 +149,7 @@ const CUSTOMER_PREFETCH_PATHS = [
   '/customer/wallet',
   '/customer/wallet/transactions',
   '/customer/complaints',
-  '/customer/hubs',
+  '/hubs',
   '/customer/profile',
 ];
 
@@ -1586,7 +1586,7 @@ function PickupLocationMap({ location, onClose }) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     const L = window.L;
     const map = L.map(mapRef.current).setView([lat,lng], 15);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>', subdomains: 'abcd', maxZoom: 19 }).addTo(map);
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors', maxZoom: 19 }).addTo(map);
     const marker = L.marker([lat,lng]).addTo(map);
     marker.bindPopup(`<strong>${location.name || 'Pickup Location'}</strong><br/>${location.address || ''}`).openPopup();
     return () => map.remove();
@@ -3049,9 +3049,8 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     const L   = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
@@ -3067,6 +3066,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
   function drawHubMarkers(map, hubList) {
     markersRef.current.forEach(m => map.removeLayer(m));
     markersRef.current = [];
+    const allCoords = [];
     hubList.forEach(hub => {
       const coords = custGetCoords(hub);
       if (!coords) return;
@@ -3086,7 +3086,15 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
       marker.on('mouseout',  () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
       marker.on('click',     () => onSelectHub(hub));
       markersRef.current.push(marker);
+      allCoords.push(coords);
     });
+    // Auto-fit map to all hub locations
+    if (allCoords.length === 1) {
+      map.setView(allCoords[0], 14, { animate: false });
+    } else if (allCoords.length > 1) {
+      map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 14, animate: false });
+    }
+    map.invalidateSize();
   }
 
   // Draw / update user location marker
@@ -3179,12 +3187,12 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
 }
 
 function CustChargingStations({ call }) {
-  const { data: rawHubs, loading, error } = useFetch(call, '/customer/hubs');
+  const { data: rawHubs, loading, error } = useFetch(call, '/hubs');
   const [userCoords,   setUserCoords]   = useState(null);
   const [locStatus,    setLocStatus]    = useState('idle');
   const [selectedHub,  setSelectedHub]  = useState(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [viewMode,     setViewMode]     = useState('grid'); // 'grid' | 'map'
+  const [viewMode,     setViewMode]     = useState('map'); // 'grid' | 'map'
 
   const hubs = React.useMemo(() => {
     if (!rawHubs) return [];
@@ -3312,6 +3320,44 @@ function CustChargingStations({ call }) {
         <div style={{ marginBottom: 24 }}>
           <CustStationsMap hubs={hubs} userCoords={userCoords} selectedHub={selectedHub}
             onSelectHub={h => setSelectedHub(s => s?._id === h._id ? null : h)} />
+          {selectedHub && (() => {
+            const sc = STATUS_CFG[selectedHub.status] || STATUS_CFG.OFFLINE;
+            const coords = custGetCoords(selectedHub);
+            const mapsUrl = coords
+              ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+              : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedHub.address ? selectedHub.address + ', ' : '') + (selectedHub.city || ''))}`;
+            return (
+              <div style={{
+                marginTop: 16, background: '#f9fafb', border: '1px solid #e5e7eb',
+                borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 16,
+                flexWrap: 'wrap', alignItems: 'center',
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e' }}>{selectedHub.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    📍 {selectedHub.city}{selectedHub.address ? ` · ${selectedHub.address}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                    ● {sc.label}
+                  </span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>⚡ {selectedHub.chargerCount ?? 0} chargers</span>
+                  {selectedHub._dist != null && (
+                    <span style={{ fontSize: 13, color: '#2563eb', fontWeight: 600 }}>
+                      📏 {selectedHub._dist < 1 ? `${(selectedHub._dist * 1000).toFixed(0)} m` : `${selectedHub._dist.toFixed(1)} km`} away
+                    </span>
+                  )}
+                  {selectedHub.code && <span style={{ fontSize: 12, color: '#6b7280' }}>🔖 {selectedHub.code}</span>}
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                     style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <MapPin size={13} /> Open Maps
+                  </a>
+                  <button onClick={() => setSelectedHub(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16 }}>✕</button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 

@@ -1,13 +1,17 @@
 import React, { useEffect, useState, useRef, createContext, useContext } from 'react';
 import allevLogo from '../allevlogo.png';
 import axios from 'axios';
+import { io } from 'socket.io-client';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
   Calendar, Clock, User, Camera, CreditCard, Home, Settings,
   ChevronLeft, ChevronRight, Upload, Edit2, Save, X, Plus,
-  Sun, Star, Coffee, Award, Briefcase, Heart, BookOpen, Menu
+  Sun, Star, Coffee, Award, Briefcase, Heart, BookOpen, Menu,
+  MessageSquare, Megaphone, Search, Moon, Globe2, ShieldCheck,
+  ClipboardCheck, Navigation, Smartphone, Download, Send, Check,
+  ChevronDown, UserCheck, Timer, Wifi, BadgeCheck, CircleDollarSign
 } from 'lucide-react';
 import './staff.css';
 
@@ -35,7 +39,7 @@ const TRANSLATIONS = {
     high:'High', medium:'Medium', low:'Low', update:'Update', saveWork:'Save Work',
     noWorks:'No works', addFirstWork:'Add your first work item to get started.',
     noPendingWorks:'No pending works right now.', noCompletedWorks:'No completed works right now.',
-    pendingLeaves:'pending leave', pendingWork:'pending work',
+    pendingLeaves:'pending leave', pendingWork:'pending work', chargeHubs:'Charge Hubs',
     applyForLeave:'Apply for Leave', leaveHistory:'Leave History', balance:'Balance',
     pushNotifications:'Push Notifications', language:'Language', fontSize:'Font Size',
     getAlerts:'Get alerts for job updates and leave status', interfaceLanguage:'Interface language',
@@ -45,6 +49,7 @@ const TRANSLATIONS = {
     appSettings:'App Settings', profileSaved:'Profile saved successfully!',
     submitApplication:'Submit Application', leavePendingApproval:'Pending Approval',
     approvedLeaves:'Approved Leaves', daysTaken:'Days Taken', totalApplied:'Total Applied',
+    notifications:'Notifications', attendance:'Attendance & Duty', support:'Support', documentsVault:'Documents', payslips:'Payslips', performance:'Performance', shifts:'Shift Schedule', recognition:'Recognition', checklist:'Daily Checklist', search:'Search', announcements:'Announcements', security:'Security',
   },
   hi: {
     dashboard:'डैशबोर्ड', myWorks:'मेरे कार्य', holidays:'छुट्टियाँ', leave:'अवकाश', profile:'प्रोफ़ाइल',
@@ -418,11 +423,22 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const NAV_ITEMS = [
-    { id: 'dashboard',  labelKey: 'dashboard',   Icon: LayoutDashboard },
-    { id: 'my-works',   labelKey: 'myWorks',      Icon: Briefcase },
-    { id: 'holidays',   labelKey: 'holidays',     Icon: Calendar },
-    { id: 'leave',      labelKey: 'leave',        Icon: Clock },
-    { id: 'profile',    labelKey: 'profile',      Icon: User },
+    { id: 'dashboard', labelKey: 'dashboard', Icon: LayoutDashboard },
+    { id: 'my-works', labelKey: 'myWorks', Icon: Briefcase },
+    { id: 'notifications', labelKey: 'notifications', Icon: Bell },
+    { id: 'attendance', labelKey: 'attendance', Icon: Clock },
+    { id: 'checklist', labelKey: 'checklist', Icon: ClipboardCheck },
+    { id: 'leave', labelKey: 'leave', Icon: Calendar },
+    { id: 'shifts', labelKey: 'shifts', Icon: Calendar },
+    { id: 'payslips', labelKey: 'payslips', Icon: CircleDollarSign },
+    { id: 'documents', labelKey: 'documentsVault', Icon: FileText },
+    { id: 'support', labelKey: 'support', Icon: MessageSquare },
+    { id: 'performance', labelKey: 'performance', Icon: TrendingUp },
+    { id: 'recognition', labelKey: 'recognition', Icon: Award },
+    { id: 'global-search', labelKey: 'search', Icon: Search },
+    { id: 'security', labelKey: 'security', Icon: ShieldCheck },
+    { id: 'charge-hubs', labelKey: 'chargeHubs', Icon: MapPin },
+    { id: 'profile', labelKey: 'profile', Icon: User },
   ];
 
   return (
@@ -475,28 +491,19 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
 
       {/* ── Mobile Header ── */}
       <header className="mobile-topbar">
-        <div className="topnav-logo">
-          <img src={allevLogo} alt="allEV" style={{height:"30px",objectFit:"contain"}} />
-        </div>
-        <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}><Menu size={20} /></button>
+        <div className="topnav-logo"><img src={allevLogo} alt="allEV" style={{height:'30px',objectFit:'contain'}} /></div>
+        <button className="mobile-profile-btn" onClick={() => setPage('profile')} aria-label="Profile">
+          {user?.profileImage || user?.profilePic ? <img src={user.profileImage || user.profilePic} alt="" className="mobile-profile-avatar-img" /> : <span className="mobile-profile-avatar">{user?.name?.[0] || '?'}</span>}
+          <span className="mobile-profile-online" />
+        </button>
       </header>
-
-      {/* Mobile menu */}
-      {mobileMenuOpen && (
-        <div className="mobile-nav">
-          {NAV_ITEMS.map(({ id, labelKey, Icon }) => (
-            <button key={id} className={'mobile-nav-item' + (page === id ? ' active' : '')}
-              onClick={() => { setPage(id); setMobileMenuOpen(false); }}>
-              <Icon size={16} />{t(labelKey)}
-            </button>
-          ))}
-          <button className="mobile-nav-item logout-mobile" onClick={logout}><LogOut size={16} />{t('signOut')}</button>
-        </div>
-      )}
 
       {/* ── Page Content ── */}
       <div className="page-content-area">
         <PageRouter page={page} call={call} user={user} setUser={setUser} setPage={setPage} />
+        <nav className="staff-mobile-bottom-nav">
+          {[['dashboard','Dashboard',LayoutDashboard],['my-works','My Works',Briefcase],['holidays','Holidays',Calendar],['notifications','Notifications',Bell],['profile','Profile',User]].map(([id,label,Icon])=><button key={id} className={page===id?'active':''} onClick={()=>setPage(id)}><Icon size={21}/><span>{label}</span>{id==='notifications'&&<b className="bottom-badge">{(store.get('ev_staff_notifications')||[]).filter(n=>!n.read).length||''}</b>}</button>)}
+        </nav>
       </div>
     </div>
   );
@@ -513,6 +520,18 @@ function PageRouter({ page, call, user, setUser, setPage }) {
     holidays: <Holidays {...P} />,
     leave: <Leave {...P} />,
     profile: <Profile {...P} />,
+    'charge-hubs': <StaffChargeHubs {...P} />,
+    notifications: <NotificationsCenter {...P} />,
+    attendance: <AttendanceDuty {...P} />,
+    checklist: <DailyChecklist {...P} />,
+    documents: <DocumentsVault {...P} />,
+    payslips: <Payslips {...P} />,
+    support: <SupportTickets {...P} />,
+    performance: <StaffPerformance {...P} />,
+    shifts: <ShiftSchedule {...P} />,
+    recognition: <StaffRecognition {...P} />,
+    'global-search': <GlobalSearch {...P} />,
+    security: <SecurityPage {...P} />,
   };
   return pages[page] || pages.dashboard;
 }
@@ -520,9 +539,10 @@ function PageRouter({ page, call, user, setUser, setPage }) {
 // ══════════════════════════════════════════════════════════════════
 // SHARED UI COMPONENTS
 // ══════════════════════════════════════════════════════════════════
-function PageHeader({ title, sub }) {
+function PageHeader({ title, sub, back }) {
   return (
     <div className="page-header">
+      {back && <button className="mobile-back-btn" onClick={back}><ChevronLeft size={20}/></button>}
       <h1 className="page-title">{title}</h1>
       {sub && <p className="page-sub">{sub}</p>}
     </div>
@@ -649,6 +669,8 @@ function Err({ msg }) { return <div className="empty" style={{ color:'#dc2626' }
 function StaffDashboard({ call, user, setPage }) {
   const { t } = useTranslation();
   const { data: jobs, loading: lj } = useFetch(call, '/staff/jobs');
+  const { data: leaveRows } = useFetch(call, '/staff/leave-requests');
+  const { data: notificationRows } = useFetch(call, '/staff/notifications');
   const leaves = store.get('ev_staff_leaves') || [];
   const myWorks = store.get('ev_staff_works') || [];
 
@@ -663,9 +685,11 @@ function StaffDashboard({ call, user, setPage }) {
 
   if (lj) return <Loader />;
   const open = jobs?.filter(j => !['COMPLETED','CANCELLED'].includes(j.status)) || [];
-  const pendingLeaves = leaves.filter(l => l.status === 'PENDING').length;
+  const liveLeaves = leaveRows || leaves;
+  const pendingLeaves = liveLeaves.filter(l => l.status === 'PENDING').length;
   const pendingWorks  = myWorks.filter(w => w.status === 'pending').length;
   const completedWorks = myWorks.filter(w => w.status === 'completed').length;
+  const unreadNotificationsCount = (notificationRows || store.get('ev_staff_notifications') || []).filter(n => !n.read).length;
 
   const today = new Date();
   const weekday = today.toLocaleDateString('en-IN', { weekday:'long' });
@@ -677,7 +701,7 @@ function StaffDashboard({ call, user, setPage }) {
     setShowDutyConfirm(true);
   };
 
-  const confirmDuty = () => {
+  const confirmDuty = async () => {
     const now = new Date().toISOString();
     const staffName  = user?.name  || 'Staff';
     const staffId    = user?._id   || user?.id || 'staff-001';
@@ -685,6 +709,23 @@ function StaffDashboard({ call, user, setPage }) {
     const staffPhone = store.get('ev_staff_profile')?.phone || '—';
     const hubId      = user?.hubId || 'HUB-001';
     const todayKey   = new Date().toISOString().slice(0, 10);
+
+    try {
+      const endpoint = confirmAction === 'on' ? '/staff/attendance/clock-in' : '/staff/attendance/clock-out';
+      const location = await new Promise(resolve => {
+        if (!navigator.geolocation) return resolve(null);
+        navigator.geolocation.getCurrentPosition(
+          p => resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),
+          () => resolve(null),
+          {enableHighAccuracy:true,timeout:7000}
+        );
+      });
+      await call(endpoint, { method:'post', data: location ? {location} : {} });
+    } catch (e) {
+      alert(e.response?.data?.message || e.message || 'Could not update duty status');
+      setShowDutyConfirm(false);
+      return;
+    }
 
     if (confirmAction === 'on') {
       // Mark duty ON
@@ -800,6 +841,20 @@ function StaffDashboard({ call, user, setPage }) {
       </button>
     </div>
 
+    <div className="staff-mobile-launcher">
+      {[
+        ['dashboard','Dashboard',LayoutDashboard,'blue'],['my-works','My Works',Briefcase,'indigo',pendingWorks],['holidays','Holidays',Calendar,'green'],
+        ['leave','Leave',Clock,'orange',pendingLeaves],['profile','Profile',User,'pink'],['charge-hubs','Charge Hubs',MapPin,'teal'],
+        ['support','Support',MessageSquare,'violet'],['notifications','Notifications',Bell,'sky',unreadNotificationsCount],['payslips','Payslips',CircleDollarSign,'amber'],
+        ['documents','Documents',FileText,'purple'],['attendance','Attendance',Timer,'mint'],['checklist','Checklist',ClipboardCheck,'rose'],['global-search','Search',Search,'blue'],['security','Security',ShieldCheck,'indigo']
+      ].map(([id,label,Icon,tone,badge]) => (
+        <button key={id} className={'staff-mobile-launch-item'+(id==='dashboard'?' active':'')} onClick={()=>setPage(id)}>
+          <span className={'staff-mobile-launch-icon '+tone}><Icon size={22}/>{Number(badge)>0 && <b>{badge>9?'9+':badge}</b>}</span>
+          <span>{label}</span>
+        </button>
+      ))}
+    </div>
+
     <PageHeader title={t('dashboard')} sub={t('operationsOverview')} />
 
     {/* Clickable KPI Cards — only Open Jobs and My Works */}
@@ -846,35 +901,73 @@ function StaffDashboard({ call, user, setPage }) {
       </div>
     </div>
 
-    <div className="dash-grid-3">
-      <Card title={t('activeJobs')} badge={t('live')}>
-        <DataTable rows={open?.slice(0, 5)} cols={['serviceType','status','priority','trackingStatus']} />
-      </Card>
-      <Card title={t('myWorksSummary')}>
-        <div className="works-summary">
-          <div className="works-sum-item pending">
-            <div className="wsval">{pendingWorks}</div>
-            <div className="wslabel">{t('pending')}</div>
+    <div className="dashboard-premium-grid">
+      <section className="dashboard-section premium-panel active-jobs-panel">
+        <div className="dashboard-section-head">
+          <div>
+            <div className="dashboard-section-title"><span className="section-icon live-icon"><Activity size={16}/></span>{t('activeJobs')} <span className="live-badge"><i/> {t('live')}</span></div>
+            <div className="dashboard-section-sub">Assigned work that still needs attention</div>
           </div>
-          <div className="works-sum-item completed">
-            <div className="wsval">{completedWorks}</div>
-            <div className="wslabel">{t('completed')}</div>
-          </div>
-          <div className="works-sum-item total">
-            <div className="wsval">{myWorks.length}</div>
-            <div className="wslabel">{t('total')}</div>
-          </div>
+          <button className="section-link" onClick={() => setPage && setPage('my-works')}>View all <ChevronRight size={16}/></button>
         </div>
-        {myWorks.slice(0, 3).map(w => (
-          <div key={w.id} className="work-mini-row">
-            <span className="work-mini-title">{w.title}</span>
-            <span className="status-pill" style={{ background: (w.status==='completed'?'#16a34a':'#d97706')+'18', color: w.status==='completed'?'#16a34a':'#d97706', fontSize:10 }}>
-              {w.status}
-            </span>
+        {open?.length ? (
+          <div className="active-job-list">
+            {open.slice(0,4).map((job, i) => {
+              const priority = String(job.priority || 'NORMAL').toUpperCase();
+              const status = String(job.status || 'ASSIGNED').replaceAll('_',' ');
+              const title = job.title || job.serviceType || 'Service Job';
+              const jobId = job.jobId || job._id || `JOB-${i+1}`;
+              const pClass = priority === 'HIGH' || priority === 'URGENT' ? 'high' : priority === 'MEDIUM' ? 'medium' : 'normal';
+              return (
+                <button key={job._id || job.id || i} className="active-job-row" onClick={() => setPage && setPage('my-works')}>
+                  <span className={`job-priority-bar ${pClass}`}/>
+                  <span className="job-row-icon"><Briefcase size={17}/></span>
+                  <span className="job-row-main">
+                    <strong>{title}</strong>
+                    <small>{jobId} · {job.customerName || job.customer?.name || 'Customer job'}</small>
+                  </span>
+                  <span className="job-row-side">
+                    <em className={`job-status ${String(job.status||'assigned').toLowerCase()}`}>{status}</em>
+                    <small className={`job-priority ${pClass}`}>{priority}</small>
+                  </span>
+                  <ChevronRight size={16} className="job-row-chevron"/>
+                </button>
+              );
+            })}
           </div>
-        ))}
-        {myWorks.length === 0 && <div className="empty">{t('noWorksAdded')}</div>}
-      </Card>
+        ) : (
+          <div className="dashboard-empty compact-empty"><span><Briefcase size={22}/></span><strong>No active jobs</strong><small>New assignments will appear here.</small></div>
+        )}
+      </section>
+
+      <section className="dashboard-section premium-panel works-summary-panel">
+        <div className="dashboard-section-head">
+          <div>
+            <div className="dashboard-section-title"><span className="section-icon works-icon"><ClipboardCheck size={16}/></span>{t('myWorksSummary')}</div>
+            <div className="dashboard-section-sub">Your work progress at a glance</div>
+          </div>
+          <button className="section-link" onClick={() => setPage && setPage('my-works')}>View all <ChevronRight size={16}/></button>
+        </div>
+        <div className="works-premium-stats">
+          <button className="work-stat-card pending" onClick={() => setPage && setPage('my-works')}><span className="work-stat-icon"><Clock size={16}/></span><strong>{pendingWorks}</strong><small>Pending</small></button>
+          <button className="work-stat-card progress" onClick={() => setPage && setPage('my-works')}><span className="work-stat-icon"><Zap size={16}/></span><strong>{myWorks.filter(w => ['in-progress','in_progress','started','active'].includes(String(w.status).toLowerCase())).length}</strong><small>In progress</small></button>
+          <button className="work-stat-card completed" onClick={() => setPage && setPage('my-works')}><span className="work-stat-icon"><CheckCircle size={16}/></span><strong>{completedWorks}</strong><small>Completed</small></button>
+          <button className="work-stat-card total" onClick={() => setPage && setPage('my-works')}><span className="work-stat-icon"><ClipboardList size={16}/></span><strong>{myWorks.length}</strong><small>Total</small></button>
+        </div>
+        <div className="works-progress-head"><span>Overall progress</span><b>{myWorks.length ? Math.round((completedWorks / myWorks.length) * 100) : 0}%</b></div>
+        <div className="works-progress-track"><span style={{width:`${myWorks.length ? Math.round((completedWorks / myWorks.length) * 100) : 0}%`}}/></div>
+        {myWorks.length ? (
+          <div className="recent-work-list">
+            {myWorks.slice(0,3).map(w => (
+              <button key={w.id || w._id} className="recent-work-row" onClick={() => setPage && setPage('my-works')}>
+                <span className="recent-work-dot"/>
+                <span><strong>{w.title || 'Work item'}</strong><small>{w.dueDate ? `Due ${w.dueDate}` : 'Personal task'}</small></span>
+                <em className={`mini-work-status ${String(w.status||'pending').toLowerCase()}`}>{w.status || 'pending'}</em>
+              </button>
+            ))}
+          </div>
+        ) : <div className="dashboard-empty compact-empty"><span><ClipboardList size={22}/></span><strong>{t('noWorksAdded')}</strong><small>Add or receive work to start tracking progress.</small></div>}
+      </section>
     </div>
   </>;
 }
@@ -895,6 +988,10 @@ function MyWorks({ user, call }) {
   const [tick, setTick] = useState(0);
   const [pauseModal, setPauseModal] = useState(null);   // jobCard being paused
   const [pauseReasonText, setPauseReasonText] = useState('');
+  const [proofModal, setProofModal] = useState(null);
+  const [proofTimeline, setProofTimeline] = useState([]);
+  const [proofForm, setProofForm] = useState({notes:'',issue:'',completionSummary:'',photos:[],signatureData:''});
+  const [proofRequired, setProofRequired] = useState(false);
 
   // Live tick for elapsed timer
   useEffect(() => {
@@ -1021,8 +1118,11 @@ function MyWorks({ user, call }) {
 
   const markComplete = (jc) => {
     const elapsed = getLiveElapsed(jc);
-    setRemarksModal({ ...jc, elapsedSeconds: elapsed });
-    setRemarksText('');
+    // Completion uses the proof/report flow so evidence is captured before closing the job.
+    setProofRequired(true);
+    setProofModal({ ...jc, elapsedSeconds: elapsed });
+    setProofForm({notes:jc.remarks||'',issue:'',completionSummary:jc.remarks||'',photos:[],signatureData:''});
+    setProofTimeline([]);
   };
 
   const submitRemarks = () => {
@@ -1065,6 +1165,31 @@ function MyWorks({ user, call }) {
     setJcTab('completed');
   };
 
+  const openProof = async (jc) => {
+    try { const proof=await call(`/staff/jobs/${jc._id||jc.id}/timeline`); setProofTimeline(proof?.timeline||[]); setProofRequired(false); setProofModal(jc); setProofForm({notes:proof?.proof?.report?.notes||'',issue:proof?.proof?.report?.issue||'',completionSummary:proof?.proof?.report?.completionSummary||'',photos:proof?.proof?.photos||[],signatureData:proof?.proof?.signatureData||''}); } catch (_) { setProofTimeline([]); setProofRequired(false); setProofModal(jc); }
+  };
+  const addProofFiles = files => Array.from(files||[]).slice(0,5).forEach(file=>{
+    if(file.size>1500000){alert(`${file.name} is larger than 1.5 MB`);return;}
+    const r=new FileReader();r.onload=e=>setProofForm(f=>({...f,photos:[...f.photos,{name:file.name,url:e.target.result}].slice(0,5)}));r.readAsDataURL(file)
+  });
+  const submitProof = async () => {
+    if(!proofModal)return;
+    if(proofRequired && !proofForm.completionSummary.trim()) return alert('Add a completion summary before completing this job.');
+    if(proofRequired && !proofForm.photos.length && !proofForm.signatureData) return alert('Add at least one job photo or customer signature before completing this job.');
+    try {
+      const id=proofModal._id||proofModal.id;
+      await call(`/staff/jobs/${id}/proof`,{method:'post',data:{photos:proofForm.photos,signatureData:proofForm.signatureData,report:{notes:proofForm.notes,issue:proofForm.issue,completionSummary:proofForm.completionSummary}}});
+      if(proofRequired){
+        const elapsed=proofModal.elapsedSeconds||0, completedAt=new Date().toISOString();
+        await updateJobCard(id,{status:'COMPLETED',completedAt,elapsedSeconds:elapsed,remarks:proofForm.completionSummary});
+        try { const stored=JSON.parse(localStorage.getItem('ev_franchise_job_cards')||'[]'); localStorage.setItem('ev_franchise_job_cards',JSON.stringify(stored.map(j=>(j.id===id||j.jobId===id)?{...j,status:'COMPLETED',completedAt,elapsedSeconds:elapsed,remarks:proofForm.completionSummary}:j))); } catch(_) {}
+        try { const cust=JSON.parse(localStorage.getItem('ev_customer_job_updates')||'[]'); cust.push({jobId:id,event:'COMPLETED',remarks:proofForm.completionSummary,timestamp:completedAt,vehicleMake:proofModal.vehicleMake||proofModal.vehicleId?.make||'',vehicleReg:proofModal.vehicleReg||proofModal.vehicleId?.registrationNo||'—',customerName:proofModal.customerName||''}); localStorage.setItem('ev_customer_job_updates',JSON.stringify(cust)); } catch(_) {}
+        setJcTab('completed');
+      }
+      setProofRequired(false); setProofModal(null); alert(proofRequired?'Job completed with proof':'Job proof saved');
+    } catch(e){alert(e.response?.data?.message||e.message)}
+  };
+
   // ── General Works ──
   const save = () => {
     if (!form.title.trim()) return;
@@ -1101,7 +1226,7 @@ function MyWorks({ user, call }) {
 
   return <>
     <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8, marginBottom:4}}>
-      <PageHeader title="My Works" sub="Complaint job cards assigned to you and your personal task list." />
+      <PageHeader title="My Works" sub="Complaint job cards assigned to you and your personal task list." back={() => setPage && setPage('dashboard')} />
       <button onClick={fetchMyJobCards} disabled={jcLoading} style={{
         display:'flex', alignItems:'center', gap:6, padding:'8px 16px', borderRadius:8,
         background:'#f8fafc', border:'1.5px solid #e2e8f0', cursor:'pointer', fontWeight:600, fontSize:13,
@@ -1111,35 +1236,26 @@ function MyWorks({ user, call }) {
       </button>
     </div>
 
-    {/* Top-level tabs */}
-    <div className="works-tabs" style={{marginBottom:16}}>
-      {[
-        ['jobcards', `🪪 Job Cards`, jobCards.length],
-        ['all', 'All Tasks', works.length],
-        ['pending-tasks', 'Pending', works.filter(w=>w.status==='pending').length],
-        ['completed-tasks', 'Completed', works.filter(w=>w.status==='completed').length],
-      ].map(([key, label, count]) => (
-        <button key={key} className={'works-tab' + (tab === key ? ' active' : '')} onClick={() => setTab(key)}>
-          {label} <span className="tab-count">{count}</span>
-        </button>
-      ))}
+    {/* Work modes — no duplicated Pending/Completed tabs */}
+    <div className="works-mode-tabs">
+      <button className={'works-mode-btn'+(tab==='jobcards'?' active':'')} onClick={() => setTab('jobcards')}>
+        <Briefcase size={17}/> <span>Job Cards</span><b>{jobCards.length}</b>
+      </button>
+      <button className={'works-mode-btn'+(tab==='all'?' active':'')} onClick={() => setTab('all')}>
+        <ClipboardList size={17}/> <span>My Tasks</span><b>{works.length}</b>
+      </button>
     </div>
 
     {/* ── JOB CARDS TAB ── */}
     {tab === 'jobcards' && (
       <div>
-        {/* Sub-tabs */}
-        <div style={{display:'flex', gap:8, marginBottom:16}}>
-          {[['pending', '⏳ Pending', pendingCards.length], ['completed', '✅ Completed', completedCards.length]].map(([key,label,cnt]) => (
-            <button key={key} onClick={() => setJcTab(key)} style={{
-              padding:'7px 18px', borderRadius:99, border:'2px solid', cursor:'pointer', fontWeight:700, fontSize:13,
-              borderColor: jcTab===key ? '#7c3aed' : '#e2e8f0',
-              background: jcTab===key ? '#7c3aed' : '#fff',
-              color: jcTab===key ? '#fff' : '#374151',
-            }}>
-              {label} <span style={{marginLeft:4, background: jcTab===key?'rgba(255,255,255,.25)':'#f1f5f9', borderRadius:99, padding:'1px 8px', fontSize:11}}>{cnt}</span>
-            </button>
-          ))}
+        <div className="job-card-summary-grid">
+          <button className={'job-card-summary pending'+(jcTab==='pending'?' active':'')} onClick={() => setJcTab('pending')}>
+            <span className="job-card-summary-icon">⏳</span><span><b>{pendingCards.length}</b><small>Pending Job Cards</small></span><ChevronRight size={18}/>
+          </button>
+          <button className={'job-card-summary completed'+(jcTab==='completed'?' active':'')} onClick={() => setJcTab('completed')}>
+            <span className="job-card-summary-icon">✓</span><span><b>{completedCards.length}</b><small>Completed Job Cards</small></span><ChevronRight size={18}/>
+          </button>
         </div>
 
         {jcLoading && (
@@ -1238,6 +1354,10 @@ function MyWorks({ user, call }) {
                           padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
                         }}>⏸ Pause</button>
                       )}
+                      <button onClick={() => openProof(jc)} style={{
+                        background:'#eef2ff', color:'#4338ca', border:'1px solid #c7d2fe', borderRadius:8,
+                        padding:'7px 12px', cursor:'pointer', fontWeight:700, fontSize:12,
+                      }}>📸 Proof</button>
                       <button onClick={() => markComplete(jc)} style={{
                         background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
                         padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
@@ -1428,7 +1548,37 @@ function MyWorks({ user, call }) {
         </div>
       </div>
     )}
+
+    {proofModal && (
+      <div className="modal-overlay" onClick={()=>setProofModal(null)}>
+        <div className="modal-drawer staff-proof-modal" onClick={e=>e.stopPropagation()}>
+          <div className="modal-head"><div><div className="modal-title">{proofRequired ? 'Complete Job' : 'Job Proof & Report'}</div><div className="modal-subtitle">{proofRequired ? 'Add evidence before closing this job' : 'Attach evidence and notes'}</div></div><button className="icon-btn" onClick={()=>setProofModal(null)}><X size={18}/></button></div>
+          <div className="modal-body">
+            <div className="proof-job-summary"><strong>{proofModal.vehicleMake||proofModal.vehicleId?.make||'Vehicle'} {proofModal.vehicleModel||proofModal.vehicleId?.model||''}</strong><span>{proofModal.vehicleReg||proofModal.vehicleId?.registrationNo||'—'}</span></div>
+            <div className="job-timeline">{proofTimeline.map((x,i)=><div key={i} className={'timeline-item'+(x.at?' done':'')}><span></span><div><b>{x.status}</b><small>{x.at?new Date(x.at).toLocaleString('en-IN'):'Pending'}</small></div></div>)}</div>
+            <div className="form-field"><label>Completion summary</label><textarea rows="3" value={proofForm.completionSummary} onChange={e=>setProofForm({...proofForm,completionSummary:e.target.value})} placeholder="What was completed?"/></div>
+            <div className="form-field"><label>Issue / exception</label><textarea rows="2" value={proofForm.issue} onChange={e=>setProofForm({...proofForm,issue:e.target.value})} placeholder="Any unresolved issue or exception"/></div>
+            <div className="form-field"><label>Technician notes</label><textarea rows="3" value={proofForm.notes} onChange={e=>setProofForm({...proofForm,notes:e.target.value})} placeholder="Parts, checks, readings…"/></div>
+            <label className="upload-drop"><Upload size={20}/><span><b>Upload job proof</b><small>Photos or documents · up to 5 files</small></span><input type="file" multiple accept="image/*,.pdf" onChange={e=>addProofFiles(e.target.files)}/></label>
+            <div className="proof-thumb-row">{proofForm.photos.map((p,i)=><div className="proof-thumb" key={i}>{p.url?.startsWith('data:image')?<img src={p.url} alt=""/>:<FileText size={22}/>}<button onClick={()=>setProofForm(f=>({...f,photos:f.photos.filter((_,k)=>k!==i)}))}>×</button></div>)}</div>
+            <SignaturePad value={proofForm.signatureData} onChange={v=>setProofForm({...proofForm,signatureData:v})}/>
+          </div>
+          <div className="modal-foot"><button className="btn-ghost" onClick={()=>{setProofRequired(false);setProofModal(null)}}>Cancel</button><button className="btn-primary" onClick={submitProof}>{proofRequired ? <><Check size={14}/> Complete Job</> : <><Save size={14}/> Save proof</>}</button></div>
+        </div>
+      </div>
+    )}
   </>;
+}
+
+
+function SignaturePad({value,onChange}) {
+  const ref=useRef(null); const drawing=useRef(false);
+  const point=e=>{const c=ref.current,r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}};
+  const start=e=>{drawing.current=true;const p=point(e),ctx=ref.current.getContext('2d');ctx.beginPath();ctx.moveTo(p.x,p.y);e.currentTarget.setPointerCapture?.(e.pointerId)};
+  const move=e=>{if(!drawing.current)return;const p=point(e),ctx=ref.current.getContext('2d');ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827';ctx.lineTo(p.x,p.y);ctx.stroke()};
+  const end=()=>{drawing.current=false;if(ref.current)onChange(ref.current.toDataURL('image/png'))};
+  useEffect(()=>{if(value&&ref.current){const img=new Image();img.onload=()=>ref.current.getContext('2d').drawImage(img,0,0);img.src=value}},[]);
+  return <div className="signature-box"><div className="signature-head"><span>Customer signature</span><button onClick={()=>{const c=ref.current;c.getContext('2d').clearRect(0,0,c.width,c.height);onChange('')}}>Clear</button></div><canvas ref={ref} width="700" height="180" onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerLeave={end}/></div>;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1544,7 +1694,7 @@ function getHolidaysForYear(yr) {
 // Telangana first
 const REGION_NAMES = { TS:'Telangana', TN:'Tamil Nadu', MH:'Maharashtra', KA:'Karnataka', AP:'Andhra Pradesh', KL:'Kerala' };
 
-function Holidays() {
+function Holidays({ setPage }) {
   const { t } = useTranslation();
   const [region, setRegion] = useState('TS');
   const [filterMonth, setFilterMonth] = useState('');
@@ -1570,7 +1720,7 @@ function Holidays() {
   };
 
   return <>
-    <PageHeader title={`${t('holidaysTitle')} ${currentYear}`} sub={t('publicRegionalHolidays')} />
+    <PageHeader title={`${t('holidaysTitle')} ${currentYear}`} sub={t('publicRegionalHolidays')} back={() => setPage && setPage('dashboard')} />
 
     {nextHoliday && (
       <div className="next-holiday-banner">
@@ -1627,8 +1777,10 @@ function Holidays() {
 // ══════════════════════════════════════════════════════════════════
 // LEAVE MANAGEMENT
 // ══════════════════════════════════════════════════════════════════
-function Leave({ user }) {
+function Leave({ user, call, setPage }) {
   const [leaves, setLeaves] = useState(() => store.get('ev_staff_leaves') || []);
+  const [loadingLeaves, setLoadingLeaves] = useState(false);
+  useEffect(() => { let alive=true; if(!call)return; setLoadingLeaves(true); call('/staff/leave-requests').then(rows=>{ if(!alive)return; const mapped=(rows||[]).map(r=>({ ...r, id:r._id, type:String(r.leaveType||'CASUAL').toLowerCase(), fromDate:r.startDate, toDate:r.endDate, appliedOn:r.createdAt, staffId:r.userId })); setLeaves(mapped); store.set('ev_staff_leaves',mapped); }).catch(()=>{}).finally(()=>alive&&setLoadingLeaves(false)); return()=>{alive=false}; }, [user?._id, user?.id]);
   const [showForm, setShowForm] = useState(false);
   const [tab, setTab] = useState('history');
   const [form, setForm] = useState({
@@ -1645,31 +1797,14 @@ function Leave({ user }) {
     return Math.max(0, Math.ceil(diff / (1000*60*60*24)) + 1);
   };
 
-  const submitLeave = () => {
+  const submitLeave = async () => {
     if (!form.fromDate || !form.toDate || !form.reason) return;
-    const newLeave = {
-      ...form,
-      id: Date.now().toString(),
-      days: calcDays(form.fromDate, form.toDate),
-      status: 'PENDING',
-      appliedOn: new Date().toISOString(),
-      staffName: user?.name || 'Staff',
-      staffEmail: user?.email || '',
-      staffId: user?._id || user?.id || 'staff-001',
-      franchiseeRef: user?.hubId || 'HUB-001',
-    };
-    // Save to staff personal history
-    const updated = [newLeave, ...leaves];
-    setLeaves(updated); store.set('ev_staff_leaves', updated);
-
-    // Also push to shared franchise leave requests (visible to franchisee for approval)
-    const franLeaves = store.get('ev_franchise_leave_requests') || [];
-    franLeaves.unshift({ ...newLeave });
-    store.set('ev_franchise_leave_requests', franLeaves);
-
-    setForm({ type:'casual', fromDate:'', toDate:'', reason:'', contactDuring:'', emergencyContact:'' });
-    setSubmitted(true); setShowForm(false); setTab('history');
-    setTimeout(() => setSubmitted(false), 4000);
+    try {
+      const row = await call('/staff/leave-requests', { method:'post', data:{ leaveType:form.type.toUpperCase(), startDate:form.fromDate, endDate:form.toDate, reason:form.reason } });
+      const newLeave = { ...row, id:row._id, type:String(row.leaveType||form.type).toLowerCase(), fromDate:row.startDate||form.fromDate, toDate:row.endDate||form.toDate, days:row.days||calcDays(form.fromDate,form.toDate), status:row.status||'PENDING', appliedOn:row.createdAt||new Date().toISOString(), staffName:user?.name||'Staff', staffId:user?._id||user?.id };
+      const updated=[newLeave,...leaves]; setLeaves(updated); store.set('ev_staff_leaves',updated);
+      setForm({type:'casual',fromDate:'',toDate:'',reason:'',contactDuring:'',emergencyContact:''}); setSubmitted(true); setShowForm(false); setTab('history'); setTimeout(()=>setSubmitted(false),4000);
+    } catch(e) { alert(e.response?.data?.message||e.message||'Could not submit leave'); }
   };
 
   // Sync approval status back from franchisee store
@@ -1686,17 +1821,14 @@ function Leave({ user }) {
     }));
   }, []);
 
-  const cancelLeave = id => {
-    const updated = leaves.map(l => l.id === id && l.status === 'PENDING' ? { ...l, status:'CANCELLED' } : l);
-    setLeaves(updated); store.set('ev_staff_leaves', updated);
-  };
+  const cancelLeave = async id => { try { await call(`/staff/leave-requests/${id}/cancel`,{method:'put'}); const updated=leaves.map(l=>l.id===id&&l.status==='PENDING'?{...l,status:'CANCELLED'}:l); setLeaves(updated); store.set('ev_staff_leaves',updated); } catch(e){ alert(e.response?.data?.message||e.message||'Could not cancel leave'); } };
 
   const pending  = leaves.filter(l => l.status === 'PENDING').length;
   const approved = leaves.filter(l => l.status === 'APPROVED').length;
   const taken    = leaves.filter(l => l.status === 'APPROVED').reduce((s,l) => s + (l.days||0), 0);
 
   return <>
-    <PageHeader title="Leave Management" sub="Apply for leave and track approvals." />
+    <PageHeader title="Leave Management" sub="Apply for leave and track approvals." back={() => setPage && setPage('dashboard')} />
 
     {submitted && (
       <div className="success-toast">
@@ -1714,7 +1846,7 @@ function Leave({ user }) {
     <div className="leave-top-bar">
       <div className="works-tabs" style={{ flex:1 }}>
         <button className={'works-tab'+(tab==='history'?' active':'')} onClick={() => setTab('history')}>Leave History</button>
-        <button className={'works-tab'+(tab==='balance'?' active':'')} onClick={() => setTab('balance')}>Balance</button>
+        <button className={'works-tab'+(tab==='balance'?' active':'')} onClick={() => setTab('balance')}>Balance</button><button className={'works-tab'+(tab==='calendar'?' active':'')} onClick={() => setTab('calendar')}>Calendar</button>
       </div>
       <button className="btn-primary" onClick={() => setShowForm(!showForm)}>
         {showForm ? <><X size={14}/> Cancel</> : <><Plus size={14}/> Apply for Leave</>}
@@ -1806,6 +1938,9 @@ function Leave({ user }) {
       </div>
     )}
 
+    {tab === 'calendar' && (() => {
+      const y=new Date().getFullYear(), m=new Date().getMonth(); const first=new Date(y,m,1).getDay(); const count=new Date(y,m+1,0).getDate(); const cells=[]; for(let i=0;i<first;i++)cells.push(<span key={'e'+i}/>); for(let d=1;d<=count;d++){const key=`${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const hit=leaves.find(l=>l.status==='APPROVED'&&key>=String(l.fromDate).slice(0,10)&&key<=String(l.toDate).slice(0,10)); cells.push(<span key={d} className={'leave-calendar-day'+(hit?' leave':'')+(key===new Date().toISOString().slice(0,10)?' today':'')}>{d}</span>)} return <div className="feature-card leave-calendar-card"><div className="feature-card-head"><b>{new Date(y,m).toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><span>Approved leave days</span></div><div className="leave-week-head">{['S','M','T','W','T','F','S'].map((x,i)=><span key={i}>{x}</span>)}</div><div className="leave-calendar-grid">{cells}</div><div className="calendar-legend"><span><i className="legend-dot leave"/> Approved leave</span><span><i className="legend-dot today"/> Today</span></div></div> })()}
+
     {tab === 'balance' && (
       <div className="balance-grid">
         {[
@@ -1833,7 +1968,7 @@ function Leave({ user }) {
 // ══════════════════════════════════════════════════════════════════
 // PROFILE — PHOTO, DETAILS, AADHAAR, PAN, ADDRESS, SETTINGS
 // ══════════════════════════════════════════════════════════════════
-function Profile({ user, setUser }) {
+function Profile({ user, setUser, setPage }) {
   const { setLang } = useContext(LangContext);
   const [profile, setProfile] = useState(() => store.get('ev_staff_profile') || {
     name: user?.name || '', email: user?.email || '', phone:'', dob:'', gender:'',
@@ -1844,6 +1979,11 @@ function Profile({ user, setUser }) {
   const [activeTab, setActiveTab] = useState('personal');
   const [saved, setSaved] = useState(false);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    document.body.classList.toggle('staff-dark', Boolean(profile.settings?.darkMode));
+    return () => document.body.classList.remove('staff-dark');
+  }, [profile.settings?.darkMode]);
 
   const save = () => {
     store.set('ev_staff_profile', profile);
@@ -1874,65 +2014,74 @@ function Profile({ user, setUser }) {
     ['settings', 'Settings', Settings],
   ];
 
+  const works = store.get('ev_staff_works') || [];
+  const leaves = store.get('ev_staff_leaves') || [];
+  const completed = works.filter(w => w.status === 'completed').length;
+  const displayName = profile.name || user?.name || 'Staff';
+  const role = String(user?.role || 'STAFF').toUpperCase();
+
   const FieldVal = ({ value }) => value
     ? <div className="profile-field-val">{value}</div>
-    : <div className="profile-field-val"><span style={{ color:'#d1d5db' }}>Not set</span></div>;
+    : <div className="profile-field-val"><span className="profile-not-set">Not set</span></div>;
 
-  return <>
-    <PageHeader title="My Profile" sub="Manage your personal details and preferences." />
+  return <div className="premium-profile-page">
+    <PageHeader title="My Profile" sub="Manage your personal details and preferences." back={() => setPage && setPage('dashboard')} />
 
     {saved && <div className="success-toast">✅ Profile saved successfully!</div>}
 
-    <div className="profile-layout">
-      {/* Profile Photo Card */}
-      <div className="profile-photo-card">
-        <div className="profile-avatar-wrap">
-          {profile.profilePic
-            ? <img src={profile.profilePic} alt="Profile" className="profile-avatar-img" />
-            : <div className="profile-avatar-default">{(profile.name || user?.name || '?')[0]}</div>
-          }
-          <button className="photo-upload-btn" onClick={() => fileRef.current?.click()}>
-            <Camera size={14} />
-          </button>
-          <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handlePhoto} />
-        </div>
-        <div className="profile-name-block">
-          <div className="profile-display-name">{profile.name || user?.name || 'Staff'}</div>
-          <div className="profile-role-badge">{user?.role || 'STAFF'}</div>
-          {user?.hubId && <div className="profile-hub">Hub: {user.hubId}</div>}
-        </div>
-        <div className="profile-quick-stats">
-          <div className="pqs-item">
-            <div className="pqs-val">{(store.get('ev_staff_works')||[]).length}</div>
-            <div className="pqs-label">Works</div>
+    <div className="profile-layout premium-profile-layout">
+      <section className="profile-photo-card premium-profile-hero">
+        <div className="premium-profile-hero-top">
+          <div className="profile-avatar-wrap premium-avatar-wrap">
+            {profile.profilePic
+              ? <img src={profile.profilePic} alt="Profile" className="profile-avatar-img" />
+              : <div className="profile-avatar-default">{displayName[0]}</div>
+            }
+            <button className="photo-upload-btn" onClick={() => fileRef.current?.click()} aria-label="Change profile photo">
+              <Camera size={14} />
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handlePhoto} />
           </div>
-          <div className="pqs-item">
-            <div className="pqs-val">{(store.get('ev_staff_leaves')||[]).length}</div>
-            <div className="pqs-label">Leaves</div>
-          </div>
-          <div className="pqs-item">
-            <div className="pqs-val">{(store.get('ev_staff_works')||[]).filter(w=>w.status==='completed').length}</div>
-            <div className="pqs-label">Done</div>
-          </div>
-        </div>
-      </div>
 
-      {/* Profile Details */}
-      <div className="profile-details">
-        <div className="profile-tabs">
+          <div className="profile-name-block premium-profile-identity">
+            <div className="profile-display-name">{displayName}</div>
+            <div className="profile-role-badge">{role}</div>
+            {user?.hubId && <div className="profile-hub"><MapPin size={11}/> <span>{user.hubId}</span></div>}
+            <div className="profile-account-status"><span /> Active account</div>
+          </div>
+
+          <button className="premium-profile-edit" onClick={() => setActiveTab('personal')}>
+            <Settings size={14}/> Manage
+          </button>
+        </div>
+
+        <div className="profile-quick-stats premium-profile-stats">
+          <div className="pqs-item"><div className="pqs-val">{works.length}</div><div className="pqs-label">Works</div></div>
+          <div className="pqs-item"><div className="pqs-val">{leaves.length}</div><div className="pqs-label">Leaves</div></div>
+          <div className="pqs-item"><div className="pqs-val">{completed}</div><div className="pqs-label">Completed</div></div>
+        </div>
+      </section>
+
+      <div className="profile-details premium-profile-details">
+        <div className="profile-tabs premium-profile-tabs">
           {TAB_LABELS.map(([id, label, Icon]) => (
             <button key={id} className={'prof-tab'+(activeTab===id?' active':'')} onClick={() => setActiveTab(id)}>
-              <Icon size={14}/> {label}
+              <span className="prof-tab-icon"><Icon size={15}/></span>
+              <span>{label}</span>
             </button>
           ))}
         </div>
 
         {activeTab === 'personal' && (
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">Personal Information</div>
+          <div className="card premium-profile-card">
+            <div className="card-head premium-card-head">
+              <div>
+                <div className="card-title">Personal Information</div>
+                <div className="premium-card-subtitle">Your basic profile and contact details</div>
+              </div>
+              <span className="premium-section-chip"><User size={12}/> Personal</span>
             </div>
-            <div className="work-form-grid">
+            <div className="work-form-grid premium-profile-fields">
               {[
                 ['name','Full Name'], ['email','Email'], ['phone','Phone Number'],
                 ['dob','Date of Birth'], ['gender','Gender'],
@@ -1943,96 +2092,503 @@ function Profile({ user, setUser }) {
                 </div>
               ))}
             </div>
+            <div className="premium-profile-save-row">
+              <span><ShieldCheck size={13}/> Changes are stored securely on this device.</span>
+              <button className="premium-btn" onClick={save}>Save Changes</button>
+            </div>
           </div>
         )}
 
         {activeTab === 'documents' && (
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">Identity Documents</div>
+          <div className="card premium-profile-card">
+            <div className="card-head premium-card-head">
+              <div>
+                <div className="card-title">Identity Documents</div>
+                <div className="premium-card-subtitle">Your verified identity information</div>
+              </div>
+              <span className="premium-section-chip"><ShieldCheck size={12}/> Secure</span>
             </div>
-            <div className="doc-fields">
+            <div className="doc-fields premium-doc-fields">
               {[
                 { key:'aadhaar', label:'Aadhaar Number', icon:'🪪', mask: v => v ? v.replace(/(\d{4})(\d{4})(\d{4})/, '$1 $2 $3') : '' },
                 { key:'pan', label:'PAN Card', icon:'💳', mask: v => v },
               ].map(({ key, label, icon, mask }) => (
-                <div key={key} className="doc-field-card">
+                <div key={key} className="doc-field-card premium-doc-card">
                   <div className="dfc-icon">{icon}</div>
-                  <div className="dfc-body">
-                    <div className="dfc-label">{label}</div>
-                    <div className="dfc-val">{profile[key] ? mask(profile[key]) : <span style={{ color:'#d1d5db' }}>Not added</span>}</div>
-                  </div>
-                  {profile[key] && <span className="dfc-verified">✓</span>}
+                  <div className="dfc-body"><div className="dfc-label">{label}</div><div className="dfc-val">{profile[key] ? mask(profile[key]) : <span className="profile-not-set">Not added</span>}</div></div>
+                  {profile[key] && <span className="dfc-verified"><Check size={12}/></span>}
                 </div>
               ))}
             </div>
-            <div className="doc-privacy-note">🔒 Your documents are stored locally and never shared without consent.</div>
+            <div className="doc-privacy-note premium-privacy-note"><ShieldCheck size={13}/> Your document information remains protected and is not shared without consent.</div>
           </div>
         )}
 
         {activeTab === 'address' && (
-          <div className="card">
-            <div className="card-head">
-              <div className="card-title">Address</div>
-            </div>
-            <div className="work-form-grid">
-              <div className="form-field full">
-                <label>Street Address</label>
-                <FieldVal value={profile.address} />
+          <div className="card premium-profile-card">
+            <div className="card-head premium-card-head">
+              <div>
+                <div className="card-title">Address Details</div>
+                <div className="premium-card-subtitle">Your current residential address</div>
               </div>
-              {[['city','City'],['state','State'],['pincode','PIN Code']].map(([k,l]) => (
-                <div key={k} className="form-field">
-                  <label>{l}</label>
-                  <FieldVal value={profile[k]} />
-                </div>
-              ))}
+              <span className="premium-section-chip"><Home size={12}/> Address</span>
             </div>
+            <div className="work-form-grid premium-profile-fields">
+              <div className="form-field full"><label>Street Address</label><FieldVal value={profile.address} /></div>
+              {[['city','City'],['state','State'],['pincode','PIN Code']].map(([k,l]) => <div key={k} className="form-field"><label>{l}</label><FieldVal value={profile[k]} /></div>)}
+            </div>
+            <div className="premium-address-note"><MapPin size={15}/><div><strong>Address on file</strong><span>Keep your residential information up to date for official communication.</span></div></div>
           </div>
         )}
 
         {activeTab === 'settings' && (
-          <div className="card">
-            <div className="card-title" style={{ marginBottom:20 }}>App Settings</div>
-            <div className="settings-list">
-              <div className="setting-row">
-                <div>
-                  <div className="setting-label">Push Notifications</div>
-                  <div className="setting-sub">Get alerts for job updates and leave status</div>
-                </div>
-                <button className={'toggle-btn'+(profile.settings.notifications?' on':'')} onClick={() => { updSettings('notifications', !profile.settings.notifications); save(); }}>
-                  <div className="toggle-knob" />
-                </button>
-              </div>
-              <div className="setting-row">
-                <div>
-                  <div className="setting-label">Language</div>
-                  <div className="setting-sub">Interface language</div>
-                </div>
-                <select value={profile.settings.language} className="settings-select"
-                  onChange={e => { updSettings('language', e.target.value); if(setLang) setLang(e.target.value); save(); }}>
-                  <option value="en">English</option>
-                  <option value="ta">Tamil</option>
-                  <option value="hi">Hindi</option>
-                  <option value="te">Telugu</option>
-                  <option value="kn">Kannada</option>
-                </select>
-              </div>
-              <div className="setting-row">
-                <div>
-                  <div className="setting-label">Font Size</div>
-                  <div className="setting-sub">Adjust text size for readability</div>
-                </div>
-                <select value={profile.settings.fontSize} className="settings-select"
-                  onChange={e => { updSettings('fontSize', e.target.value); save(); }}>
-                  <option value="small">Small</option>
-                  <option value="medium">Medium</option>
-                  <option value="large">Large</option>
-                </select>
-              </div>
+          <div className="card premium-profile-card">
+            <div className="card-head premium-card-head">
+              <div><div className="card-title">App Settings</div><div className="premium-card-subtitle">Personalize your Staff Portal experience</div></div>
+              <span className="premium-section-chip"><Settings size={12}/> Preferences</span>
+            </div>
+            <div className="settings-list premium-settings-list">
+              <div className="setting-row premium-setting-row"><div className="premium-setting-icon blue"><Bell size={16}/></div><div className="premium-setting-copy"><div className="setting-label">Push Notifications</div><div className="setting-sub">Get alerts for job updates and leave status</div></div><button className={'toggle-btn'+(profile.settings.notifications?' on':'')} onClick={() => { updSettings('notifications', !profile.settings.notifications); save(); }}><div className="toggle-knob" /></button></div>
+              <div className="setting-row premium-setting-row"><div className="premium-setting-icon indigo"><Moon size={16}/></div><div className="premium-setting-copy"><div className="setting-label">Dark Mode</div><div className="setting-sub">Use a darker interface at night</div></div><button className={'toggle-btn'+(profile.settings.darkMode?' on':'')} onClick={() => { updSettings('darkMode', !profile.settings.darkMode); save(); }}><div className="toggle-knob" /></button></div>
+              <div className="setting-row premium-setting-row"><div className="premium-setting-icon green"><Globe2 size={16}/></div><div className="premium-setting-copy"><div className="setting-label">Language</div><div className="setting-sub">Interface language</div></div><select value={profile.settings.language} className="settings-select" onChange={e => { updSettings('language', e.target.value); if(setLang) setLang(e.target.value); save(); }}><option value="en">English</option><option value="ta">Tamil</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="kn">Kannada</option></select></div>
+              <div className="setting-row premium-setting-row"><div className="premium-setting-icon orange"><Type size={16}/></div><div className="premium-setting-copy"><div className="setting-label">Font Size</div><div className="setting-sub">Adjust text size for readability</div></div><select value={profile.settings.fontSize} className="settings-select" onChange={e => { updSettings('fontSize', e.target.value); save(); }}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></div>
             </div>
           </div>
         )}
       </div>
     </div>
-  </>;
+  </div>;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STAFF PORTAL V3 — CONNECTED FEATURES
+// ══════════════════════════════════════════════════════════════════
+function MobileBack({ setPage }) { return <button className="mobile-back-btn" onClick={() => setPage('dashboard')}><ChevronLeft size={20}/><span>Back</span></button>; }
+
+function FeatureHeader({ title, sub, setPage, Icon=Activity, action }) {
+  return <div className="feature-header"><div className="feature-header-left"><MobileBack setPage={setPage}/><div className="feature-title-icon"><Icon size={20}/></div><div><h1>{title}</h1>{sub&&<p>{sub}</p>}</div></div>{action}</div>;
+}
+
+function useStaffLive(call, path, interval=20000) {
+  const [data,setData]=useState([]); const [loading,setLoading]=useState(true); const [error,setError]=useState('');
+  const load=async()=>{try{const d=await call(path);setData(d||[]);setError('')}catch(e){setError(e.response?.data?.message||e.message||'Unable to load')}finally{setLoading(false)}};
+  useEffect(()=>{load();const id=setInterval(load,interval);return()=>clearInterval(id)},[path]); return {data,loading,error,refresh:load};
+}
+
+function NotificationsCenter({call,user,setPage}) {
+  const {data,loading,refresh}=useStaffLive(call,'/staff/notifications',15000); const [local,setLocal]=useState([]);
+  useEffect(()=>setLocal(data||[]),[data]);
+  useEffect(()=>{
+    const id=user?._id||user?.id; if(!id)return;
+    const socket=io((API||window.location.origin).replace(/\/api\/?$/,''),{transports:['websocket','polling']});
+    socket.on('connect',()=>socket.emit('auth:user',id));
+    socket.on('notification:new',n=>{setLocal(prev=>[n,...prev].slice(0,200));});
+    return()=>socket.disconnect();
+  },[user]);
+
+  useEffect(()=>{try{localStorage.setItem('ev_staff_notifications',JSON.stringify(local))}catch(_){}} ,[local]);
+  const unread=local.filter(n=>!n.read).length;
+  const mark=async n=>{setLocal(x=>x.map(v=>String(v._id)===String(n._id)?{...v,read:true}:v));try{await call(`/staff/notifications/${n._id}/read`,{method:'put'})}catch(_){}};
+  const all=async()=>{setLocal(x=>x.map(n=>({...n,read:true})));try{await call('/staff/notifications/read-all',{method:'put'})}catch(_){} };
+  return <><FeatureHeader title="Notifications" sub={unread?`${unread} unread`:'All caught up'} setPage={setPage} Icon={Bell} action={unread>0?<button className="premium-btn ghost" onClick={all}>Mark all read</button>:null}/><div className="feature-stack">{loading&&<Loader/>}{!loading&&!local.length&&<div className="premium-empty"><Bell size={28}/><b>No notifications</b><span>Updates from Command Center and your work will appear here.</span></div>}{local.map(n=><button key={n._id} className={'notification-card'+(!n.read?' unread':'')} onClick={()=>mark(n)}><span className="notification-icon">{n.data?.banner?<Megaphone size={18}/>:<Bell size={18}/>}</span><span className="notification-body"><strong>{n.title}</strong><span>{n.message}</span><small>{new Date(n.createdAt).toLocaleString('en-IN')}</small></span>{!n.read&&<i/>}</button>)}</div></>;
+}
+
+function AttendanceDuty({call,user,setPage}) {
+  const {data,loading,refresh}=useStaffLive(call,'/staff/attendance',30000); const today=data?.[0]; const [clock,setClock]=useState(new Date()); const [busy,setBusy]=useState(false);
+  useEffect(()=>{const id=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(id)},[]);
+  const locate=()=>new Promise(resolve=>{if(!navigator.geolocation)return resolve(null);navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),()=>resolve(null),{enableHighAccuracy:true,timeout:7000})});
+  const act=async type=>{setBusy(true);try{const location=await locate();await call(`/staff/attendance/${type}`,{method:'post',data:location?{location}:{} });await refresh()}catch(e){alert(e.response?.data?.message||e.message)}finally{setBusy(false)}};
+  const active=today?.clockIn&&!today?.clockOut; const breaks=today?.breaks||[]; const onBreak=breaks.length>0&&!breaks[breaks.length-1].endedAt;
+  const y=clock.getFullYear(), m=clock.getMonth(), monthDays=new Date(y,m+1,0).getDate(), firstDay=new Date(y,m,1).getDay();
+  const attByDay=new Map((data||[]).filter(a=>String(a.dateKey||'').startsWith(`${y}-${String(m+1).padStart(2,'0')}`)).map(a=>[Number(String(a.dateKey).slice(-2)),a]));
+  const cal=[]; for(let i=0;i<firstDay;i++) cal.push(<span key={'blank'+i}/>); for(let d=1;d<=monthDays;d++){const a=attByDay.get(d); const future=d>clock.getDate(); const state=a?.clockIn?(a.lateMinutes>0?'late':'present'):(future?'future':'absent'); cal.push(<span key={d} className={'attendance-day '+state}>{d}</span>)}
+  return <><FeatureHeader title="Attendance & Duty" sub={clock.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})} setPage={setPage} Icon={Clock}/><div className="attendance-hero"><div><small>Current time</small><strong>{clock.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</strong><span className={active?'live-dot':''}>{active?'● On duty':'○ Off duty'}</span></div><button className={'duty-big-btn '+(active?'on':'')} onClick={()=>act(active?'clock-out':'clock-in')} disabled={busy}>{busy?'Updating…':active?'Clock out':'Clock in'}</button></div><div className="mini-stat-grid"><div><b>{data.filter(x=>x.clockIn).length}</b><span>Days present</span></div><div><b>{today?.lateMinutes||0}</b><span>Late minutes</span></div><div><b>{onBreak?'On break':'Working'}</b><span>Current state</span></div></div><div className="feature-card attendance-calendar-card"><div className="feature-card-head"><b>{clock.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><span>Monthly attendance</span></div><div className="attendance-week-head">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div><div className="attendance-calendar-grid">{cal}</div><div className="calendar-legend"><span><i className="legend-dot attendance-present"/> Present</span><span><i className="legend-dot attendance-late"/> Late</span><span><i className="legend-dot attendance-absent"/> Absent</span></div></div><div className="feature-card"><div className="feature-card-head"><b>Today</b><span>{today?.clockIn?new Date(today.clockIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—'} → {today?.clockOut?new Date(today.clockOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'Now'}</span></div><button className="premium-btn ghost full" onClick={()=>act('break')}>{onBreak?'End break':'Start break'}</button>{today?.location&&<div className="location-chip"><Navigation size={15}/> Location updated · ±{Math.round(today.location.accuracy||0)}m</div>}</div><div className="feature-card"><div className="feature-card-head"><b>Recent duty logs</b><span>{data.length} records</span></div>{data.slice(0,7).map(a=><div className="log-row" key={a._id}><span>{a.dateKey}</span><span>{a.clockIn?new Date(a.clockIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—'} – {a.clockOut?new Date(a.clockOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'Active'}</span><em>{a.status}</em></div>)}</div></>;
+}
+
+function DailyChecklist({call,setPage}) { const {data,loading,refresh}=useStaffLive(call,'/staff/checklists',30000); const [rows,setRows]=useState([]); useEffect(()=>setRows(data||[]),[data]); const toggle=async(row,i)=>{const items=row.items.map((x,k)=>k===i?{...x,done:!x.done}:x);setRows(r=>r.map(x=>x._id===row._id?{...x,items}:x));try{await call(`/staff/checklists/${row._id}`,{method:'put',data:{items,title:row.title}})}catch(_){refresh()}}; return <><FeatureHeader title="Daily Checklist" sub="Complete your required work items" setPage={setPage} Icon={ClipboardCheck}/><div className="feature-stack">{loading&&<Loader/>}{!loading&&!rows.length&&<div className="premium-empty"><ClipboardCheck size={28}/><b>No checklist assigned</b><span>Your daily checklist will appear when Command Center assigns one.</span></div>}{rows.map(r=><div className="feature-card" key={r._id}><div className="feature-card-head"><b>{r.title||'Today’s checklist'}</b><span>{r.items.filter(i=>i.done).length}/{r.items.length}</span></div>{r.items.map((item,i)=><button className={'check-row'+(item.done?' done':'')} key={i} onClick={()=>toggle(r,i)}><span>{item.done?<CheckCircle size={20}/>:<span className="check-box"/>}</span><span>{item.label}</span></button>)}</div>)}</div></> }
+
+function DocumentsVault({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/documents',60000); const docs=data||[]; return <><FeatureHeader title="Documents" sub="Your secure staff document vault" setPage={setPage} Icon={FileText}/><div className="doc-vault-grid">{loading&&<Loader/>}{!loading&&!docs.length&&<div className="premium-empty"><FileText size={28}/><b>No documents yet</b><span>HR and Command Center documents will appear here.</span></div>}{docs.map(d=><a className="vault-doc-card" href={d.url||'#'} target="_blank" rel="noreferrer" key={d._id}><span className="vault-doc-icon"><FileText size={22}/></span><strong>{d.title}</strong><small>{d.type||'Document'}</small><span className="doc-open"><Download size={14}/> Open</span></a>)}</div></> }
+
+function Payslips({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/payslips',60000); const rows=data||[]; const money=v=>`₹${Number(v||0).toLocaleString('en-IN')}`; return <><FeatureHeader title="Payslips" sub="Salary statements and take-home history" setPage={setPage} Icon={CircleDollarSign}/>{!rows.length&&!loading?<div className="premium-empty"><CircleDollarSign size={28}/><b>No payslips published</b><span>Your monthly salary statements will appear here.</span></div>:<div className="payslip-grid">{rows.map(p=><div className="payslip-card" key={p._id}><div className="payslip-top"><div><small>{p.month}</small><strong>{money(p.net)}</strong></div><span>NET TAKE-HOME</span></div><div className="salary-lines"><span>Gross <b>{money(p.gross)}</b></span>{Object.entries(p.earnings||{}).slice(0,3).map(([k,v])=><span key={k}>{k}<b>{money(v)}</b></span>)}{Object.entries(p.deductions||{}).slice(0,3).map(([k,v])=><span key={k}>{k}<b>− {money(v)}</b></span>)}</div>{p.url?<a className="premium-btn ghost full" href={p.url} target="_blank" rel="noreferrer"><Download size={15}/> Download</a>:<span className="published-pill">Published</span>}</div>)}</div>}</> }
+
+function SupportTickets({call,setPage}) { const {data,loading,refresh}=useStaffLive(call,'/staff/support',30000); const [open,setOpen]=useState(false); const [form,setForm]=useState({category:'TECHNICAL',subject:'',description:'',priority:'NORMAL'}); const [reply,setReply]=useState({}); const submit=async()=>{if(!form.subject||!form.description)return;await call('/staff/support',{method:'post',data:form});setForm({category:'TECHNICAL',subject:'',description:'',priority:'NORMAL'});setOpen(false);refresh()}; const sendReply=async(id)=>{if(!reply[id])return;await call(`/staff/support/${id}/messages`,{method:'post',data:{message:reply[id]}});setReply(r=>({...r,[id]:''}));refresh()}; return <><FeatureHeader title="Support" sub="Raise and track staff requests" setPage={setPage} Icon={MessageSquare} action={<button className="premium-btn" onClick={()=>setOpen(true)}><Plus size={15}/> New request</button>}/><div className="support-category-grid">{[['TECHNICAL','Technical',Settings],['HR','HR & People',UserCheck],['PAYROLL','Payroll',CircleDollarSign],['OPERATIONS','Operations',Briefcase]].map(([key,label,Icon])=><button key={key} className={'support-category '+(form.category===key?'active':'')} onClick={()=>{setForm({...form,category:key});setOpen(true)}}><span><Icon size={19}/></span><b>{label}</b><small>Raise {label.toLowerCase()} request</small></button>)}</div>{open&&<div className="feature-card"><div className="feature-card-head"><b>Raise a request</b><button className="icon-btn" onClick={()=>setOpen(false)}><X size={17}/></button></div><div className="form-field"><label>Category</label><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option>TECHNICAL</option><option>HR</option><option>PAYROLL</option><option>OPERATIONS</option><option>GENERAL</option></select></div><div className="form-field"><label>Subject</label><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}/></div><div className="form-field"><label>Details</label><textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div><button className="premium-btn full" onClick={submit}><Send size={15}/> Submit request</button></div>}<div className="feature-stack">{loading&&<Loader/>}{!loading&&!data?.length&&<div className="premium-empty"><MessageSquare size={28}/><b>No support tickets</b><span>Need help? Create your first request.</span></div>}{(data||[]).map(t=><div className="ticket-card" key={t._id}><div className="ticket-head"><span>#{t.ticketNo}</span><em>{t.status}</em></div><strong>{t.subject}</strong><p>{t.description}</p><div className="ticket-thread">{(t.messages||[]).slice(-4).map((m,i)=><div key={i} className={m.senderRole=== 'STAFF'?'mine':'theirs'}><b>{m.senderRole}</b><span>{m.message}</span></div>)}</div><div className="ticket-reply"><input placeholder="Reply…" value={reply[t._id]||''} onChange={e=>setReply(r=>({...r,[t._id]:e.target.value}))}/><button onClick={()=>sendReply(t._id)}><Send size={15}/></button></div></div>)}</div></> }
+
+function StaffPerformance({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/performance',60000); const p=data||{}; return <><FeatureHeader title="Performance" sub="Your work and attendance snapshot" setPage={setPage} Icon={TrendingUp}/><div className="performance-hero"><div><small>Completion rate</small><strong>{p.completionRate||0}%</strong></div><div className="progress-ring"><span>{p.completedJobs||0}</span><small>completed</small></div></div><div className="mini-stat-grid"><div><b>{p.totalJobs||0}</b><span>Total jobs</span></div><div><b>{p.completedJobs||0}</b><span>Completed</span></div><div><b>{p.attendanceRate||0}%</b><span>Attendance</span></div><div><b>{p.presentDays||0}</b><span>Present days</span></div></div></> }
+
+function ShiftSchedule({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/shifts',60000); return <><FeatureHeader title="Shift Schedule" sub="Upcoming duty assignments" setPage={setPage} Icon={Calendar}/><div className="feature-stack">{loading&&<Loader/>}{!loading&&!data?.length&&<div className="premium-empty"><Calendar size={28}/><b>No shifts scheduled</b><span>Your upcoming shift assignments will appear here.</span></div>}{(data||[]).map(s=><div className="shift-card" key={s._id}><div className="shift-date"><b>{new Date(s.dateKey).getDate()}</b><small>{new Date(s.dateKey).toLocaleDateString('en-IN',{month:'short'})}</small></div><div><strong>{s.startTime} – {s.endTime}</strong><span>{s.location||'Assigned duty area'}</span></div><em>{s.status}</em></div>)}</div></> }
+
+function StaffRecognition({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/recognition',60000); return <><FeatureHeader title="Recognition" sub="Achievements and appreciation" setPage={setPage} Icon={Award}/><div className="recognition-grid">{loading&&<Loader/>}{!loading&&!data?.length&&<div className="premium-empty"><Award size={28}/><b>No recognitions yet</b><span>Appreciation from Command Center will appear here.</span></div>}{(data||[]).map(r=><div className="recognition-card" key={r._id}><span><BadgeCheck size={26}/></span><div><strong>{r.title}</strong><p>{r.description}</p><small>{r.badge||'Achievement'} · {new Date(r.awardedAt).toLocaleDateString('en-IN')}</small></div></div>)}</div></> }
+
+
+function GlobalSearch({call,setPage}) { const [q,setQ]=useState(''); const {data:jobs}=useStaffLive(call,'/staff/jobs',60000); const {data:notifs}=useStaffLive(call,'/staff/notifications',60000); const {data:tickets}=useStaffLive(call,'/staff/support',60000); const query=q.trim().toLowerCase(); const groups=[['Jobs',jobs||[],j=>`${j.serviceType||''} ${j.problem||''} ${j._id||''}`, 'my-works'],['Notifications',notifs||[],j=>`${j.title||''} ${j.message||''}`,'notifications'],['Tickets',tickets||[],j=>`${j.ticketNo||''} ${j.subject||''}`,'support']]; const results=groups.flatMap(([name,arr,fn,page])=>arr.filter(x=>!query||fn(x).toLowerCase().includes(query)).slice(0,8).map(x=>({name,x,page}))); return <><FeatureHeader title="Search" sub="Find jobs, notifications and support tickets" setPage={setPage} Icon={Search}/><div className="search-box"><Search size={18}/><input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by job, ticket, message…"/></div><div className="search-results">{!results.length?<div className="premium-empty"><Search size={28}/><b>No matches</b><span>Try a job ID, ticket number or keyword.</span></div>:results.map((r,i)=><button key={i} className="search-result" onClick={()=>setPage(r.page)}><span>{r.name}</span><strong>{r.x.title||r.x.subject||r.x.serviceType||r.x.ticketNo||'Result'}</strong><small>{r.x.message||r.x.problem||r.x.description||''}</small></button>)}</div></> }
+
+function SecurityPage({call,setPage}) { const [form,setForm]=useState({currentPassword:'',newPassword:'',confirm:''}); const [busy,setBusy]=useState(false); const submit=async()=>{if(form.newPassword!==form.confirm)return alert('New passwords do not match');setBusy(true);try{await call('/auth/change-password',{method:'post',data:{currentPassword:form.currentPassword,newPassword:form.newPassword}});setForm({currentPassword:'',newPassword:'',confirm:''});alert('Password changed successfully')}catch(e){alert(e.response?.data?.message||e.message)}finally{setBusy(false)}}; return <><FeatureHeader title="Security" sub="Protect your staff account" setPage={setPage} Icon={ShieldCheck}/><div className="feature-card security-card"><div className="security-banner"><ShieldCheck size={26}/><div><b>Account security</b><span>Change your password regularly and keep your account private.</span></div></div><div className="form-field"><label>Current password</label><input type="password" value={form.currentPassword} onChange={e=>setForm({...form,currentPassword:e.target.value})}/></div><div className="form-field"><label>New password</label><input type="password" minLength="6" value={form.newPassword} onChange={e=>setForm({...form,newPassword:e.target.value})}/></div><div className="form-field"><label>Confirm new password</label><input type="password" value={form.confirm} onChange={e=>setForm({...form,confirm:e.target.value})}/></div><button className="premium-btn" disabled={busy} onClick={submit}>{busy?'Updating…':'Change password'}</button></div></> }
+
+// ══════════════════════════════════════════════════════════════════
+// STAFF CHARGE HUBS
+// ══════════════════════════════════════════════════════════════════
+
+const STAFF_HUB_STATUS_COLOR = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
+
+const STAFF_CITY_COORDS = {
+  'hyderabad':  [17.3850,  78.4867], 'bangalore':  [12.9716,  77.5946],
+  'bengaluru':  [12.9716,  77.5946], 'mumbai':     [19.0760,  72.8777],
+  'delhi':      [28.6139,  77.2090], 'new delhi':  [28.6139,  77.2090],
+  'chennai':    [13.0827,  80.2707], 'kolkata':    [22.5726,  88.3639],
+  'pune':       [18.5204,  73.8567], 'ahmedabad':  [23.0225,  72.5714],
+  'jaipur':     [26.9124,  75.7873], 'lucknow':    [26.8467,  80.9462],
+  'surat':      [21.1702,  72.8311], 'kochi':      [ 9.9312,  76.2673],
+  'vizag':      [17.6868,  83.2185], 'visakhapatnam': [17.6868, 83.2185],
+  'nagpur':     [21.1458,  79.0882], 'indore':     [22.7196,  75.8577],
+  'coimbatore': [11.0168,  76.9558], 'vadodara':   [22.3072,  73.1812],
+  'patna':      [25.5941,  85.1376], 'bhopal':     [23.2599,  77.4126],
+  'thane':      [19.2183,  72.9781], 'noida':      [28.5355,  77.3910],
+  'gurgaon':    [28.4595,  77.0266], 'gurugram':   [28.4595,  77.0266],
+  'chandigarh': [30.7333,  76.7794], 'mysore':     [12.2958,  76.6394],
+  'mysuru':     [12.2958,  76.6394], 'bhubaneswar':[20.2961,  85.8245],
+  'kurnool':    [15.8281,  78.0373], 'vijayawada': [16.5062,  80.6480],
+  'guntur':     [16.3067,  80.4365], 'tirupati':   [13.6288,  79.4192],
+  'warangal':   [17.9784,  79.5941], 'nellore':    [14.4426,  79.9865],
+  'rajkot':     [22.3039,  70.8022], 'amritsar':   [31.6340,  74.8723],
+  'jodhpur':    [26.2389,  73.0243], 'guwahati':   [26.1445,  91.7362],
+  'agra':       [27.1767,  78.0081], 'varanasi':   [25.3176,  82.9739],
+};
+
+function staffGetCoords(hub) {
+  if (hub.lat && hub.lng) return [hub.lat, hub.lng];
+  const key = (hub.city || '').toLowerCase().trim();
+  return STAFF_CITY_COORDS[key] || null;
+}
+
+async function staffGeocodeHub(hub) {
+  const q = [hub.address, hub.city, 'India'].filter(Boolean).join(', ');
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const data = await r.json();
+    if (data && data[0]) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch (_) {}
+  return null;
+}
+
+function StaffHubMap({ hubs, selectedHub, onSelectHub }) {
+  const mapRef          = React.useRef(null);
+  const leafRef         = React.useRef(null);
+  const markersRef      = React.useRef([]);
+  const tooltipTimerRef = React.useRef(null);
+  const hubsRef         = React.useRef(hubs);
+  const drawScheduled   = React.useRef(false);
+  const [tooltip, setTooltip] = React.useState(null);
+
+  hubsRef.current = hubs;
+
+  function scheduleDraw() {
+    if (drawScheduled.current) return;
+    drawScheduled.current = true;
+    setTimeout(() => {
+      drawScheduled.current = false;
+      if (leafRef.current && hubsRef.current && hubsRef.current.length > 0) {
+        leafRef.current.invalidateSize();
+        drawStaffMarkers(leafRef.current, hubsRef.current);
+      }
+    }, 50);
+  }
+
+  React.useEffect(() => {
+    if (leafRef.current || !mapRef.current || !window.L) return;
+    const L = window.L;
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+      .setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    map.getPane('markerPane').style.zIndex = 650;
+    map.getPane('tooltipPane').style.zIndex = 700;
+    delete window.L.Icon.Default.prototype._getIconUrl;
+    window.L.Icon.Default.mergeOptions({ iconUrl: '', shadowUrl: '', iconRetinaUrl: '' });
+    leafRef.current = map;
+    setTimeout(() => scheduleDraw(), 400);
+  }, []);
+
+  React.useEffect(() => { scheduleDraw(); }, [hubs]);
+
+  function placeStaffMarker(map, hub, coords) {
+    const color = STAFF_HUB_STATUS_COLOR[hub.status] || '#2563eb';
+    const marker = window.L.circleMarker(coords, {
+      radius: 13, fillColor: color, color: '#ffffff',
+      weight: 3, opacity: 1, fillOpacity: 1, pane: 'markerPane',
+    }).addTo(map);
+    marker.bindTooltip(hub.name || '', {
+      permanent: true, direction: 'bottom',
+      offset: [0, 10], className: 'hub-map-label',
+    }).openTooltip();
+    marker.on('mouseover', e => {
+      clearTimeout(tooltipTimerRef.current);
+      const pt = map.latLngToContainerPoint(e.latlng);
+      setTooltip({ hub, x: pt.x, y: pt.y });
+    });
+    marker.on('mouseout', () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
+    marker.on('click', () => onSelectHub(hub));
+    markersRef.current.push(marker);
+    return coords;
+  }
+
+  async function drawStaffMarkers(map, hubList) {
+    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
+    markersRef.current = [];
+    const allCoords = [];
+    for (const hub of hubList) {
+      let coords = staffGetCoords(hub);
+      if (!coords) coords = await staffGeocodeHub(hub);
+      if (!coords) continue;
+      placeStaffMarker(map, hub, coords);
+      allCoords.push(coords);
+    }
+    if (allCoords.length === 0) return;
+    if (allCoords.length === 1) {
+      map.setView(allCoords[0], 14, { animate: false });
+    } else {
+      map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 14, animate: false });
+    }
+    map.invalidateSize();
+  }
+
+  React.useEffect(() => {
+    if (!selectedHub || !leafRef.current) return;
+    (async () => {
+      let c = staffGetCoords(selectedHub);
+      if (!c) c = await staffGeocodeHub(selectedHub);
+      if (c && leafRef.current) leafRef.current.setView(c, 15, { animate: true });
+    })();
+  }, [selectedHub]);
+
+  const sc = tooltip ? (STAFF_HUB_STATUS_COLOR[tooltip.hub.status] || '#2563eb') : '#16a34a';
+
+  return (
+    <div className="hub-map-container" style={{ position: 'relative' }}>
+      <div ref={mapRef} id="staff-hub-map" style={{ height: 480, borderRadius: 12, overflow: 'hidden' }} />
+      {tooltip && (() => {
+        const coords  = staffGetCoords(tooltip.hub);
+        const mapsUrl = coords
+          ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((tooltip.hub.address ? tooltip.hub.address + ', ' : '') + (tooltip.hub.city || ''))}`;
+        return (
+          <div className="map-tooltip"
+            style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'auto' }}
+            onMouseEnter={() => clearTimeout(tooltipTimerRef.current)}
+            onMouseLeave={() => setTooltip(null)}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+              <div className="map-tooltip-name">{tooltip.hub.name}</div>
+              <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Open in Google Maps"
+                 style={{ color: '#2563eb', flexShrink: 0, display: 'flex', alignItems: 'center', textDecoration: 'none', padding: '2px 0' }}>
+                <MapPin size={16} />
+              </a>
+            </div>
+            <div className="map-tooltip-row"><span>📍</span><strong>{tooltip.hub.city}</strong></div>
+            {tooltip.hub.address && <div className="map-tooltip-row" style={{ fontSize: 11 }}>{tooltip.hub.address}</div>}
+            <div className="map-tooltip-row"><span>⚡ Chargers:</span><strong>{tooltip.hub.chargerCount ?? 0}</strong></div>
+            {tooltip.hub.code && <div className="map-tooltip-row"><span>🔖 Code:</span><strong>{tooltip.hub.code}</strong></div>}
+            <div><span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>● {tooltip.hub.status}</span></div>
+          </div>
+        );
+      })()}
+      <div className="map-legend">
+        {Object.entries(STAFF_HUB_STATUS_COLOR).map(([s, c]) => (
+          <div key={s} className="legend-item">
+            <div className="legend-dot" style={{ background: c }} />
+            <span style={{ fontSize: 11, color: '#374151' }}>{s}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StaffChargeHubs({ call, setPage }) {
+  const { data: hubs, loading, error } = useFetch(call, '/hubs');
+  const [selectedHub,  setSelectedHub]  = useState(null);
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [viewMode,     setViewMode]     = useState('map');
+
+  if (loading && !hubs) return <Loader />;
+  if (error   && !hubs) return <div className="empty-state"><p style={{color:'#dc2626'}}>{error}</p></div>;
+
+  const hubList      = hubs || [];
+  const filtered     = statusFilter === 'ALL' ? hubList : hubList.filter(h => h.status === statusFilter);
+  const onlineCount  = hubList.filter(h => h.status === 'ONLINE').length;
+  const offlineCount = hubList.filter(h => h.status === 'OFFLINE').length;
+  const maintCount   = hubList.filter(h => h.status === 'MAINTENANCE').length;
+  const totalChargers = hubList.reduce((s, h) => s + (h.chargerCount || 0), 0);
+
+  const STATUS_CFG = {
+    ONLINE:      { color: '#16a34a', bg: '#f0fdf4', border: '#bbf7d0', label: 'Online'      },
+    OFFLINE:     { color: '#dc2626', bg: '#fef2f2', border: '#fecaca', label: 'Offline'     },
+    MAINTENANCE: { color: '#d97706', bg: '#fffbeb', border: '#fde68a', label: 'Maintenance' },
+  };
+
+  return (
+    <>
+      <PageHeader title="Charge Hubs" sub={`${hubList.length} hubs across the allEV network · ${totalChargers} total charger slots`} back={() => setPage && setPage('dashboard')} />
+
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        {[
+          { label: 'Total Hubs',    value: hubList.length,  color: '#2563eb' },
+          { label: 'Online',        value: onlineCount,     color: '#16a34a' },
+          { label: 'Offline',       value: offlineCount,    color: '#dc2626' },
+          { label: 'Maintenance',   value: maintCount,      color: '#d97706' },
+          { label: 'Charger Slots', value: totalChargers,   color: '#7c3aed' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{
+            background: '#fff', border: '1px solid #e4e7ef', borderRadius: 12,
+            padding: '10px 18px', flex: '1 1 120px', minWidth: 100,
+            boxShadow: '0 1px 4px rgba(0,0,0,.04)',
+          }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color }}>{value}</div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2, fontWeight: 600 }}>{label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {[
+            { id: 'ALL',         label: `All (${hubList.length})`,     color: '#2563eb' },
+            { id: 'ONLINE',      label: `Online (${onlineCount})`,     color: '#16a34a' },
+            { id: 'OFFLINE',     label: `Offline (${offlineCount})`,   color: '#dc2626' },
+            { id: 'MAINTENANCE', label: `Maintenance (${maintCount})`, color: '#d97706' },
+          ].map(f => (
+            <button key={f.id} onClick={() => setStatusFilter(f.id)} style={{
+              padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              border: statusFilter === f.id ? `2px solid ${f.color}` : '2px solid #e5e7eb',
+              background: statusFilter === f.id ? f.color : '#fff',
+              color: statusFilter === f.id ? '#fff' : '#374151',
+              transition: 'all .15s',
+            }}>{f.label}</button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', background: '#f3f4f6', borderRadius: 8, padding: 3, gap: 2, marginLeft: 'auto' }}>
+          {[{ id: 'map', icon: '🗺', label: 'Map' }, { id: 'table', icon: '📋', label: 'Table' }].map(v => (
+            <button key={v.id} onClick={() => setViewMode(v.id)} style={{
+              padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+              background: viewMode === v.id ? '#fff' : 'transparent',
+              color: viewMode === v.id ? '#2563eb' : '#6b7280',
+              boxShadow: viewMode === v.id ? '0 1px 4px rgba(0,0,0,.1)' : 'none',
+              transition: 'all .15s',
+            }}>{v.icon} {v.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Map View */}
+      {viewMode === 'map' && (
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">Hub Network Map</span>
+            <span className="badge">{filtered.length} hubs</span>
+          </div>
+          <StaffHubMap hubs={filtered} selectedHub={selectedHub}
+            onSelectHub={h => setSelectedHub(s => s?._id === h._id ? null : h)} />
+          {selectedHub && (() => {
+            const sc = STATUS_CFG[selectedHub.status] || STATUS_CFG.OFFLINE;
+            const coords = staffGetCoords(selectedHub);
+            const mapsUrl = coords
+              ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+              : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedHub.address ? selectedHub.address + ', ' : '') + (selectedHub.city || ''))}`;
+            return (
+              <div style={{
+                marginTop: 16, background: '#f9fafb', border: '1px solid #e5e7eb',
+                borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 16,
+                flexWrap: 'wrap', alignItems: 'center',
+              }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e' }}>{selectedHub.name}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                    📍 {selectedHub.city}{selectedHub.address ? ` · ${selectedHub.address}` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
+                    ● {sc.label}
+                  </span>
+                  <span style={{ fontSize: 13, color: '#374151' }}>⚡ {selectedHub.chargerCount ?? 0} chargers</span>
+                  {selectedHub.code && <span style={{ fontSize: 12, color: '#6b7280' }}>🔖 {selectedHub.code}</span>}
+                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                     style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <MapPin size={13} /> Open Maps
+                  </a>
+                  <button onClick={() => setSelectedHub(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16 }}>✕</button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Table View */}
+      {viewMode === 'table' && (
+        <div className="card">
+          <div className="card-head">
+            <span className="card-title">Hub List</span>
+            <span className="badge">{filtered.length} hubs</span>
+          </div>
+          {filtered.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">📍</div>
+              <div className="empty-title">No hubs found for this filter.</div>
+            </div>
+          ) : (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>City</th><th>Status</th><th>Chargers</th><th>Code</th><th>Address</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {filtered.map(h => {
+                    const sc = STATUS_CFG[h.status] || STATUS_CFG.OFFLINE;
+                    const coords  = staffGetCoords(h);
+                    const mapsUrl = coords
+                      ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
+                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((h.address ? h.address + ', ' : '') + (h.city || ''))}`;
+                    return (
+                      <tr key={h._id}>
+                        <td style={{ fontWeight: 600 }}>{h.name || '—'}</td>
+                        <td>{h.city || '—'}</td>
+                        <td>
+                          <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '2px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            ● {sc.label}
+                          </span>
+                        </td>
+                        <td>{h.chargerCount ?? 0}</td>
+                        <td>{h.code || '—'}</td>
+                        <td style={{ fontSize: 12, color: '#6b7280', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.address || '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+                               style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <MapPin size={12} /> Maps
+                            </a>
+                            <button onClick={() => { setSelectedHub(h); setViewMode('map'); }}
+                              style={{ fontSize: 11, color: '#7c3aed', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                              📍 Map
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
 }

@@ -25,3 +25,4 @@ exports.refreshToken = async (req, res) => {
     res.status(401).json({ message: 'Refresh token expired or invalid' });
   }
 };
+exports.changePassword=async(req,res)=>{try{const {currentPassword,newPassword}=req.body;if(!currentPassword||!newPassword||newPassword.length<6)return res.status(400).json({message:'Current password and a new password of at least 6 characters are required'});const u=await User.findById(req.user._id);if(!u||!await bcrypt.compare(currentPassword,u.passwordHash||''))return res.status(400).json({message:'Current password is incorrect'});u.passwordHash=await bcrypt.hash(newPassword,12);await u.save();res.json({ok:true,message:'Password changed successfully'});}catch(e){res.status(500).json({message:e.message})}};

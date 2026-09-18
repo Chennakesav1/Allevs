@@ -190,3 +190,160 @@ exports.customerDetail = async (req, res) => {
     res.status(500).json({ message: e.message });
   }
 };
+// ═══════════════════════════════════════════════════════════════
+// COMMAND CENTER VEHICLE INVENTORY
+// ═══════════════════════════════════════════════════════════════
+
+/** GET /api/admin/vehicles — list all command center vehicles */
+exports.listVehicles = async (req, res) => {
+  try {
+    const { CommandVehicle, User } = require('../models');
+    const vehicles = await CommandVehicle.find().sort('-createdAt').lean();
+    // Enrich with fleet operator info
+    const opIds = [...new Set(vehicles.filter(v => v.fleetOperatorId).map(v => String(v.fleetOperatorId)))];
+    const operators = opIds.length
+      ? await User.find({ _id: { $in: opIds } }).select('name email address').lean()
+      : [];
+    const opMap = new Map(operators.map(op => [String(op._id), op]));
+    res.json(vehicles.map(v => ({
+      ...v,
+      franchiseeId:    v.fleetOperatorId,
+      franchiseeName:  v.fleetOperatorName || opMap.get(String(v.fleetOperatorId))?.name || null,
+      franchiseeEmail: v.fleetOperatorEmail || opMap.get(String(v.fleetOperatorId))?.email || null,
+    })));
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+/** POST /api/admin/vehicles — create a vehicle in Command Center inventory */
+exports.createVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    const { make, model } = req.body;
+    if (!make || !model) return res.status(400).json({ message: 'Make and Model are required' });
+    const vehicle = await CommandVehicle.create({
+      ...req.body,
+      quantity:   Math.max(1, Number(req.body.quantity) || 1),
+      pricePerDay: Number(req.body.pricePerDay) || 0,
+      batteryCapacityKwh: req.body.batteryCapacityKwh ? Number(req.body.batteryCapacityKwh) : undefined,
+      rangeKm: req.body.rangeKm ? Number(req.body.rangeKm) : undefined,
+      status:    'UNASSIGNED',
+      createdBy:  req.user._id,
+    });
+    // Return in shape compatible with frontend (uses franchiseeId field)
+    res.status(201).json({ ...vehicle.toObject(), franchiseeId: null, franchiseeName: null, franchiseeEmail: null });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+};
+
+/** PUT /api/admin/vehicles/:id — update a command center vehicle */
+exports.updateVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    const allowed = ['category','make','model','year','color','registrationNo','batteryCapacityKwh','rangeKm','chargingType','pricePerDay','quantity','description','images'];
+    const updates = {};
+    allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+    if (updates.quantity !== undefined)   updates.quantity = Math.max(0, Number(updates.quantity));
+    if (updates.pricePerDay !== undefined) updates.pricePerDay = Number(updates.pricePerDay);
+    const vehicle = await CommandVehicle.findByIdAndUpdate(req.params.id, updates, { new: true });
+    if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
+    res.json({
+      ...vehicle.toObject(),
+      franchiseeId:    vehicle.fleetOperatorId,
+      franchiseeName:  vehicle.fleetOperatorName,
+      franchiseeEmail: vehicle.fleetOperatorEmail,
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+/** DELETE /api/admin/vehicles/:id — remove a command center vehicle */
+exports.deleteVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    await CommandVehicle.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+};
+
+/** PUT /api/admin/vehicles/:id/assign — assign or reassign a vehicle to a fleet operator */
+exports.assignVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle, User } = require('../models');
+    const { fleetOperatorId } = req.body;
+    if (!fleetOperatorId) return res.status(400).json({ message: 'fleetOperatorId is required' });
+
+    const operator = await User.findOne({ _id: fleetOperatorId, role: 'FRANCHISEE' }).select('name email').lean();
+    if (!operator) return res.status(404).json({ message: 'Fleet operator not found' });
+
+    const vehicle = await CommandVehicle.findByIdAndUpdate(
+      req.params.id,
+      {
+        fleetOperatorId:    operator._id,
+        fleetOperatorName:  operator.name,
+        fleetOperatorEmail: operator.email,
+        assignedAt:         new Date(),
+        assignedBy:         req.user._id,
+        status:             'ASSIGNED',
+      },
+      { new: true }
+    );
+    if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
+
+    res.json({
+      ...vehicle.toObject(),
+      franchiseeId:    vehicle.fleetOperatorId,
+      franchiseeName:  vehicle.fleetOperatorName,
+      franchiseeEmail: vehicle.fleetOperatorEmail,
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+/** GET /api/franchise/assigned-vehicles — fleet operator gets their assigned vehicles */
+exports.assignedVehicles = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    const vehicles = await CommandVehicle.find({
+      fleetOperatorId: req.user._id,
+      status: { $in: ['ASSIGNED', 'ACTIVE'] },
+    }).sort('-assignedAt').lean();
+    res.json(vehicles);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+// COMMAND CENTER PARTS (spare parts)
+// ═══════════════════════════════════════════════════════════════
+
+/** POST /api/admin/parts — create a spare part in Command Center inventory */
+exports.createPart = async (req, res) => {
+  try {
+    const { Inventory } = require('../models');
+    const { sku, name } = req.body;
+    if (!sku || !name) return res.status(400).json({ message: 'SKU and Part Name are required' });
+    const existing = await Inventory.findOne({ sku: sku.trim().toUpperCase() });
+    if (existing) return res.status(409).json({ message: `Part code "${sku}" already exists.` });
+    const part = await Inventory.create({
+      sku:         sku.trim().toUpperCase(),
+      name:        name.trim(),
+      category:    req.body.category    || 'General',
+      quantity:    Number(req.body.quantity)    || 0,
+      reorderLevel:Number(req.body.reorderLevel)|| 5,
+      unitPrice:   Number(req.body.unitPrice)   || 0,
+      description: req.body.description,
+      manufacturer:req.body.manufacturer,
+    });
+    res.status(201).json(part);
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
+};

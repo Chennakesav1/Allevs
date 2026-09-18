@@ -200,16 +200,73 @@ exports.allVehicles = async (req, res) => {
 /** GET /api/customer/available-vehicles */
 exports.availableVehicles = async (req, res) => {
   try {
+    const { CommandVehicle } = require('../models');
     const pin = req.query.pincode || '';
     const customer = req.user ? await User.findById(req.user._id).select('address').lean() : null;
     const address = customer?.address || {};
-    const docs = await PendingVehicle.find({ status: 'APPROVED', $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }] }).sort('-reviewedAt').lean();
-    const franchiseeIds = [...new Set(docs.map(v => String(v.franchiseeId)).filter(Boolean))];
-    const franchisees = await User.find({ _id: { $in: franchiseeIds }, role:'FRANCHISEE' }).select('name address').lean();
+
+    // 1. PendingVehicle — fleet-operator submitted & approved by admin
+    const pendingDocs = await PendingVehicle.find({
+      status: 'APPROVED',
+      $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }],
+    }).sort('-reviewedAt').lean();
+
+    // 2. CommandVehicle — created by Command Center and assigned to a fleet operator
+    const cmdDocs = await CommandVehicle.find({
+      status: { $in: ['ASSIGNED', 'ACTIVE'] },
+      fleetOperatorId: { $exists: true, $ne: null },
+      $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }],
+    }).sort('-assignedAt').lean();
+
+    // Collect all fleet operator IDs for address lookup
+    const allFranchiseeIds = [
+      ...new Set([
+        ...pendingDocs.map(v => String(v.franchiseeId)).filter(Boolean),
+        ...cmdDocs.map(v => String(v.fleetOperatorId)).filter(Boolean),
+      ]),
+    ];
+    const franchisees = allFranchiseeIds.length
+      ? await User.find({ _id: { $in: allFranchiseeIds }, role: 'FRANCHISEE' }).select('name address').lean()
+      : [];
     const fm = new Map(franchisees.map(f => [String(f._id), f]));
-    const score = v => { const a=fm.get(String(v.franchiseeId))?.address||{}; if(pin && a.pincode===pin)return 0; if(a.pincode===address.pincode && a.pincode)return 0; if(a.district && address.district && a.district.toLowerCase()===address.district.toLowerCase())return 1; if(a.state && address.state && a.state.toLowerCase()===address.state.toLowerCase())return 2; return 3; };
-    res.json(docs.sort((a,b)=>score(a)-score(b)).map(v=>({...v, quantity: v.quantity == null ? 1 : v.quantity, franchiseeName: fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE franchise', franchiseeAddress: fm.get(String(v.franchiseeId))?.address || null})));
-  
+
+    // Scoring: lower = closer to customer
+    const score = (franchiseeId) => {
+      const a = fm.get(String(franchiseeId))?.address || {};
+      if (pin && a.pincode === pin) return 0;
+      if (a.pincode && a.pincode === address.pincode) return 0;
+      if (a.district && address.district && a.district.toLowerCase() === address.district.toLowerCase()) return 1;
+      if (a.state && address.state && a.state.toLowerCase() === address.state.toLowerCase()) return 2;
+      return 3;
+    };
+
+    // Normalise PendingVehicle docs
+    const normPending = pendingDocs.map(v => ({
+      ...v,
+      _source:          'fleet_submission',
+      quantity:         v.quantity == null ? 1 : v.quantity,
+      franchiseeId:     v.franchiseeId,
+      franchiseeName:   fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE Fleet',
+      franchiseeAddress:fm.get(String(v.franchiseeId))?.address || null,
+      _score:           score(v.franchiseeId),
+    }));
+
+    // Normalise CommandVehicle docs — map fields to same shape
+    const normCmd = cmdDocs.map(v => ({
+      ...v,
+      _source:          'command_center',
+      quantity:         v.quantity == null ? 1 : v.quantity,
+      // reuse franchiseeId field so customer portal works unchanged
+      franchiseeId:     v.fleetOperatorId,
+      franchiseeName:   fm.get(String(v.fleetOperatorId))?.name || v.fleetOperatorName || 'EV CORE Fleet',
+      franchiseeAddress:fm.get(String(v.fleetOperatorId))?.address || null,
+      // status normalise — customer portal checks for APPROVED
+      status:           'APPROVED',
+      _score:           score(v.fleetOperatorId),
+    }));
+
+    const all = [...normPending, ...normCmd].sort((a, b) => a._score - b._score);
+    res.json(all);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }

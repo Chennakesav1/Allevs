@@ -158,6 +158,36 @@ button, input { font: inherit; }
 .nav-item.nav-sub svg:first-child { color: #9ca3af; }
 .nav-item.nav-sub.active svg:first-child { color: #1d4ed8; }
 
+/* ── Nav Category Groups ── */
+.nav-group {
+  margin-bottom: 2px;
+}
+.nav-group + .nav-group {
+  margin-top: 6px;
+}
+.nav-category-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #b0b7c3;
+  padding: 8px 12px 3px;
+  user-select: none;
+  pointer-events: none;
+}
+.nav-group:first-child .nav-category-label {
+  padding-top: 2px;
+}
+
+/* ── Sidebar divider between groups ── */
+.nav-group + .nav-group::before {
+  content: '';
+  display: block;
+  height: 1px;
+  background: #f0f2f7;
+  margin: 4px 10px 8px;
+}
+
 .logout-btn {
   margin-top: auto;
   color: #ef4444 !important;
@@ -1080,3 +1110,19 @@ select.fld-input { cursor: pointer; }
 .franchise-popup .leaflet-popup-tip {
   background: #fff;
 }
+/* ── Hub map pin label ───────────────────────────────────────────── */
+.hub-map-label {
+  background: #fff !important;
+  border: none !important;
+  border-radius: 5px !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.22) !important;
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #1e293b !important;
+  white-space: nowrap !important;
+}
+.hub-map-label::before { display: none !important; }
+/* Staff communications workspace */
+.command-comm-grid{max-width:1280px}.admin-feature-tabs{margin-top:4px}.command-comm-grid .card,.support-admin-card{box-shadow:0 8px 26px rgba(15,23,42,.045)}.comm-banner-preview{border:1px solid #dbeafe}.form-grid label input:focus,.form-grid label select:focus,.form-grid label textarea:focus{border-color:#93c5fd;box-shadow:0 0 0 3px #eff6ff}.admin-reply button:last-child{display:inline-flex;align-items:center;gap:5px;background:#ecfdf5;color:#047857;padding:9px 11px;font-size:10px;font-weight:750}
+@media(max-width:768px){.command-comm-grid{grid-template-columns:1fr!important}.form-grid{grid-template-columns:1fr!important}.admin-feature-tabs{overflow:auto}.admin-feature-tabs button{white-space:nowrap}.comm-history{max-height:360px;overflow:auto}.support-admin-card .card-head{align-items:flex-start}}

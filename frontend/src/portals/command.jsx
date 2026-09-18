@@ -6,7 +6,9 @@ import {
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
   Plus, X, Save, Eye, EyeOff, UserPlus, BarChart2, RefreshCw,
-  Clock, Key, UserCheck, UserX, UserMinus, Image, Layers, Hash
+  Clock, Key, UserCheck, UserX, UserMinus, Image, Layers, Hash, Wrench,
+  MessageSquare, Megaphone, Send, Search, UploadCloud, Award,
+  CalendarDays, FilePlus2, ShieldCheck
 } from 'lucide-react';
 import './command.css';
 
@@ -17,10 +19,10 @@ const kind = 'command';
 const ALLOWED_ROLES = ['CENTRAL_ADMIN','SUPER_ADMIN'];
 
 const PORTAL_CFG = {
-  customer:   { title: 'Customer Portal',    accent: 'Customer Operations' },
-  staff:      { title: 'Staff Portal',       accent: 'Service Operations' },
-  franchisee: { title: 'Franchisee Portal',  accent: 'Business Intelligence' },
-  command:    { title: 'Central Command',    accent: 'Enterprise Control', email: 'admin@ev.local' },
+  customer:   { title: 'Customer Portal',       accent: 'Customer Operations' },
+  staff:      { title: 'Staff Portal',          accent: 'Service Operations' },
+  franchisee: { title: 'Fleet Operator Portal', accent: 'Fleet Operations' },
+  command:    { title: 'Central Command',        accent: 'Enterprise Control', email: 'admin@ev.local' },
 };
 const cfg = PORTAL_CFG[kind];
 
@@ -48,17 +50,33 @@ const NAV_ITEMS = {
     { id: 'jobs',       label: 'Jobs',       Icon: ClipboardList },
   ],
   command: [
-    { id: 'dashboard',           label: 'Dashboard',              Icon: LayoutDashboard },
-    { id: 'hubs',                label: 'Hubs',                   Icon: Factory },
-    { id: 'franchisees',         label: 'Franchisees',            Icon: Users },
-    { id: 'vehicle-inventory',   label: 'Vehicle & Inventory',    Icon: Layers },
-    { id: 'vehicle-approvals',   label: 'Vehicle Approvals',      Icon: Car },
-    { id: 'staff-directory',     label: 'Staff Directory',        Icon: Users },
-    { id: 'customers',           label: 'Customers',              Icon: Users },
-    { id: 'franchise-ratings',   label: 'Franchisee Ratings',     Icon: BarChart2 },
-    { id: 'customer-payments',   label: 'Customer Payments',      Icon: DollarSign },
-    { id: 'wallet-recharges',    label: 'Wallet Recharges',        Icon: Wallet },
-    { id: 'demand',              label: 'Demand',                 Icon: TrendingUp },
+    // ── Overview ──
+    { id: 'dashboard',           label: 'Dashboard',           Icon: LayoutDashboard, cat: 'Overview' },
+
+    // ── Operations ──
+    { id: 'complaint-center',    label: 'Complaint Center',    Icon: Bell,            cat: 'Operations' },
+    { id: 'job-management',      label: 'Job Management',      Icon: ClipboardList,   cat: 'Operations' },
+    { id: 'demand',              label: 'Demand',              Icon: TrendingUp,      cat: 'Operations' },
+
+    // ── Fleet & Infrastructure ──
+    { id: 'hubs',                label: 'Hubs',                Icon: Factory,         cat: 'Fleet & Infrastructure' },
+    { id: 'franchisees',         label: 'Fleet Operators',     Icon: Truck,           cat: 'Fleet & Infrastructure' },
+    { id: 'vehicle-inventory',   label: 'Vehicle & Inventory', Icon: Layers,          cat: 'Fleet & Infrastructure' },
+    { id: 'vehicle-approvals',   label: 'Vehicle Approvals',   Icon: Car,             cat: 'Fleet & Infrastructure' },
+    { id: 'franchise-ratings',   label: 'Fleet Ratings',       Icon: BarChart2,       cat: 'Fleet & Infrastructure' },
+
+    // ── People & HR ──
+    { id: 'customers',           label: 'Customers',           Icon: Users,           cat: 'People & HR' },
+    { id: 'staff-directory',     label: 'Staff Directory',     Icon: Shield,          cat: 'People & HR' },
+    { id: 'staff-management',    label: 'Staff Management',    Icon: UserCheck,       cat: 'People & HR' },
+    { id: 'staff-attendance',    label: 'Staff Attendance',    Icon: Clock,           cat: 'People & HR' },
+    { id: 'leave-approvals',     label: 'Leave Approvals',     Icon: FileText,        cat: 'People & HR' },
+    { id: 'staff-communications', label: 'Staff Communications', Icon: Megaphone,       cat: 'People & HR' },
+    { id: 'staff-support',        label: 'Staff Support',        Icon: MessageSquare,   cat: 'People & HR' },
+
+    // ── Finance ──
+    { id: 'customer-payments',   label: 'Customer Payments',   Icon: DollarSign,      cat: 'Finance' },
+    { id: 'wallet-recharges',    label: 'Wallet Recharges',    Icon: Wallet,          cat: 'Finance' },
   ],
 };
 
@@ -225,23 +243,37 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {!user ? <SidebarSkeleton count={navItems.length || 10} /> : navItems.map(({ id, label, Icon, parent, sub }) => {
-            const isActive = page === id;
-            const isParentActive = parent && page === parent;
-            return (
-              <button key={id}
-                className={
-                  'nav-item' +
-                  (sub ? ' nav-sub' : '') +
-                  (isActive ? ' active' : '') +
-                  (isParentActive ? ' parent-active' : '')
-                }
-                onClick={() => setPage(id)}>
-                <Icon size={sub ? 14 : 17} />
-                <span>{label}</span>
-              </button>
-            );
-          })}
+          {!user ? <SidebarSkeleton count={navItems.length || 10} /> : (() => {
+            const catOrder = [...new Set(navItems.map(item => item.cat || 'Other'))];
+            const grouped  = navItems.reduce((acc, item) => {
+              const c = item.cat || 'Other';
+              if (!acc[c]) acc[c] = [];
+              acc[c].push(item);
+              return acc;
+            }, {});
+            return catOrder.map(cat => (
+              <div key={cat} className="nav-group">
+                <div className="nav-category-label">{cat}</div>
+                {grouped[cat].map(({ id, label, Icon, parent, sub }) => {
+                  const isActive       = page === id;
+                  const isParentActive = parent && page === parent;
+                  return (
+                    <button key={id}
+                      className={
+                        'nav-item' +
+                        (sub ? ' nav-sub' : '') +
+                        (isActive ? ' active' : '') +
+                        (isParentActive ? ' parent-active' : '')
+                      }
+                      onClick={() => setPage(id)}>
+                      <Icon size={sub ? 14 : 17} />
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ));
+          })()}
         </nav>
         <button className="nav-item logout-btn" onClick={logout}>
           <LogOut size={17} /><span>Sign out</span>
@@ -301,11 +333,18 @@ function PageRouter({ page, call }) {
   // command
   const pages = {
     dashboard:            <AdminDashboard          {...P} />,
+    'complaint-center':   <AdminComplaintCenter    call={call} />,
     hubs:                 <AdminHubs               {...P} />,
     franchisees:          <AdminFranchisees         {...P} />,
     'vehicle-inventory':  <AdminVehicleInventory    call={call} />,
     'vehicle-approvals':  <AdminVehicleApprovals    call={call} />,
     'staff-directory':    <AdminStaffDirectory      call={call} />,
+    'staff-management':   <AdminStaffManagement     call={call} />,
+    'staff-attendance':   <AdminStaffAttendance     call={call} />,
+    'leave-approvals':    <AdminLeaveApprovals      call={call} />,
+    'staff-communications': <AdminStaffCommunications call={call} />,
+    'staff-support':        <AdminStaffSupport call={call} />,
+    'job-management':     <AdminJobManagement       call={call} />,
     customers:            <AdminCustomers           call={call} />,
     'franchise-ratings':  <AdminFranchiseRatings    call={call} />,
     'customer-payments':  <AdminCustomerPayments    call={call} />,
@@ -811,7 +850,7 @@ function AdminDashboard({ call }) {
     ]} />
     <AdminPendingBanner call={call} />
     <InfoBanner Icon={Activity}>
-      Use the sidebar to manage Hubs, Chargers, Franchisees and more. All sections have entry forms.
+      Use the sidebar to manage Hubs, Chargers, Fleet Operators and more. All sections have entry forms.
     </InfoBanner>
   </>;
 }
@@ -843,97 +882,147 @@ const CITY_COORDS = {
   'agra':       [27.1767,  78.0081], 'varanasi':   [25.3176,  82.9739],
 };
 function getHubCoords(hub) {
-  if (hub.lat && hub.lng) return [hub.lat, hub.lng];
-  return CITY_COORDS[(hub.city || '').toLowerCase().trim()] || null;
+  if (hub.lat && hub.lng) return [Number(hub.lat), Number(hub.lng)];
+  // Search both city AND address fields for a known city name
+  const combined = [(hub.city || ''), (hub.address || '')].join(' ').toLowerCase().trim();
+  if (CITY_COORDS[combined]) return CITY_COORDS[combined];
+  // Partial match — city/address may contain extra text like "Hyderabad, Telangana" or full address
+  const key = Object.keys(CITY_COORDS).find(k => combined.includes(k));
+  return key ? CITY_COORDS[key] : null;
+}
+
+// ── Geocode a hub via Nominatim (free, no key needed) ─────────────────
+async function geocodeHub(hub) {
+  const q = [hub.address, hub.city, 'India'].filter(Boolean).join(', ');
+  try {
+    const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`, {
+      headers: { 'Accept-Language': 'en' }
+    });
+    const data = await r.json();
+    if (data && data[0]) return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
+  } catch (_) {}
+  return null;
 }
 const HUB_STATUS_COLOR = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
 
 function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
-  const mapRef          = React.useRef(null);  // <div> element
-  const leafRef         = React.useRef(null);  // L.map instance
+  const mapRef          = React.useRef(null);
+  const leafRef         = React.useRef(null);
   const markersRef      = React.useRef([]);
   const tooltipTimerRef = React.useRef(null);
+  const hubsRef         = React.useRef(hubs);   // always-current hubs, no stale closure
+  const drawScheduled   = React.useRef(false);
   const [tooltip, setTooltip] = React.useState(null);
 
-  // ── init map once — L is already on window from index.html ────
-  React.useEffect(() => {
-    if (leafRef.current || !mapRef.current || !window.L) return;
-    const L   = window.L;
-    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
-      .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19,
-    }).addTo(map);
-    leafRef.current = map;
-    // Draw immediately after init
-    setTimeout(() => { map.invalidateSize(); drawMarkers(map, hubs); }, 50);
-  }, []);
+  // Keep hubsRef current on every render
+  hubsRef.current = hubs;
 
-  // ── invalidate size when panel re-appears (view toggle fix) ───
-  React.useEffect(() => {
-    if (!visible || !leafRef.current) return;
-    // Double invalidate: once immediately, once after transition settles
-    leafRef.current.invalidateSize();
-    const t = setTimeout(() => { leafRef.current?.invalidateSize(); drawMarkers(leafRef.current, hubs); }, 300);
-    return () => clearTimeout(t);
-  }, [visible]);
-
-  // ── redraw markers whenever hub list changes ───────────────────
-  React.useEffect(() => {
-    if (!leafRef.current) return;
-    drawMarkers(leafRef.current, hubs);
-  }, [hubs]);
-
-  function drawMarkers(map, hubList) {
-    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch(_){} });
-    markersRef.current = [];
-    hubList.forEach((hub, idx) => {
-      const coords = getHubCoords(hub);
-      if (!coords) return;
-      const color = HUB_STATUS_COLOR[hub.status] || '#2563eb';
-      const icon = window.L.divIcon({
-        className: '',
-        html: `<div style="
-          width:22px;height:22px;border-radius:50%;
-          background:${color};
-          border:3px solid #fff;
-          box-shadow:0 2px 10px rgba(0,0,0,.38);
-          cursor:pointer;
-          transition:transform .1s;
-        " onmouseover="this.style.transform='scale(1.3)'" onmouseout="this.style.transform='scale(1)'"></div>`,
-        iconSize:   [22, 22],
-        iconAnchor: [11, 11],
-        popupAnchor:[0, -13],
-      });
-      const marker = window.L.marker(coords, { icon }).addTo(map);
-      marker.on('mouseover', e => {
-        clearTimeout(tooltipTimerRef.current);
-        const pt = map.latLngToContainerPoint(e.latlng);
-        setTooltip({ hub, x: pt.x, y: pt.y });
-      });
-      marker.on('mouseout',  () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
-      marker.on('click',     () => onSelectHub(hub));
-      markersRef.current.push(marker);
-    });
-    // Auto-fit if more than one hub with coords
-    const withCoords = hubList.filter(h => getHubCoords(h));
-    if (withCoords.length > 1) {
-      try {
-        map.fitBounds(
-          window.L.latLngBounds(withCoords.map(h => getHubCoords(h))),
-          { padding:[30,30], maxZoom:10, animate:false }
-        );
-      } catch(_){}
-    }
+  // ── schedule a single draw, debounced 50ms ────────────────────
+  function scheduleDraw() {
+    if (drawScheduled.current) return;
+    drawScheduled.current = true;
+    setTimeout(() => {
+      drawScheduled.current = false;
+      if (leafRef.current && hubsRef.current && hubsRef.current.length > 0) {
+        leafRef.current.invalidateSize();
+        drawMarkers(leafRef.current, hubsRef.current);
+      }
+    }, 50);
   }
 
-  // ── pan to selected hub ────────────────────────────────────────
+  // ── init map once ─────────────────────────────────────────────
+  React.useEffect(() => {
+    if (leafRef.current || !mapRef.current || !window.L) return;
+    const L = window.L;
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+      .setView([20.5937, 78.9629], 5);
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    map.getPane('markerPane').style.zIndex = 650;
+    map.getPane('tooltipPane').style.zIndex = 700;
+    delete window.L.Icon.Default.prototype._getIconUrl;
+    window.L.Icon.Default.mergeOptions({ iconUrl: '', shadowUrl: '', iconRetinaUrl: '' });
+    leafRef.current = map;
+    setTimeout(() => scheduleDraw(), 400);
+  }, []);
+
+  // ── re-draw whenever hubs array changes ───────────────────────
+  React.useEffect(() => {
+    scheduleDraw();
+  }, [hubs]);
+
+  // ── fix size when panel re-appears ────────────────────────────
+  React.useEffect(() => {
+    if (!visible || !leafRef.current) return;
+    setTimeout(() => {
+      leafRef.current && leafRef.current.invalidateSize();
+    }, 100);
+  }, [visible]);
+
+  function placeMarker(map, hub, coords) {
+    const color = HUB_STATUS_COLOR[hub.status] || '#2563eb';
+    // Use CircleMarker — guaranteed to render, no icon loading issues
+    const marker = window.L.circleMarker(coords, {
+      radius: 14,
+      fillColor: color,
+      color: '#ffffff',
+      weight: 3,
+      opacity: 1,
+      fillOpacity: 1,
+      pane: 'markerPane',
+    }).addTo(map);
+    // Permanent label below the dot
+    marker.bindTooltip(hub.name || '', {
+      permanent: true,
+      direction: 'bottom',
+      offset: [0, 10],
+      className: 'hub-map-label',
+    }).openTooltip();
+    marker.on('mouseover', e => {
+      clearTimeout(tooltipTimerRef.current);
+      const pt = map.latLngToContainerPoint(e.latlng);
+      setTooltip({ hub, x: pt.x, y: pt.y });
+    });
+    marker.on('mouseout',  () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
+    marker.on('click',     () => onSelectHub(hub));
+    markersRef.current.push(marker);
+    return coords;
+  }
+
+  async function drawMarkers(map, hubList) {
+    // Clear old markers
+    markersRef.current.forEach(m => { try { map.removeLayer(m); } catch(_){} });
+    markersRef.current = [];
+
+    const allCoords = [];
+    for (const hub of hubList) {
+      let coords = getHubCoords(hub);
+      if (!coords) coords = await geocodeHub(hub);
+      if (!coords) continue;
+      placeMarker(map, hub, coords);
+      allCoords.push(coords);
+    }
+
+    if (allCoords.length === 0) return;
+
+    if (allCoords.length === 1) {
+      map.setView(allCoords[0], 15, { animate: false });
+    } else {
+      map.fitBounds(window.L.latLngBounds(allCoords), { padding:[50,50], maxZoom:13, animate:false });
+    }
+    map.invalidateSize();
+  }
+
+  // ── pan to selected hub (async: geocode if coords missing) ────
   React.useEffect(() => {
     if (!selectedHub || !leafRef.current) return;
-    const c = getHubCoords(selectedHub);
-    if (c) leafRef.current.setView(c, 10, { animate: true });
+    (async () => {
+      let c = getHubCoords(selectedHub);
+      if (!c) c = await geocodeHub(selectedHub);
+      if (c && leafRef.current) leafRef.current.setView(c, 15, { animate: true });
+    })();
   }, [selectedHub]);
 
   const sc = tooltip ? (HUB_STATUS_COLOR[tooltip.hub.status] || '#2563eb') : '#16a34a';
@@ -1081,20 +1170,18 @@ function AdminHubs({ call }) {
       />
       <div>
         <div style={{ fontWeight: 700, fontSize: 13, color: '#374151', marginBottom: 8 }}>
-          🏭 {hubs.length} Hubs · {hubsWithCoords.length} on map
+          🏭 {hubs.length} Hubs · {hubs.length} on map
         </div>
         <div className="hub-list-panel">
           {hubs.map(hub => {
             const color     = HUB_STATUS_COLOR[hub.status] || '#2563eb';
-            const hasCoords = !!getHubCoords(hub);
             return (
               <div key={hub._id}
                 className={'hub-list-item' + (selectedHub?._id === hub._id ? ' selected' : '')}
-                style={{ opacity: hasCoords ? 1 : 0.65 }}
               >
                 <div
-                  onClick={() => { if (hasCoords) setSelectedHub(s => s?._id === hub._id ? null : hub); }}
-                  style={{ cursor: hasCoords ? 'pointer' : 'default' }}
+                  onClick={() => setSelectedHub(s => s?._id === hub._id ? null : hub)}
+                  style={{ cursor: 'pointer' }}
                 >
                   <div className="hub-list-name">{hub.name}</div>
                   <div className="hub-list-city">📍 {hub.city}{hub.address ? ` · ${hub.address.substring(0, 32)}…` : ''}</div>
@@ -1102,7 +1189,7 @@ function AdminHubs({ call }) {
                     <div className="hub-pin-dot" style={{ background: color }} />
                     <span style={{ fontSize: 11, color, fontWeight: 600 }}>{hub.status}</span>
                     <span style={{ fontSize: 11, color: '#9ca3af' }}>· ⚡ {hub.chargerCount ?? 0}</span>
-                    {!hasCoords && <span style={{ fontSize: 10, color: '#d97706' }}>no coords</span>}
+                    {!getHubCoords(hub) && <span style={{ fontSize: 10, color: '#d97706' }}>📡 auto-locating…</span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -1428,9 +1515,8 @@ function FranchiseeMap({ franchisees = [] }) {
     const L = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
+    L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
@@ -1492,7 +1578,7 @@ function FranchiseeMap({ franchisees = [] }) {
       const popupHtml = `
         <div style="min-width:230px;font-family:sans-serif;font-size:13px;line-height:1.55">
           <div style="font-weight:800;font-size:15px;color:#1e3a8a;margin-bottom:6px;display:flex;align-items:center;gap:6px">
-            🏢 ${f.name || 'Franchisee'}
+            🏢 ${f.name || 'Fleet Operator'}
           </div>
           ${a.businessName ? `<div style="color:#2563eb;font-weight:600;margin-bottom:6px">${a.businessName}</div>` : ''}
           <hr style="border:0;border-top:1px solid #e5e7eb;margin:6px 0"/>
@@ -1549,7 +1635,7 @@ function FranchiseeMap({ franchisees = [] }) {
           <span style={{ fontSize:36, marginBottom:10 }}>📍</span>
           <div style={{ color:'#374151', fontWeight:700, fontSize:14 }}>No franchisees mapped yet</div>
           <div style={{ color:'#9ca3af', fontSize:12, marginTop:4 }}>
-            Add latitude &amp; longitude when creating a franchisee to see them here.
+            Add latitude &amp; longitude when creating a fleet operator to see them here.
           </div>
         </div>
       )}
@@ -1560,7 +1646,7 @@ function FranchiseeMap({ franchisees = [] }) {
           border:'1px solid #e5e7eb', fontSize:12, color:'#374151', fontWeight:600,
           boxShadow:'0 2px 8px rgba(0,0,0,0.1)',
         }}>
-          🏢 {mappedCount} / {franchisees.length} franchisee{franchisees.length !== 1 ? 's' : ''} on map
+          🏢 {mappedCount} / {franchisees.length} fleet operator{franchisees.length !== 1 ? 's' : ''} on map
         </div>
       )}
     </div>
@@ -1621,9 +1707,9 @@ function AdminFranchisees({ call }) {
       });
       setList(l => [...l, newFr]);
       setCreated({ name: form.name, email: form.email, password: form.password, businessName: form.businessName, managerName: form.managerName, latitude: form.latitude, longitude: form.longitude });
-      show('✓ Franchisee account created!');
+      show('✓ Fleet Operator account created!');
     } catch (e) {
-      show(e.response?.data?.message || e.message || 'Failed to create franchisee', 'error');
+      show(e.response?.data?.message || e.message || 'Failed to create fleet operator', 'error');
     } finally { setSaving(false); }
   };
 
@@ -1640,9 +1726,9 @@ function AdminFranchisees({ call }) {
   return <>
     <Toast toast={toast} />
     <PageHeader
-      title="Franchisees"
+      title="Fleet Operators"
       sub="All franchise partners across the network."
-      actions={<button className="btn-primary" onClick={openForm}><UserPlus size={15} /> Add Franchisee</button>}
+      actions={<button className="btn-primary" onClick={openForm}><UserPlus size={15} /> Add Fleet Operator</button>}
     />
     <MetricGrid metrics={[
       { label: 'Total Partners',      value: list.length,      Icon: Users,         color: '#2563eb' },
@@ -1654,30 +1740,39 @@ function AdminFranchisees({ call }) {
     ]} />
 
     {/* ── Per-Franchisee Vehicle & Inventory Breakdown ── */}
-    <Card title="Vehicle & Inventory by Franchisee" badge={`${list.length} partners`}>
+    <Card title="Vehicle & Inventory by Fleet Operator" badge={`${list.length} partners`}>
       <div className="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Franchisee</th>
+              <th>Fleet Operator</th>
               <th>Email</th>
               <th style={{ textAlign:'center' }}>Total Vehicles</th>
-              <th style={{ textAlign:'center' }}>Approved</th>
-              <th style={{ textAlign:'center' }}>Pending</th>
+              <th style={{ textAlign:'center' }}>Assigned by Command</th>
+              <th style={{ textAlign:'center' }}>Operator Submitted</th>
+              <th style={{ textAlign:'center' }}>Pending Approval</th>
               <th style={{ textAlign:'center' }}>Status</th>
             </tr>
           </thead>
           <tbody>
             {list.map(f => {
-              const s = statsMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0 };
+              const s = statsMap.get(String(f._id)) || { totalVehicles: 0, approvedVehicles: 0, pendingVehicles: 0, assignedVehicles: 0 };
+              const cmdCount = s.assignedVehicles || 0;
+              const ownApproved = (s.approvedVehicles || 0) - cmdCount;
               return (
                 <tr key={String(f._id)}>
                   <td style={{ fontWeight: 600 }}>{f.name || '—'}</td>
                   <td style={{ color: '#6b7280', fontSize: 12 }}>{f.email}</td>
                   <td style={{ textAlign:'center', fontWeight: 700 }}>{s.totalVehicles}</td>
                   <td style={{ textAlign:'center' }}>
+                    {cmdCount > 0
+                      ? <span style={{ background:'#eff6ff', color:'#1d4ed8', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>{cmdCount}</span>
+                      : <span style={{ color:'#9ca3af', fontSize:12 }}>—</span>
+                    }
+                  </td>
+                  <td style={{ textAlign:'center' }}>
                     <span style={{ background:'#dcfce7', color:'#166534', padding:'2px 10px', borderRadius:6, fontSize:12, fontWeight:700 }}>
-                      {s.approvedVehicles}
+                      {ownApproved > 0 ? ownApproved : '—'}
                     </span>
                   </td>
                   <td style={{ textAlign:'center' }}>
@@ -1700,7 +1795,7 @@ function AdminFranchisees({ call }) {
               );
             })}
             {list.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign:'center', padding:32, color:'#9ca3af' }}>No franchisees yet.</td></tr>
+              <tr><td colSpan={7} style={{ textAlign:'center', padding:32, color:'#9ca3af' }}>No fleet operators yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -1723,17 +1818,17 @@ function AdminFranchisees({ call }) {
       </div>
     </Card>
 
-    <Card title="Franchisee Locations" badge={`${list.filter(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))).length} mapped`}>
+    <Card title="Fleet Operator Locations" badge={`${list.filter(f => Number.isFinite(Number(f.address?.latitude ?? f.address?.lat)) && Number.isFinite(Number(f.address?.longitude ?? f.address?.lng))).length} mapped`}>
       <FranchiseeMap franchisees={list} />
     </Card>
-    <Card title="Franchisee Directory" badge={`${list.length} partners`}>
+    <Card title="Fleet Operator Directory" badge={`${list.length} partners`}>
       <DataTable rows={list} cols={['name', 'email', 'phone', 'active', 'createdAt']} />
     </Card>
 
     {open && (
       <Modal
-        title={created ? 'Franchisee Created!' : 'Add New Franchisee'}
-        subtitle={created ? 'Share credentials with the franchisee' : 'Creates a login for the Franchisee Portal'}
+        title={created ? 'Fleet Operator Created!' : 'Add New Fleet Operator'}
+        subtitle={created ? 'Share credentials with the fleet operator' : 'Creates a login for the Fleet Operator Portal'}
         onClose={() => setOpen(false)}
         footer={
           created
@@ -1741,7 +1836,7 @@ function AdminFranchisees({ call }) {
             : <>
                 <button className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
                 <button className="btn-primary" onClick={submit} disabled={saving}>
-                  {saving ? 'Creating Account…' : <><UserPlus size={14} /> Create Franchisee</>}
+                  {saving ? 'Creating Account…' : <><UserPlus size={14} /> Create Fleet Operator</>}
                 </button>
               </>
         }
@@ -1750,7 +1845,7 @@ function AdminFranchisees({ call }) {
           <div className="success-card">
             <div className="success-icon"><CheckCircle size={32} /></div>
             <h3>Account Created Successfully</h3>
-            <p>The franchisee can now login at the Franchisee Portal with these credentials:</p>
+            <p>The fleet operator can now login at the Fleet Operator Portal with these credentials:</p>
             <div className="cred-box">
               <div className="cred-row"><span>Portal URL</span><code>localhost:5000/franchisee</code></div>
               <div className="cred-row"><span>Name</span><code>{created.name}</code></div>
@@ -1764,7 +1859,7 @@ function AdminFranchisees({ call }) {
         ) : (
           <>
             <InfoBanner Icon={Shield}>
-              This creates a dedicated login account for the Franchisee Portal. The franchisee will have access to their
+              This creates a dedicated login account for the Fleet Operator Portal. The fleet operator will have access to their
               own dashboard, financials, inventory and staff.
             </InfoBanner>
 
@@ -1773,7 +1868,7 @@ function AdminFranchisees({ call }) {
             <Fld label="Full Name" required>
               <Inp value={form.name} onChange={ff('name')} placeholder="e.g. Raj Kumar" />
             </Fld>
-            <Fld label="Email Address" required hint="Used to login to the Franchisee Portal">
+            <Fld label="Email Address" required hint="Used to login to the Fleet Operator Portal">
               <Inp value={form.email} onChange={ff('email')} type="email" placeholder="raj@example.com" />
             </Fld>
             <div className="row-2">
@@ -1808,7 +1903,7 @@ function AdminFranchisees({ call }) {
               <Fld label="Manager Phone" hint="Primary contact number">
                 <Inp value={form.managerPhone} onChange={ff('managerPhone')} type="tel" placeholder="+91 9876543210" />
               </Fld>
-              <Fld label="Franchisee Phone" hint="Alternate / login phone">
+              <Fld label="Fleet Operator Phone" hint="Alternate / login phone">
                 <Inp value={form.phone} onChange={ff('phone')} type="tel" placeholder="+91 9876543210" />
               </Fld>
             </div>
@@ -1859,7 +1954,7 @@ function AdminFranchisees({ call }) {
             </div>
 
             <div className="form-section-label">Additional Notes</div>
-            <Fld label="Notes / Remarks" hint="Internal notes about this franchisee">
+            <Fld label="Notes / Remarks" hint="Internal notes about this fleet operator">
               <Txt value={form.notes} onChange={ff('notes')} placeholder="Any special instructions or remarks…" rows={2} />
             </Fld>
           </>
@@ -2078,13 +2173,13 @@ function AdminExpansion({ call }) {
 }
 
 
-// ── Franchisee Ratings ────────────────────────────────────────────
+// ── Fleet Operator Ratings ────────────────────────────────────────────
 function AdminFranchiseRatings({ call }) {
   const { data, loading, error, refresh } = useFetch(call, '/admin/franchise-ratings');
   if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
-  return <><PageHeader title="Franchisee Ratings" sub="Customer feedback captured after complaints are solved." actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15}/> Refresh</button>}/>
-    <MetricGrid metrics={[{label:'Rated Franchisees',value:data?.length||0,Icon:Users,color:'#2563eb'},{label:'Total Ratings',value:(data||[]).reduce((s,x)=>s+(x.ratingCount||0),0),Icon:BarChart2,color:'#16a34a'},{label:'Network Avg',value:data?.length?((data.reduce((s,x)=>s+(x.averageRating||0)*(x.ratingCount||0),0)/(data.reduce((s,x)=>s+(x.ratingCount||0),0)||1)).toFixed(2)):'0.00',Icon:BarChart2,color:'#d97706'}]}/>
-    <Card title="Franchisee Performance" badge={`${data?.length||0} rated`}><div style={{display:'flex',flexDirection:'column',gap:10}}>{(data||[]).map(r=><div key={String(r._id)} style={{border:'1px solid #e5e7eb',borderRadius:10,padding:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><strong>{r.franchisee?.name||'Franchisee'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:3}}>{r.franchisee?.email||''} · PIN {r.franchisee?.address?.pincode||'—'}</div></div><div style={{fontWeight:800,fontSize:18}}>⭐ {(r.averageRating||0).toFixed(2)} <span style={{fontSize:11,fontWeight:500,color:'#64748b'}}>({r.ratingCount} ratings)</span></div></div>)}</div></Card>
+  return <><PageHeader title="Fleet Operator Ratings" sub="Customer feedback captured after complaints are solved." actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={15}/> Refresh</button>}/>
+    <MetricGrid metrics={[{label:'Rated Fleet Operators',value:data?.length||0,Icon:Users,color:'#2563eb'},{label:'Total Ratings',value:(data||[]).reduce((s,x)=>s+(x.ratingCount||0),0),Icon:BarChart2,color:'#16a34a'},{label:'Network Avg',value:data?.length?((data.reduce((s,x)=>s+(x.averageRating||0)*(x.ratingCount||0),0)/(data.reduce((s,x)=>s+(x.ratingCount||0),0)||1)).toFixed(2)):'0.00',Icon:BarChart2,color:'#d97706'}]}/>
+    <Card title="Fleet Operator Performance" badge={`${data?.length||0} rated`}><div style={{display:'flex',flexDirection:'column',gap:10}}>{(data||[]).map(r=><div key={String(r._id)} style={{border:'1px solid #e5e7eb',borderRadius:10,padding:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,flexWrap:'wrap'}}><div><strong>{r.franchisee?.name||'Fleet Operator'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:3}}>{r.franchisee?.email||''} · PIN {r.franchisee?.address?.pincode||'—'}</div></div><div style={{fontWeight:800,fontSize:18}}>⭐ {(r.averageRating||0).toFixed(2)} <span style={{fontSize:11,fontWeight:500,color:'#64748b'}}>({r.ratingCount} ratings)</span></div></div>)}</div></Card>
   </>;
 }
 
@@ -2120,63 +2215,123 @@ function AdminPendingBanner({ call }) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// VEHICLE & INVENTORY BY FRANCHISEE — full detail view
+// INVENTORY MANAGEMENT — Command Center creates vehicles & spare parts,
+// then assigns vehicles to fleet operators
 // ══════════════════════════════════════════════════════════════════
 function AdminVehicleInventory({ call }) {
-  const { data: franchiseeList, loading: flLoading } = useFetch(call, '/admin/franchisees');
-  const { data: statsData,      loading: sdLoading } = useFetch(call, '/admin/franchisee-stats');
-  const { data: allVehicles,    loading: avLoading } = useFetch(call, '/admin/pending-vehicles');
-  const { data: allPartsData,   loading: apLoading } = useFetch(call, '/admin/all-parts');
-  const [activeTab,     setActiveTab]     = useState('vehicles');
-  const [selectedFr,    setSelectedFr]    = useState('all');
-  const [selectedVeh,   setSelectedVeh]   = useState(null);
-  const [selectedPart,  setSelectedPart]  = useState(null);
+  const { data: franchiseeList } = useFetch(call, '/admin/franchisees');
+  const [vehicles,     setVehicles]     = useState([]);
+  const [loadingVeh,   setLoadingVeh]   = useState(true);
+  const [parts,        setParts]        = useState([]);
+  const [loadingParts, setLoadingParts] = useState(true);
+  const [activeTab,    setActiveTab]    = useState('vehicles');
+  const [showAddVeh,   setShowAddVeh]   = useState(false);
+  const [showAddPart,  setShowAddPart]  = useState(false);
+  const [assignVeh,    setAssignVeh]    = useState(null);
+  const [assignToId,   setAssignToId]   = useState('');
+  const [assigning,    setAssigning]    = useState(false);
+  const [selectedVeh,  setSelectedVeh]  = useState(null);
+  const [selectedPart, setSelectedPart] = useState(null);
   const { toast, show } = useToast();
 
-  if (flLoading || sdLoading || avLoading || apLoading) return <Loader />;
+  // Vehicle form
+  const EMPTY_VEH = { category:'', make:'', model:'', year:'', color:'', registrationNo:'', batteryCapacityKwh:'', rangeKm:'', chargingType:'', pricePerDay:'', quantity:'1', description:'' };
+  const [vehForm, setVehForm] = useState(EMPTY_VEH);
+  const [savingVeh, setSavingVeh] = useState(false);
+  const vf = k => e => setVehForm(f => ({ ...f, [k]: e.target.value }));
 
-  const franchisees  = franchiseeList || [];
-  const statsMap     = new Map((statsData?.franchisees || []).map(s => [s.franchiseeId, s]));
-  const inv          = statsData?.inventory || { totalSkus: 0, totalQty: 0, totalValue: 0 };
-  const vehicles     = allVehicles || [];
-  const allParts     = allPartsData || [];
+  // Part form
+  const EMPTY_PART = { sku:'', name:'', category:'', manufacturer:'', quantity:'', reorderLevel:'5', unitPrice:'', description:'' };
+  const [partForm, setPartForm] = useState(EMPTY_PART);
+  const [savingPart, setSavingPart] = useState(false);
+  const pf = k => e => setPartForm(f => ({ ...f, [k]: e.target.value }));
 
-  const filteredVehicles = selectedFr === 'all'
-    ? vehicles
-    : vehicles.filter(v => v.franchiseeEmail === selectedFr || v.franchiseeId === selectedFr);
+  const loadVehicles = () => {
+    setLoadingVeh(true);
+    call('/admin/vehicles').then(d => { setVehicles(d || []); setLoadingVeh(false); }).catch(() => setLoadingVeh(false));
+  };
+  const loadParts = () => {
+    setLoadingParts(true);
+    call('/admin/all-parts').then(d => { setParts(d || []); setLoadingParts(false); }).catch(() => setLoadingParts(false));
+  };
+  useEffect(() => { loadVehicles(); }, []);
+  useEffect(() => { loadParts(); }, []);
 
-  const approved  = vehicles.filter(v => v.status === 'APPROVED');
-  const pending   = vehicles.filter(v => v.status === 'PENDING_APPROVAL');
-  const totalVeh  = (statsData?.franchisees || []).reduce((s, f) => s + f.totalVehicles, 0);
+  const saveVehicle = async () => {
+    if (!vehForm.make.trim() || !vehForm.model.trim()) { show('Make and Model are required', 'error'); return; }
+    setSavingVeh(true);
+    try {
+      const payload = { ...vehForm, batteryCapacityKwh: Number(vehForm.batteryCapacityKwh)||undefined, rangeKm: Number(vehForm.rangeKm)||undefined, pricePerDay: Number(vehForm.pricePerDay)||0, quantity: Number(vehForm.quantity)||1 };
+      const v = await call('/admin/vehicles', { method:'post', data:payload });
+      setVehicles(prev => [v, ...prev]);
+      setShowAddVeh(false); setVehForm(EMPTY_VEH);
+      show('✓ Vehicle added to inventory!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to add vehicle', 'error'); }
+    finally { setSavingVeh(false); }
+  };
 
-  const totalPartsValue = allParts.reduce((s, p) => s + (Number(p.unitPrice || 0) * Number(p.quantity || 0)), 0);
-  const lowStockParts   = allParts.filter(p => p.quantity <= p.reorderLevel);
+  const savePart = async () => {
+    if (!partForm.sku.trim() || !partForm.name.trim()) { show('SKU and Part Name are required', 'error'); return; }
+    setSavingPart(true);
+    try {
+      const payload = { ...partForm, quantity: Number(partForm.quantity)||0, reorderLevel: Number(partForm.reorderLevel)||5, unitPrice: Number(partForm.unitPrice)||0 };
+      const p = await call('/admin/parts', { method:'post', data:payload });
+      setParts(prev => [p, ...prev]);
+      setShowAddPart(false); setPartForm(EMPTY_PART);
+      show('✓ Spare part added to inventory!');
+    } catch (e) { show(e.response?.data?.message || 'Failed to add part', 'error'); }
+    finally { setSavingPart(false); }
+  };
 
+  const doAssign = async () => {
+    if (!assignToId) { show('Please select a fleet operator', 'error'); return; }
+    setAssigning(true);
+    try {
+      const updated = await call(`/admin/vehicles/${assignVeh._id}/assign`, { method:'put', data:{ fleetOperatorId: assignToId } });
+      setVehicles(prev => prev.map(v => v._id === updated._id ? updated : v));
+      setAssignVeh(null); setAssignToId('');
+      show('✓ Vehicle assigned! It now appears in the fleet operator\'s inventory.');
+    } catch (e) { show(e.response?.data?.message || 'Assignment failed', 'error'); }
+    finally { setAssigning(false); }
+  };
+
+  const operators = franchiseeList || [];
+  const assigned   = vehicles.filter(v => v.franchiseeId);
+  const unassigned = vehicles.filter(v => !v.franchiseeId);
+  const lowStockParts = parts.filter(p => p.quantity <= p.reorderLevel);
   const TABS = [
-    { id: 'vehicles', label: 'Vehicles by Franchisee', Icon: Car,     count: vehicles.length },
-    { id: 'inventory', label: 'Parts Inventory',        Icon: Package, count: allParts.length },
+    { id:'vehicles', label:'Vehicles',    Icon:Car,     count:vehicles.length },
+    { id:'parts',    label:'Spare Parts', Icon:Package, count:parts.length },
   ];
-
-  const fmt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+  const fmt = d => d ? new Date(d).toLocaleString('en-IN',{ day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
 
   return <>
     <Toast toast={toast} />
     <PageHeader
-      title="Vehicle & Inventory by Franchisee"
-      sub="Complete network view — all vehicles and parts inventory across all franchise partners."
-      actions={<button className="btn-ghost" onClick={() => window.location.reload()}><RefreshCw size={15} /> Refresh</button>}
+      title="Inventory Management"
+      sub="Create vehicles and spare parts from the Command Center — assign vehicles to fleet operators to make them available for customers."
+      actions={
+        <div style={{ display:'flex', gap:8 }}>
+          <button className="btn-ghost" onClick={() => { setShowAddPart(true); setActiveTab('parts'); }}>
+            <Package size={15} /> Add Spare Part
+          </button>
+          <button className="btn-primary" onClick={() => { setShowAddVeh(true); setActiveTab('vehicles'); }}>
+            <Plus size={15} /> Add Vehicle
+          </button>
+        </div>
+      }
     />
 
     <MetricGrid metrics={[
-      { label: 'Total Partners',      value: franchisees.length, Icon: Users,         color: '#2563eb' },
-      { label: 'Total Vehicles',      value: totalVeh,           Icon: Car,           color: '#7c3aed' },
-      { label: 'Approved & Live',     value: approved.length,    Icon: CheckCircle,   color: '#16a34a' },
-      { label: 'Pending Approval',    value: pending.length,     Icon: Clock,         color: '#d97706' },
-      { label: 'Parts SKUs (Network)',value: inv.totalSkus,      Icon: Package,       color: '#0891b2' },
-      { label: 'Parts Stock (Units)', value: inv.totalQty,       Icon: Layers,        color: '#4f46e5' },
+      { label: 'Total Vehicles',   value: vehicles.length,       Icon: Car,           color: '#2563eb' },
+      { label: 'Assigned',         value: assigned.length,       Icon: CheckCircle,   color: '#16a34a' },
+      { label: 'Unassigned',       value: unassigned.length,     Icon: Clock,         color: '#d97706' },
+      { label: 'Fleet Operators',  value: operators.length,      Icon: Users,         color: '#7c3aed' },
+      { label: 'Spare Parts SKUs', value: parts.length,          Icon: Package,       color: '#0891b2' },
+      { label: 'Low Stock Parts',  value: lowStockParts.length,  Icon: AlertTriangle, color: '#dc2626' },
     ]} />
 
-    {/* ── Subtab Bar ── */}
+    {/* ── Tab bar ── */}
     <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
       {TABS.map(t => (
         <button key={t.id} onClick={() => setActiveTab(t.id)}
@@ -2190,212 +2345,357 @@ function AdminVehicleInventory({ call }) {
           }}>
           <t.Icon size={15} />
           {t.label}
-          <span style={{
-            background: activeTab === t.id ? '#2563eb' : '#e5e7eb',
-            color: activeTab === t.id ? '#fff' : '#374151',
-            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
-          }}>{t.count}</span>
+          <span style={{ background: activeTab === t.id ? '#2563eb' : '#e5e7eb', color: activeTab === t.id ? '#fff' : '#374151', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{t.count}</span>
         </button>
       ))}
     </div>
 
     {/* ── VEHICLES TAB ── */}
     {activeTab === 'vehicles' && <>
-      {/* Franchisee filter */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
-        <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>Filter by Franchisee:</span>
-        <select
-          className="fld-input"
-          style={{ maxWidth:280, padding:'6px 12px', fontSize:13 }}
-          value={selectedFr}
-          onChange={e => setSelectedFr(e.target.value)}
-        >
-          <option value="all">All Franchisees ({vehicles.length} vehicles)</option>
-          {franchisees.map(f => {
-            const count = vehicles.filter(v => v.franchiseeEmail === f.email || v.franchiseeId === String(f._id)).length;
-            return <option key={f._id} value={f.email}>{f.name} — {f.email} ({count} vehicles)</option>;
-          })}
-        </select>
-        {selectedFr !== 'all' && (
-          <button className="btn-ghost" style={{ fontSize:12, padding:'4px 10px' }} onClick={() => setSelectedFr('all')}>
-            Clear Filter
-          </button>
-        )}
-      </div>
-
-      <Card title="Vehicle Listings" badge={`${filteredVehicles.length} vehicles`}>
-        {filteredVehicles.length === 0
-          ? <div className="empty-state"><Car size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No vehicles found.</p></div>
-          : <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Franchisee</th>
-                    <th>Category</th>
-                    <th>Make</th>
-                    <th>Model</th>
-                    <th>Registration No.</th>
-                    <th>Color</th>
-                    <th>Year</th>
-                    <th>Battery</th>
-                    <th>Range</th>
-                    <th>Charging</th>
-                    <th>Price</th>
-                    <th>Qty</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredVehicles.map((v, i) => {
-                    const sc = v.status === 'APPROVED' ? '#16a34a' : v.status === 'REJECTED' ? '#dc2626' : '#d97706';
-                    return (
-                      <tr key={v._id || i}>
-                        <td>
-                          <div style={{ fontWeight:600, fontSize:12 }}>{v.franchiseeName || '—'}</div>
-                          <div style={{ fontSize:11, color:'#9ca3af' }}>{v.franchiseeEmail || ''}</div>
-                        </td>
-                        <td style={{ fontSize:12 }}>{v.category || '—'}</td>
-                        <td style={{ fontWeight:600, fontSize:13 }}>{v.make || '—'}</td>
-                        <td style={{ fontSize:13 }}>{v.model || '—'}</td>
-                        <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
-                        <td style={{ fontSize:12 }}>{v.color || '—'}</td>
-                        <td style={{ fontSize:12 }}>{v.year || '—'}</td>
-                        <td style={{ fontSize:12 }}>{v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}</td>
-                        <td style={{ fontSize:12 }}>{v.rangeKm ? `${v.rangeKm} km` : '—'}</td>
-                        <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
-                        <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
-                        <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
-                        <td>
-                          <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:11 }}>
-                            {v.status === 'APPROVED' ? '✓ Approved' : v.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending'}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:11 }}
-                            onClick={() => setSelectedVeh(v)}>
-                            View Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+      {unassigned.length > 0 && (
+        <InfoBanner type="warning" Icon={AlertTriangle}>
+          {unassigned.length} vehicle(s) have not been assigned to any fleet operator yet. Click <strong>→ Assign</strong> to assign them.
+        </InfoBanner>
+      )}
+      <Card
+        title="Command Center Vehicles"
+        badge={`${vehicles.length} vehicles`}
+        action={<button className="btn-primary" style={{ fontSize:12, padding:'5px 14px' }} onClick={() => setShowAddVeh(true)}><Plus size={13} /> Add Vehicle</button>}
+      >
+        {loadingVeh
+          ? <Loader />
+          : vehicles.length === 0
+            ? <div className="empty-state"><Car size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No vehicles yet. Click <strong>Add Vehicle</strong> to create your first vehicle.</p></div>
+            : <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th>
+                      <th>Category</th>
+                      <th>Reg. No.</th>
+                      <th>Battery / Range</th>
+                      <th>Charging</th>
+                      <th>Price</th>
+                      <th>Qty</th>
+                      <th>Assigned To</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vehicles.map((v, i) => {
+                      const isAssigned = !!v.franchiseeId;
+                      return (
+                        <tr key={v._id || i}>
+                          <td>
+                            <div style={{ fontWeight:700, fontSize:13 }}>{v.make} {v.model}</div>
+                            <div style={{ fontSize:11, color:'#9ca3af' }}>{v.year}{v.year && v.color ? ' · ' : ''}{v.color}</div>
+                          </td>
+                          <td style={{ fontSize:12 }}>{v.category || '—'}</td>
+                          <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
+                          <td style={{ fontSize:12 }}>
+                            {v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}
+                            {v.rangeKm ? ` / ${v.rangeKm} km` : ''}
+                          </td>
+                          <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
+                          <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
+                          <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
+                          <td>
+                            {isAssigned
+                              ? <div>
+                                  <div style={{ fontSize:12, fontWeight:700, color:'#16a34a' }}>✓ {v.franchiseeName || '—'}</div>
+                                  <div style={{ fontSize:11, color:'#9ca3af' }}>{v.franchiseeEmail || ''}</div>
+                                </div>
+                              : <span style={{ fontSize:12, color:'#d97706', fontWeight:600 }}>⏳ Not assigned</span>
+                            }
+                          </td>
+                          <td>
+                            <div style={{ display:'flex', gap:6 }}>
+                              <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:11 }} onClick={() => setSelectedVeh(v)}>View</button>
+                              <button style={{
+                                padding:'3px 12px', fontSize:11, cursor:'pointer', fontWeight:700, borderRadius:6,
+                                border: isAssigned ? '1px solid #2563eb' : 'none',
+                                background: isAssigned ? '#eff6ff' : '#2563eb',
+                                color: isAssigned ? '#2563eb' : '#fff',
+                              }}
+                                onClick={() => { setAssignVeh(v); setAssignToId(v.franchiseeId ? String(v.franchiseeId) : ''); }}>
+                                {isAssigned ? '⟳ Reassign' : '→ Assign'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
         }
       </Card>
-
     </>}
 
-    {/* ── INVENTORY TAB ── */}
-    {activeTab === 'inventory' && <>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:16 }}>
-        {[
-          { label:'Total Vehicles',      value: totalVeh,                                                                           Icon: Car,           color:'#2563eb' },
-          { label:'Parts SKUs',          value: allParts.length,                                                                    Icon: Package,       color:'#7c3aed' },
-          { label:'Approved & Live',     value: approved.length,                                                                    Icon: CheckCircle,   color:'#16a34a' },
-          { label:'Low Stock Parts',     value: lowStockParts.length,                                                               Icon: AlertTriangle, color:'#dc2626' },
-        ].map(({ label, value, Icon: Ic, color }) => (
-          <div key={label} style={{ background:'#fff', borderRadius:12, padding:'18px 20px', border:'1.5px solid #e5e7eb', display:'flex', alignItems:'center', gap:14 }}>
-            <div style={{ background: color + '15', borderRadius:10, width:42, height:42, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-              <Ic size={20} color={color} />
-            </div>
+    {/* ── SPARE PARTS TAB ── */}
+    {activeTab === 'parts' && (
+      <Card
+        title="Spare Parts Inventory"
+        badge={`${parts.length} SKUs`}
+        action={<button className="btn-primary" style={{ fontSize:12, padding:'5px 14px' }} onClick={() => setShowAddPart(true)}><Plus size={13} /> Add Spare Part</button>}
+      >
+        {loadingParts
+          ? <Loader />
+          : parts.length === 0
+            ? <div className="empty-state"><Package size={40} style={{ opacity:.2, marginBottom:12 }} /><p>No spare parts yet. Click <strong>Add Spare Part</strong> to begin tracking inventory.</p></div>
+            : <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Part Code (SKU)</th>
+                      <th>Part Name</th>
+                      <th>Category</th>
+                      <th>Manufacturer</th>
+                      <th>Quantity</th>
+                      <th>Reorder Level</th>
+                      <th>Unit Price</th>
+                      <th>Stock Status</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parts.map((p, i) => {
+                      const isLow = p.quantity <= p.reorderLevel;
+                      return (
+                        <tr key={p._id || p.sku || i}>
+                          <td><span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8', background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>{p.sku || '—'}</span></td>
+                          <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
+                          <td><span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px', borderRadius:4, color:'#374151' }}>{p.category || 'General'}</span></td>
+                          <td style={{ fontSize:12, color:'#6b7280' }}>{p.manufacturer || '—'}</td>
+                          <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>{p.quantity ?? 0}</td>
+                          <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
+                          <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
+                          <td><span className="status-pill" style={{ background: isLow ? '#fee2e2' : '#dcfce7', color: isLow ? '#991b1b' : '#166534' }}>{isLow ? '⚠ Low Stock' : '✓ In Stock'}</span></td>
+                          <td><button className="btn-ghost" style={{ padding:'3px 10px', fontSize:11 }} onClick={() => setSelectedPart(p)}>View Details</button></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+        }
+      </Card>
+    )}
+
+    {/* ══ ADD VEHICLE MODAL ══ */}
+    {showAddVeh && (
+      <div className="modal-overlay" onClick={() => setShowAddVeh(false)}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(680px,100%)' }}>
+          <div className="modal-head">
             <div>
-              <div style={{ fontSize:11, fontWeight:700, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{label}</div>
-              <div style={{ fontSize:24, fontWeight:900, color }}>{value ?? 0}</div>
+              <div className="modal-title">Add Vehicle to Inventory</div>
+              <div className="modal-subtitle">Enter complete vehicle details — you can assign it to a fleet operator after saving</div>
+            </div>
+            <button className="icon-btn" onClick={() => setShowAddVeh(false)}><X size={20} /></button>
+          </div>
+          <div className="modal-body">
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+              <div className="fld">
+                <label className="fld-label">Category <span style={{color:'#dc2626'}}>*</span></label>
+                <select className="fld-input" value={vehForm.category} onChange={vf('category')}>
+                  <option value="">— Select —</option>
+                  <option>2-wheeler</option><option>3-wheeler</option><option>4-wheeler</option><option>Commercial</option>
+                </select>
+              </div>
+              <div className="fld">
+                <label className="fld-label">Make / Brand <span style={{color:'#dc2626'}}>*</span></label>
+                <input className="fld-input" placeholder="e.g. Ather" value={vehForm.make} onChange={vf('make')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Model Name <span style={{color:'#dc2626'}}>*</span></label>
+                <input className="fld-input" placeholder="e.g. 450X" value={vehForm.model} onChange={vf('model')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Year of Manufacture</label>
+                <input className="fld-input" placeholder="e.g. 2024" value={vehForm.year} onChange={vf('year')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Color</label>
+                <input className="fld-input" placeholder="e.g. Midnight Blue" value={vehForm.color} onChange={vf('color')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Registration No.</label>
+                <input className="fld-input" placeholder="e.g. TN09AB1234" value={vehForm.registrationNo} onChange={vf('registrationNo')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Battery Capacity (kWh)</label>
+                <input className="fld-input" type="number" placeholder="e.g. 2.9" value={vehForm.batteryCapacityKwh} onChange={vf('batteryCapacityKwh')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Range (km)</label>
+                <input className="fld-input" type="number" placeholder="e.g. 116" value={vehForm.rangeKm} onChange={vf('rangeKm')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Charging Type</label>
+                <select className="fld-input" value={vehForm.chargingType} onChange={vf('chargingType')}>
+                  <option value="">— Select —</option>
+                  <option>Fast Charging</option><option>Normal Charging</option><option>Swappable Battery</option>
+                </select>
+              </div>
+              <div className="fld">
+                <label className="fld-label">Price per Unit (₹) <span style={{color:'#dc2626'}}>*</span></label>
+                <input className="fld-input" type="number" placeholder="e.g. 125000" value={vehForm.pricePerDay} onChange={vf('pricePerDay')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Quantity</label>
+                <input className="fld-input" type="number" min="1" placeholder="1" value={vehForm.quantity} onChange={vf('quantity')} />
+              </div>
+            </div>
+            <div className="fld" style={{ marginTop:10 }}>
+              <label className="fld-label">Description / Notes</label>
+              <textarea className="fld-input" rows={3} placeholder="Additional features or notes…" value={vehForm.description} onChange={vf('description')} />
             </div>
           </div>
-        ))}
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setShowAddVeh(false)}>Cancel</button>
+            <button className="btn-primary" onClick={saveVehicle} disabled={savingVeh}>
+              {savingVeh ? 'Saving…' : <><Save size={14} /> Save Vehicle</>}
+            </button>
+          </div>
+        </div>
       </div>
+    )}
 
-      <Card
-        title="Parts Inventory"
-        badge={`${allParts.length} SKUs`}
-      >
-        {allParts.length === 0
-          ? <div className="empty-state" style={{ padding:'32px 24px' }}>
-              <Package size={38} style={{ opacity:.2, marginBottom:10 }} />
-              <p>No parts in inventory yet. Parts added by franchisees will appear here.</p>
+    {/* ══ ADD SPARE PART MODAL ══ */}
+    {showAddPart && (
+      <div className="modal-overlay" onClick={() => setShowAddPart(false)}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(580px,100%)' }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Add Spare Part</div>
+              <div className="modal-subtitle">Add a spare part to the Command Center inventory</div>
             </div>
-          : <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Part Code (SKU)</th>
-                    <th>Part Name</th>
-                    <th>Category</th>
-                    <th>Quantity</th>
-                    <th>Reorder Level</th>
-                    <th>Unit Price</th>
-                    <th>Stock Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allParts.map((p, i) => {
-                    const isLow = p.quantity <= p.reorderLevel;
-                    return (
-                      <tr key={p._id || p.sku || i}>
-                        <td>
-                          <span style={{ fontFamily:'monospace', fontWeight:700, color:'#1d4ed8',
-                            background:'#eff6ff', padding:'2px 8px', borderRadius:5, fontSize:12 }}>
-                            {p.sku || '—'}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight:600 }}>{p.name || '—'}</td>
-                        <td>
-                          <span style={{ fontSize:11, background:'#f3f4f6', padding:'2px 7px',
-                            borderRadius:4, color:'#374151' }}>
-                            {p.category || 'General'}
-                          </span>
-                        </td>
-                        <td style={{ fontWeight:700, color: isLow ? '#dc2626' : '#16a34a' }}>
-                          {p.quantity ?? 0}
-                        </td>
-                        <td style={{ color:'#6b7280' }}>{p.reorderLevel ?? 5}</td>
-                        <td>₹{Number(p.unitPrice || 0).toLocaleString('en-IN')}</td>
-                        <td>
-                          <span className="status-pill" style={{
-                            background: isLow ? '#fee2e2' : '#dcfce7',
-                            color:      isLow ? '#991b1b' : '#166534',
-                          }}>
-                            {isLow ? '⚠ Low Stock' : '✓ In Stock'}
-                          </span>
-                        </td>
-                        <td>
-                          <button className="btn-ghost" style={{ padding:'3px 10px', fontSize:12 }}
-                            onClick={() => setSelectedPart(p)}>
-                            View Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <button className="icon-btn" onClick={() => setShowAddPart(false)}><X size={20} /></button>
+          </div>
+          <div className="modal-body">
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+              <div className="fld">
+                <label className="fld-label">Part Code (SKU) <span style={{color:'#dc2626'}}>*</span></label>
+                <input className="fld-input" placeholder="e.g. BAT-CELL-4801" value={partForm.sku} onChange={pf('sku')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Part Name <span style={{color:'#dc2626'}}>*</span></label>
+                <input className="fld-input" placeholder="e.g. Battery Cell Pack" value={partForm.name} onChange={pf('name')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Category</label>
+                <select className="fld-input" value={partForm.category} onChange={pf('category')}>
+                  <option value="">— Select —</option>
+                  <option>Battery &amp; Charging</option><option>Motor &amp; Drive</option>
+                  <option>Brakes &amp; Suspension</option><option>Tyres &amp; Wheels</option>
+                  <option>Body &amp; Frame</option><option>Electronics &amp; Controls</option>
+                  <option>Lighting</option><option>Fasteners &amp; Hardware</option>
+                  <option>General</option><option>Other</option>
+                </select>
+              </div>
+              <div className="fld">
+                <label className="fld-label">Manufacturer</label>
+                <input className="fld-input" placeholder="e.g. LG Energy" value={partForm.manufacturer} onChange={pf('manufacturer')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Quantity in Stock</label>
+                <input className="fld-input" type="number" min="0" placeholder="0" value={partForm.quantity} onChange={pf('quantity')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Reorder Level</label>
+                <input className="fld-input" type="number" min="0" placeholder="5" value={partForm.reorderLevel} onChange={pf('reorderLevel')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Unit Price (₹)</label>
+                <input className="fld-input" type="number" min="0" placeholder="0" value={partForm.unitPrice} onChange={pf('unitPrice')} />
+              </div>
             </div>
-        }
-      </Card>
-    </>}
+            <div className="fld" style={{ marginTop:10 }}>
+              <label className="fld-label">Description / Notes</label>
+              <textarea className="fld-input" rows={2} placeholder="Optional notes…" value={partForm.description} onChange={pf('description')} />
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setShowAddPart(false)}>Cancel</button>
+            <button className="btn-primary" onClick={savePart} disabled={savingPart}>
+              {savingPart ? 'Saving…' : <><Save size={14} /> Add to Inventory</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
-    {/* ── Vehicle Detail Modal ── */}
+    {/* ══ ASSIGN VEHICLE MODAL ══ */}
+    {assignVeh && (
+      <div className="modal-overlay" onClick={() => { setAssignVeh(null); setAssignToId(''); }}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(500px,100%)' }}>
+          <div className="modal-head">
+            <div>
+              <div className="modal-title">Assign to Fleet Operator</div>
+              <div className="modal-subtitle">{assignVeh.make} {assignVeh.model}{assignVeh.registrationNo ? ` · ${assignVeh.registrationNo}` : ''}</div>
+            </div>
+            <button className="icon-btn" onClick={() => { setAssignVeh(null); setAssignToId(''); }}><X size={20} /></button>
+          </div>
+          <div className="modal-body">
+            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10, padding:'14px 18px', marginBottom:18, display:'flex', alignItems:'center', gap:14 }}>
+              <div style={{ background:'#2563eb', color:'#fff', borderRadius:10, width:46, height:46, display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, flexShrink:0 }}>
+                {assignVeh.category === '2-wheeler' ? '🛵' : assignVeh.category === '3-wheeler' ? '🛺' : '🚗'}
+              </div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:16, color:'#1e3a8a' }}>{assignVeh.make} {assignVeh.model}</div>
+                <div style={{ fontSize:12, color:'#3b82f6', marginTop:2 }}>{assignVeh.category}{assignVeh.year ? ` · ${assignVeh.year}` : ''}{assignVeh.color ? ` · ${assignVeh.color}` : ''}</div>
+                <div style={{ fontSize:12, color:'#6b7280', marginTop:1 }}>₹{Number(assignVeh.pricePerDay || 0).toLocaleString('en-IN')} · Qty: {assignVeh.quantity ?? 1}</div>
+              </div>
+            </div>
+
+            {assignVeh.franchiseeId && (
+              <InfoBanner type="warning" Icon={AlertTriangle}>
+                Currently assigned to <strong>{assignVeh.franchiseeName}</strong>. Selecting a new operator will reassign it.
+              </InfoBanner>
+            )}
+
+            <div className="fld">
+              <label className="fld-label">Select Fleet Operator <span style={{color:'#dc2626'}}>*</span></label>
+              <select className="fld-input" value={assignToId} onChange={e => setAssignToId(e.target.value)}>
+                <option value="">— Select Fleet Operator —</option>
+                {operators.map(op => (
+                  <option key={op._id} value={op._id}>
+                    {op.name} · {op.email}{op.address?.city ? ` · ${op.address.city}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {assignToId && (
+              <InfoBanner Icon={CheckCircle}>
+                After assigning, this vehicle will appear in the fleet operator's <strong>Inventory</strong> and will be visible to their customers.
+              </InfoBanner>
+            )}
+          </div>
+          <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => { setAssignVeh(null); setAssignToId(''); }}>Cancel</button>
+            <button className="btn-primary" onClick={doAssign} disabled={assigning || !assignToId}>
+              {assigning ? 'Assigning…' : '→ Assign to Fleet Operator'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ VEHICLE DETAIL MODAL ══ */}
     {selectedVeh && (
       <div className="modal-overlay" onClick={() => setSelectedVeh(null)}>
-        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(640px,100%)' }}>
+        <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(620px,100%)' }}>
           <div className="modal-head">
             <div>
               <div className="modal-title">Vehicle Details</div>
-              <div className="modal-subtitle">Complete vehicle information submitted by franchisee</div>
+              <div className="modal-subtitle">{selectedVeh.make} {selectedVeh.model}</div>
             </div>
             <button className="icon-btn" onClick={() => setSelectedVeh(null)}><X size={20} /></button>
           </div>
           <div className="modal-body">
-            {/* Hero */}
-            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
-              padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
-              <div style={{ background:'#2563eb', color:'#fff', borderRadius:10,
-                width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 }}>
+            <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12, padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+              <div style={{ background:'#2563eb', color:'#fff', borderRadius:10, width:52, height:52, display:'flex', alignItems:'center', justifyContent:'center', fontSize:24 }}>
                 {selectedVeh.category === '2-wheeler' ? '🛵' : selectedVeh.category === '3-wheeler' ? '🛺' : '🚗'}
               </div>
               <div>
@@ -2404,52 +2704,28 @@ function AdminVehicleInventory({ call }) {
                 <div style={{ fontSize:12, color:'#3b82f6', marginTop:2, fontFamily:'monospace' }}>{selectedVeh.registrationNo || '—'}</div>
               </div>
             </div>
-
-            {/* Status + badges */}
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
-              {(() => {
-                const sc = selectedVeh.status === 'APPROVED' ? '#16a34a' : selectedVeh.status === 'REJECTED' ? '#dc2626' : '#d97706';
-                const sl = selectedVeh.status === 'APPROVED' ? '✓ Approved & Live' : selectedVeh.status === 'REJECTED' ? '✗ Rejected' : '⏳ Pending Approval';
-                return <span className="status-pill" style={{ background: sc + '18', color: sc, fontSize:13, padding:'4px 14px' }}>{sl}</span>;
-              })()}
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+              <span className="status-pill" style={{ background:'#dcfce7', color:'#166534', fontSize:13, padding:'4px 14px' }}>✓ In Inventory</span>
+              {selectedVeh.franchiseeName && <span className="status-pill" style={{ background:'#eff6ff', color:'#2563eb', fontSize:13, padding:'4px 14px' }}>Assigned: {selectedVeh.franchiseeName}</span>}
+              {!selectedVeh.franchiseeId && <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>⏳ Not yet assigned</span>}
               {selectedVeh.year && <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>Year: {selectedVeh.year}</span>}
-              {selectedVeh.color && <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>{selectedVeh.color}</span>}
-              {selectedVeh.chargingType && <span className="status-pill" style={{ background:'#ecfdf5', color:'#065f46', fontSize:13, padding:'4px 14px' }}>⚡ {selectedVeh.chargingType}</span>}
+              {selectedVeh.color && <span className="status-pill" style={{ background:'#f3f4f6', color:'#374151', fontSize:13, padding:'4px 14px' }}>{selectedVeh.color}</span>}
             </div>
-
-            {/* Images */}
-            {selectedVeh.images?.length > 0 && (
-              <div style={{ marginBottom:16 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Vehicle Images ({selectedVeh.images.length})</div>
-                <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                  {selectedVeh.images.map((img, i) => (
-                    <div key={i} style={{ width:80, height:64, borderRadius:8, overflow:'hidden', border:'1px solid #e5e7eb' }}>
-                      <img src={img.url} alt={`Image ${i+1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* All Fields Grid */}
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:14 }}>
               {[
-                ['Make / Brand',        selectedVeh.make              || '—'],
-                ['Model Name',          selectedVeh.model             || '—'],
-                ['Category',            selectedVeh.category          || '—'],
-                ['Year of Manufacture', selectedVeh.year              || '—'],
-                ['Color',               selectedVeh.color             || '—'],
-                ['Registration No.',    selectedVeh.registrationNo    || '—'],
+                ['Make / Brand',        selectedVeh.make || '—'],
+                ['Model Name',          selectedVeh.model || '—'],
+                ['Category',            selectedVeh.category || '—'],
+                ['Year',                selectedVeh.year || '—'],
+                ['Color',               selectedVeh.color || '—'],
+                ['Registration No.',    selectedVeh.registrationNo || '—'],
                 ['Battery Capacity',    selectedVeh.batteryCapacityKwh ? `${selectedVeh.batteryCapacityKwh} kWh` : '—'],
-                ['Range',               selectedVeh.rangeKm           ? `${selectedVeh.rangeKm} km` : '—'],
-                ['Charging Type',       selectedVeh.chargingType      || '—'],
-                ['Price (per unit)',    `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
-                ['Quantity in Stock',   selectedVeh.quantity ?? 1],
-                ['Approval Status',     selectedVeh.status            || '—'],
-                ['Submitted By',        selectedVeh.franchiseeName    || '—'],
-                ['Franchisee Email',    selectedVeh.franchiseeEmail   || '—'],
-                ['Submitted At',        fmt(selectedVeh.createdAt)],
-                ['Last Updated',        fmt(selectedVeh.updatedAt)],
+                ['Range',               selectedVeh.rangeKm ? `${selectedVeh.rangeKm} km` : '—'],
+                ['Charging Type',       selectedVeh.chargingType || '—'],
+                ['Price per Unit',      `₹${Number(selectedVeh.pricePerDay || 0).toLocaleString('en-IN')}`],
+                ['Quantity',            selectedVeh.quantity ?? 1],
+                ['Assigned Fleet Op.',  selectedVeh.franchiseeName || 'Not yet assigned'],
+                ['Added At',            fmt(selectedVeh.createdAt)],
               ].map(([k, val]) => (
                 <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
                   <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
@@ -2457,121 +2733,74 @@ function AdminVehicleInventory({ call }) {
                 </div>
               ))}
             </div>
-
             {selectedVeh.description && (
               <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
-                <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
-                  {selectedVeh.description}
-                </div>
+                <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:6 }}>Description / Notes</div>
+                <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>{selectedVeh.description}</div>
               </div>
-            )}
-
-            {selectedVeh.status === 'REJECTED' && selectedVeh.rejectionReason && (
-              <InfoBanner Icon={AlertTriangle}>Rejection reason: {selectedVeh.rejectionReason}</InfoBanner>
             )}
           </div>
           <div className="modal-footer">
             <button className="btn-ghost" onClick={() => setSelectedVeh(null)}>Close</button>
+            <button className="btn-primary" onClick={() => { setSelectedVeh(null); setAssignVeh(selectedVeh); setAssignToId(selectedVeh.franchiseeId ? String(selectedVeh.franchiseeId) : ''); }}>
+              → {selectedVeh.franchiseeId ? 'Reassign to Fleet Operator' : 'Assign to Fleet Operator'}
+            </button>
           </div>
         </div>
       </div>
     )}
 
-    {/* ── Part Detail Modal ── */}
+    {/* ══ PART DETAIL MODAL ══ */}
     {selectedPart && (() => {
       const p = selectedPart;
       const isLow = p.quantity <= p.reorderLevel;
       return (
         <div className="modal-overlay" onClick={() => setSelectedPart(null)}>
-          <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(580px,100%)' }}>
+          <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width:'min(520px,100%)' }}>
             <div className="modal-head">
               <div>
                 <div className="modal-title">Part Details</div>
-                <div className="modal-subtitle">Complete information for this spare part</div>
+                <div className="modal-subtitle">{p.name || 'Spare Part'}</div>
               </div>
               <button className="icon-btn" onClick={() => setSelectedPart(null)}><X size={20} /></button>
             </div>
             <div className="modal-body">
-              {/* Hero: Part Code */}
-              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12,
-                padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
-                <div style={{ background:'#1d4ed8', color:'#fff', borderRadius:10,
-                  width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:12, padding:'16px 20px', marginBottom:16, display:'flex', alignItems:'center', gap:14 }}>
+                <div style={{ background:'#1d4ed8', color:'#fff', borderRadius:10, width:48, height:48, display:'flex', alignItems:'center', justifyContent:'center' }}>
                   <Hash size={22} />
                 </div>
                 <div>
-                  <div style={{ fontSize:11, fontWeight:700, color:'#1d4ed8', letterSpacing:'.1em',
-                    textTransform:'uppercase', marginBottom:3 }}>Part Code (SKU)</div>
-                  <div style={{ fontSize:26, fontWeight:900, fontFamily:'monospace', color:'#1e3a8a',
-                    letterSpacing:'.05em' }}>{p.sku || '—'}</div>
+                  <div style={{ fontSize:11, fontWeight:700, color:'#1d4ed8', letterSpacing:'.1em', textTransform:'uppercase', marginBottom:3 }}>Part Code (SKU)</div>
+                  <div style={{ fontSize:26, fontWeight:900, fontFamily:'monospace', color:'#1e3a8a', letterSpacing:'.05em' }}>{p.sku || '—'}</div>
                 </div>
               </div>
-              {/* Stock badge */}
-              <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-                <span className="status-pill" style={{
-                  background: isLow ? '#fee2e2' : '#dcfce7',
-                  color:      isLow ? '#991b1b' : '#166534',
-                  fontSize:13, padding:'4px 14px',
-                }}>
-                  {isLow ? '⚠ Low Stock' : '✓ In Stock'}
-                </span>
-                <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>
-                  {p.category || 'General'}
-                </span>
-                {p.partType && (
-                  <span className="status-pill" style={{ background:'#fef9c3', color:'#713f12', fontSize:13, padding:'4px 14px' }}>
-                    {p.partType}
-                  </span>
-                )}
+              <div style={{ display:'flex', gap:8, marginBottom:14 }}>
+                <span className="status-pill" style={{ background: isLow ? '#fee2e2' : '#dcfce7', color: isLow ? '#991b1b' : '#166534', fontSize:13, padding:'4px 14px' }}>{isLow ? '⚠ Low Stock' : '✓ In Stock'}</span>
+                <span className="status-pill" style={{ background:'#f5f3ff', color:'#5b21b6', fontSize:13, padding:'4px 14px' }}>{p.category || 'General'}</span>
               </div>
-              {/* Core Info Grid */}
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px',
-                background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:16 }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:14 }}>
                 {[
-                  ['Part Name',      p.name          || '—'],
-                  ['Category',       p.category      || 'General'],
-                  ['Current Stock',  p.quantity ?? 0],
-                  ['Reorder Level',  p.reorderLevel  ?? 5],
-                  ['Unit Price',     `₹${Number(p.unitPrice||0).toLocaleString('en-IN')}`],
-                  ['Total Value',    `₹${Number((p.unitPrice||0)*(p.quantity||0)).toLocaleString('en-IN')}`],
-                  p.manufacturer ? ['Manufacturer', p.manufacturer] : null,
-                  p.location     ? ['Storage Location', p.location]  : null,
-                  p.partType     ? ['Part Type', p.partType]          : null,
-                ].filter(Boolean).map(([k, v]) => (
+                  ['Part Name',     p.name || '—'],
+                  ['Category',      p.category || 'General'],
+                  ['Manufacturer',  p.manufacturer || '—'],
+                  ['Current Stock', p.quantity ?? 0],
+                  ['Reorder Level', p.reorderLevel ?? 5],
+                  ['Unit Price',    `₹${Number(p.unitPrice || 0).toLocaleString('en-IN')}`],
+                  ['Total Value',   `₹${Number((p.unitPrice || 0) * (p.quantity || 0)).toLocaleString('en-IN')}`],
+                ].map(([k, v]) => (
                   <div key={k} style={{ background:'#fff', padding:'12px 16px' }}>
-                    <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600,
-                      textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
-                    <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:14 }}>{v}</div>
+                    <div style={{ fontSize:11, color:'#9ca3af', fontWeight:600, textTransform:'uppercase', letterSpacing:'.07em', marginBottom:4 }}>{k}</div>
+                    <div style={{ fontWeight:700, color:'#1a1f2e', fontSize:13 }}>{v}</div>
                   </div>
                 ))}
               </div>
-              {p.compatibleVehicles && (
-                <div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8,
-                    display:'flex', alignItems:'center', gap:6 }}>
-                    <Car size={13} /> Compatible Vehicles
-                  </div>
-                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
-                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
-                    {p.compatibleVehicles}
-                  </div>
-                </div>
-              )}
               {p.description && (
-                <div style={{ marginBottom:14 }}>
-                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:8 }}>Description / Notes</div>
-                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8,
-                    padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>
-                    {p.description}
-                  </div>
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#374151', marginBottom:6 }}>Description</div>
+                  <div style={{ background:'#f9fafb', border:'1px solid #e5e7eb', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#374151', lineHeight:1.6 }}>{p.description}</div>
                 </div>
               )}
-              {isLow && (
-                <InfoBanner Icon={AlertTriangle}>
-                  Stock ({p.quantity}) is at or below reorder level ({p.reorderLevel}). Consider restocking soon.
-                </InfoBanner>
-              )}
+              {isLow && <InfoBanner Icon={AlertTriangle}>Stock ({p.quantity}) is at or below reorder level ({p.reorderLevel}). Consider restocking.</InfoBanner>}
             </div>
             <div className="modal-footer">
               <button className="btn-ghost" onClick={() => setSelectedPart(null)}>Close</button>
@@ -2803,7 +3032,7 @@ function AdminVehicleApprovals({ call }) {
             ['Charging',     selected.chargingType],
             ['Price/Unit',   `₹${(selected.pricePerDay||0).toLocaleString('en-IN')}`],
             ['Quantity',     selected.quantity ?? 1],
-            ['Franchisee',   selected.franchiseeName],
+            ['Fleet Operator',   selected.franchiseeName],
             ['Email',        selected.franchiseeEmail],
             ['Submitted',    new Date(selected.createdAt).toLocaleString()],
             ['Last Updated', new Date(selected.updatedAt).toLocaleString()],
@@ -2996,7 +3225,7 @@ function AdminStaffDirectory({ call, initialTab = 'active' }) {
                     {s.hubId && <span>Hub: {s.hubId}</span>}
                   </div>
                   <div className="approval-franchise">
-                    Franchisee: <strong>{s.franchiseeName}</strong> · {new Date(s.createdAt).toLocaleString()}
+                    Fleet Operator: <strong>{s.franchiseeName}</strong> · {new Date(s.createdAt).toLocaleString()}
                   </div>
                 </div>
                 <div className="approval-actions" onClick={e => e.stopPropagation()}>
@@ -3049,7 +3278,7 @@ function AdminStaffDirectory({ call, initialTab = 'active' }) {
             ['PAN Number',     selectedStaff.panNumber || '—'],
             ['Aadhar Number',  selectedStaff.aadhar || '—'],
             ['Address',        selectedStaff.address || '—'],
-            ['Franchisee',     selectedStaff.franchiseeName],
+            ['Fleet Operator',     selectedStaff.franchiseeName],
             ['Franchise Email',selectedStaff.franchiseeEmail],
             ['Submitted',      new Date(selectedStaff.createdAt).toLocaleString()],
           ].map(([k, v]) => (
@@ -3090,7 +3319,7 @@ function AdminStaffFullTable({ rows, setImageModal, showFranchisee, showRemovedB
             <th>Hub ID</th><th>Address</th>
             <th>PAN No.</th><th>Aadhar No.</th>
             <th>Aadhar Photo</th><th>PAN Photo</th>
-            {showFranchisee && <th>Franchisee</th>}
+            {showFranchisee && <th>Fleet Operator</th>}
             <th>Status</th>
             {showRemovedBadge && <th>Removed</th>}
             {showRejectedReason && <th>Rejection Reason</th>}
@@ -3932,7 +4161,7 @@ function AdminCustomerPayments({ call }) {
 
             {/* Pickup Location */}
             <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Franchisee Pickup Location</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 8, letterSpacing: .5 }}>Fleet Operator Pickup Location</div>
               <div style={{ background: '#f0fdf4', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#166534', lineHeight: 1.6 }}>
                 {[selected.pickupLocation?.name || selected.franchiseeName, selected.pickupLocation?.address].filter(Boolean).join(' · ') || '—'}
               </div>
@@ -3951,3 +4180,1074 @@ function AdminCustomerPayments({ call }) {
     </>
   );
 }
+// ══════════════════════════════════════════════════════════════════
+// ADMIN COMPLAINT CENTER — Full complaint lifecycle management
+// ══════════════════════════════════════════════════════════════════
+function AdminComplaintCenter({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/platform/complaints');
+  const { data: staffList } = useFetch(call, '/platform/staff-list');
+  const [selected, setSelected] = useState(null);
+  const [modalTab, setModalTab] = useState('details');
+  const [filterTab, setFilterTab] = useState('all');
+  const [assignStaffId, setAssignStaffId] = useState('');
+  const [pauseReason, setPauseReason] = useState('');
+  const [spareNote, setSpareNote] = useState('');
+  const [resolutionNote, setResolutionNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const { toast, show } = useToast();
+
+  const complaints = data || [];
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+  const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+  const daysSince = d => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0;
+
+  const STATUS_COLOR = {
+    OPEN: '#d97706', IN_PROGRESS: '#2563eb', PAUSED: '#7c3aed',
+    SOLVED: '#16a34a', CLOSED: '#64748b', PENDING_REVIEW: '#0891b2',
+  };
+
+  const filteredComplaints = complaints.filter(c => {
+    if (filterTab === 'all') return true;
+    if (filterTab === 'open') return c.status === 'OPEN';
+    if (filterTab === 'in_progress') return c.status === 'IN_PROGRESS';
+    if (filterTab === 'paused') return c.status === 'PAUSED';
+    if (filterTab === 'resolved') return ['SOLVED','CLOSED'].includes(c.status);
+    return true;
+  });
+
+  const openModal = (c) => {
+    setSelected(c);
+    setModalTab('details');
+    setAssignStaffId(c.assignedStaffId || '');
+    setPauseReason('');
+    setSpareNote('');
+    setResolutionNote(c.resolution || '');
+  };
+
+  // Assign staff and start work
+  const handleAssign = async () => {
+    if (!assignStaffId || !selected) return;
+    setBusy(true);
+    try {
+      await call(`/platform/complaints/${selected._id}/assign`, {
+        method: 'put',
+        data: { staffId: assignStaffId }
+      });
+      show('Staff assigned successfully.');
+      refresh();
+      setSelected(prev => ({ ...prev, assignedStaffId: assignStaffId, status: 'IN_PROGRESS',
+        assignedStaffName: (staffList||[]).find(s=>s._id===assignStaffId)?.name || 'Staff' }));
+    } catch(e) { show(e.response?.data?.message || 'Assignment failed','error'); }
+    finally { setBusy(false); }
+  };
+
+  // Mark work started
+  const handleStartWork = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await call(`/platform/complaints/${selected._id}/start-work`, { method: 'put' });
+      show('Work started — timer is running.');
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not start work','error'); }
+    finally { setBusy(false); }
+  };
+
+  // Pause work (spare requirement / other reason)
+  const handlePause = async () => {
+    if (!pauseReason.trim() || !selected) return;
+    setBusy(true);
+    try {
+      await call(`/platform/complaints/${selected._id}/pause-work`, {
+        method: 'put',
+        data: { reason: pauseReason, spareNote: spareNote || undefined }
+      });
+      show('Work paused. Awaiting spare/parts or resolution.');
+      setPauseReason(''); setSpareNote('');
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not pause','error'); }
+    finally { setBusy(false); }
+  };
+
+  // Resume work
+  const handleResume = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await call(`/platform/complaints/${selected._id}/resume-work`, { method: 'put' });
+      show('Work resumed.');
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not resume','error'); }
+    finally { setBusy(false); }
+  };
+
+  // Mark resolved by Command Center
+  const handleResolve = async () => {
+    if (!resolutionNote.trim() || !selected) return;
+    setBusy(true);
+    try {
+      await call(`/platform/complaints/${selected._id}/resolve`, {
+        method: 'put',
+        data: { resolution: resolutionNote }
+      });
+      // Store review request for customer portal
+      try {
+        const rrList = JSON.parse(localStorage.getItem('ev_customer_review_requests') || '[]');
+        if (!rrList.find(r => r.complaintId === selected._id)) {
+          rrList.push({
+            complaintId: selected._id,
+            vehicleMake: selected.vehicleSnapshot?.make || '',
+            vehicleModel: selected.vehicleSnapshot?.model || '',
+            vehicleReg: selected.vehicleSnapshot?.registrationNo || '—',
+            resolution: resolutionNote,
+            resolvedAt: new Date().toISOString(),
+            customerPhone: selected.customerId?.phone || '',
+            customerName: selected.customerId?.name || 'Customer',
+            reviewed: false,
+          });
+          localStorage.setItem('ev_customer_review_requests', JSON.stringify(rrList));
+        }
+      } catch(_) {}
+      show('Complaint resolved. Customer will be prompted for a review.');
+      setSelected(null);
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Could not resolve','error'); }
+    finally { setBusy(false); }
+  };
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  const stats = [
+    { label:'Total', value: complaints.length, color:'#2563eb', Icon: Bell },
+    { label:'Open', value: complaints.filter(c=>c.status==='OPEN').length, color:'#d97706', Icon: AlertTriangle },
+    { label:'In Progress', value: complaints.filter(c=>c.status==='IN_PROGRESS').length, color:'#2563eb', Icon: Activity },
+    { label:'Paused', value: complaints.filter(c=>c.status==='PAUSED').length, color:'#7c3aed', Icon: Clock },
+    { label:'Resolved', value: complaints.filter(c=>['SOLVED','CLOSED'].includes(c.status)).length, color:'#16a34a', Icon: CheckCircle },
+  ];
+
+  return (
+    <>
+      <Toast toast={toast} />
+      <PageHeader title="Complaint Center" sub="End-to-end complaint lifecycle — from customer to resolution and review." />
+
+      {/* Metrics */}
+      <MetricGrid metrics={stats} />
+
+      {/* Filter Tabs */}
+      <div style={{ display:'flex', gap:0, marginBottom:20, borderBottom:'2px solid #f1f5f9', flexWrap:'wrap' }}>
+        {[
+          ['all','All', complaints.length],
+          ['open','🔔 Open', complaints.filter(c=>c.status==='OPEN').length],
+          ['in_progress','▶ In Progress', complaints.filter(c=>c.status==='IN_PROGRESS').length],
+          ['paused','⏸ Paused', complaints.filter(c=>c.status==='PAUSED').length],
+          ['resolved','✅ Resolved', complaints.filter(c=>['SOLVED','CLOSED'].includes(c.status)).length],
+        ].map(([key, label, cnt]) => (
+          <button key={key} onClick={()=>setFilterTab(key)} style={{
+            padding:'10px 18px', border:'none', cursor:'pointer', fontWeight:700, fontSize:13, background:'transparent',
+            color: filterTab===key ? '#2563eb' : '#6b7280',
+            borderBottom: filterTab===key ? '2.5px solid #2563eb' : '2.5px solid transparent',
+            marginBottom:'-2px', transition:'all .15s', display:'flex', alignItems:'center', gap:6,
+          }}>
+            {label}
+            <span style={{
+              background: filterTab===key ? '#2563eb' : '#e2e8f0',
+              color: filterTab===key ? '#fff' : '#64748b',
+              borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700,
+            }}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Complaint Cards */}
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        {filteredComplaints.length === 0 && (
+          <div className="card">
+            <div className="empty-state">
+              <Bell size={40} style={{ opacity:.2, marginBottom:12 }} />
+              <p style={{ fontWeight:600, color:'#94a3b8' }}>No complaints in this category</p>
+            </div>
+          </div>
+        )}
+        {filteredComplaints.map(c => {
+          const days = daysSince(c.createdAt);
+          const handoverDays = c.handoverDate ? daysSince(c.handoverDate) : null;
+          return (
+            <div key={c._id} className="card" style={{
+              padding:0, overflow:'hidden',
+              borderLeft:`4px solid ${STATUS_COLOR[c.status]||'#e2e8f0'}`,
+            }}>
+              {/* Header */}
+              <div style={{ padding:'14px 18px 10px', borderBottom:'1px solid #f8fafc' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'flex-start' }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:700, fontSize:15, color:'#111827' }}>
+                      {c.subject || c.category || 'Vehicle Complaint'}
+                    </div>
+                    <div style={{ fontSize:12, color:'#64748b', marginTop:4, display:'flex', gap:10, flexWrap:'wrap' }}>
+                      <span>👤 {c.customerId?.name||'Customer'}</span>
+                      <span>📞 {c.customerId?.phone||'—'}</span>
+                      <span>🕐 Raised: {fmtDt(c.createdAt)}</span>
+                      <span style={{ color: days > 3 ? '#dc2626' : '#64748b', fontWeight: days>3?700:400 }}>
+                        📅 {days} day{days!==1?'s':''} old
+                      </span>
+                      {handoverDays !== null && (
+                        <span>🤝 Handover: {days - handoverDays} days ago</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4 }}>
+                    <span style={{
+                      fontSize:11, fontWeight:800, padding:'4px 12px', borderRadius:99,
+                      background:(STATUS_COLOR[c.status]||'#64748b')+'18', color:STATUS_COLOR[c.status]||'#64748b',
+                    }}>{c.status}</span>
+                    {c.assignedStaffName && (
+                      <span style={{ fontSize:11, color:'#2563eb', fontWeight:600 }}>🔧 {c.assignedStaffName}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding:'10px 18px' }}>
+                <div style={{ fontSize:13, color:'#374151', lineHeight:1.6, marginBottom:8 }}>{c.message}</div>
+                <div style={{ display:'flex', gap:14, flexWrap:'wrap', fontSize:12, color:'#475569' }}>
+                  {c.vehicleSnapshot && (
+                    <span>🚗 <b>{c.vehicleSnapshot.make} {c.vehicleSnapshot.model}</b> · {c.vehicleSnapshot.registrationNo||'—'}</span>
+                  )}
+                  {c.fleetOperatorName && <span>🏢 Fleet: {c.fleetOperatorName}</span>}
+                  {c.serviceCount !== undefined && <span>✅ Services completed: {c.serviceCount}</span>}
+                  {c.previousIssue && <span style={{ color:'#dc2626' }}>⚠ Prior issue: {c.previousIssue}</span>}
+                </div>
+                {c.resolution && (
+                  <div style={{ marginTop:8, fontSize:12, color:'#166534', background:'#f0fdf4', padding:'7px 10px', borderRadius:8 }}>
+                    ✓ <b>Resolution:</b> {c.resolution}
+                  </div>
+                )}
+                {c.status === 'PAUSED' && c.pauseReason && (
+                  <div style={{ marginTop:8, fontSize:12, color:'#92400e', background:'#fef3c7', padding:'7px 10px', borderRadius:8 }}>
+                    ⏸ <b>Paused:</b> {c.pauseReason}
+                    {c.spareNote && <span> · Spare needed: {c.spareNote}</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding:'10px 18px', background:'#f8fafc', borderTop:'1px solid #f1f5f9', display:'flex', gap:8, flexWrap:'wrap' }}>
+                <button className="btn-primary" onClick={() => openModal(c)}>📋 Open Complaint</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Complaint Detail Modal ── */}
+      {selected && (
+        <div className="modal-overlay" onClick={() => setSelected(null)}>
+          <div className="modal-drawer" onClick={e => e.stopPropagation()}
+            style={{ width:'min(720px,100%)', maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+
+            {/* Modal Header */}
+            <div className="modal-head">
+              <div>
+                <div className="modal-title">
+                  {selected.subject || selected.category || 'Vehicle Complaint'}
+                  <span style={{
+                    marginLeft:10, fontSize:11, fontWeight:800, padding:'3px 10px', borderRadius:99,
+                    background:(STATUS_COLOR[selected.status]||'#64748b')+'22', color:STATUS_COLOR[selected.status]||'#64748b',
+                  }}>{selected.status}</span>
+                </div>
+                <div className="modal-subtitle">
+                  👤 {selected.customerId?.name||'Customer'} &nbsp;·&nbsp;
+                  🚗 {selected.vehicleSnapshot?.make||''} {selected.vehicleSnapshot?.model||''} · {selected.vehicleSnapshot?.registrationNo||'—'} &nbsp;·&nbsp;
+                  📅 {daysSince(selected.createdAt)} days open
+                  {selected.assignedStaffName && <span> &nbsp;·&nbsp; 🔧 {selected.assignedStaffName}</span>}
+                </div>
+              </div>
+              <button className="icon-btn" onClick={() => setSelected(null)}>✕</button>
+            </div>
+
+            {/* Modal Tabs */}
+            <div style={{ display:'flex', gap:4, padding:'12px 20px 0', borderBottom:'1px solid #f1f5f9', background:'#fff', flexShrink:0, flexWrap:'wrap' }}>
+              {[
+                ['details','📋 Details'],
+                ['timeline','📍 Timeline'],
+                ['workflow','⚙️ Workflow'],
+                ['history','🔧 History'],
+              ].map(([key, label]) => (
+                <button key={key} onClick={() => setModalTab(key)} style={{
+                  padding:'8px 14px', borderRadius:'8px 8px 0 0', border:'none', cursor:'pointer', fontWeight:600, fontSize:13,
+                  background: modalTab===key ? '#fff' : 'transparent',
+                  color: modalTab===key ? '#2563eb' : '#64748b',
+                  borderBottom: modalTab===key ? '2px solid #2563eb' : '2px solid transparent',
+                }}>{label}</button>
+              ))}
+            </div>
+
+            {/* Modal Body */}
+            <div className="modal-body" style={{ flex:1, overflowY:'auto' }}>
+
+              {/* ── DETAILS TAB ── */}
+              {modalTab === 'details' && (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:10, padding:12 }}>
+                    <div style={{ fontWeight:700, marginBottom:6 }}>📣 Complaint Message</div>
+                    <div style={{ fontSize:13, color:'#374151', lineHeight:1.6 }}>{selected.message}</div>
+                  </div>
+
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:8 }}>
+                    {[
+                      ['Status', selected.status],
+                      ['Category', selected.category || '—'],
+                      ['Raised On', fmtDt(selected.createdAt)],
+                      ['Days Open', `${daysSince(selected.createdAt)} day(s)`],
+                      ['Handover Date', selected.handoverDate ? fmt(selected.handoverDate) : '—'],
+                      ['Days Since Handover', selected.handoverDate ? `${daysSince(selected.handoverDate)} day(s)` : '—'],
+                      ['Services Completed', selected.serviceCount ?? '—'],
+                      ['Previous Issue', selected.previousIssue || 'None'],
+                      ['Vehicle', `${selected.vehicleSnapshot?.make||''} ${selected.vehicleSnapshot?.model||''}`],
+                      ['Registration', selected.vehicleSnapshot?.registrationNo || '—'],
+                      ['Customer', selected.customerId?.name || '—'],
+                      ['Phone', selected.customerId?.phone || '—'],
+                      ['Assigned Staff', selected.assignedStaffName || 'Not assigned'],
+                      ['Fleet Operator', selected.fleetOperatorName || '—'],
+                    ].map(([k,v]) => (
+                      <div key={k} style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
+                        <div style={{ color:'#64748b', marginBottom:2 }}>{k}</div>
+                        <div style={{ fontWeight:700, color:'#111827' }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selected.resolution && (
+                    <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:12 }}>
+                      <div style={{ fontWeight:700, color:'#166534', marginBottom:4 }}>✅ Resolution</div>
+                      <div style={{ fontSize:13, color:'#374151' }}>{selected.resolution}</div>
+                      <div style={{ fontSize:11, color:'#64748b', marginTop:4 }}>Resolved: {fmt(selected.solvedAt)}</div>
+                    </div>
+                  )}
+
+                  {selected.status === 'CLOSED' && (
+                    <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:12 }}>
+                      <div style={{ fontWeight:700, color:'#166534', marginBottom:4 }}>⭐ Customer Review</div>
+                      <div style={{ fontSize:14, color:'#374151' }}>Rating: {selected.franchiseeRating || '—'}/5</div>
+                      {selected.feedback && <div style={{ fontSize:13, color:'#374151', marginTop:4 }}>"{selected.feedback}"</div>}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── TIMELINE TAB ── */}
+              {modalTab === 'timeline' && (
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#374151' }}>📍 Complaint Timeline</div>
+                  <div style={{ position:'relative' }}>
+                    <div style={{ position:'absolute', left:19, top:0, bottom:0, width:2, background:'#e2e8f0' }} />
+                    {[
+                      { label:'Complaint Registered', time: selected.createdAt, color:'#d97706', icon:'📩', note: `By ${selected.customerId?.name||'Customer'}` },
+                      { label:'Sent to Fleet Operator', time: selected.createdAt, color:'#d97706', icon:'📤', note: `Fleet: ${selected.fleetOperatorName||'—'}` },
+                      { label:'Received by Command Center', time: selected.createdAt, color:'#2563eb', icon:'🏢', note:'Auto-escalated to Command Center' },
+                      selected.handoverDate && { label:'Vehicle Handover Date', time: selected.handoverDate, color:'#0891b2', icon:'🤝', note:`${daysSince(selected.handoverDate)} days ago` },
+                      selected.assignedAt && { label:'Staff Assigned', time: selected.assignedAt, color:'#7c3aed', icon:'👷', note: `Assigned to ${selected.assignedStaffName||'Staff'}` },
+                      selected.startedAt && { label:'Work Started', time: selected.startedAt, color:'#2563eb', icon:'▶', note:'Technician started working' },
+                      selected.pausedAt && { label:'Work Paused', time: selected.pausedAt, color:'#d97706', icon:'⏸', note: selected.pauseReason||'Paused' },
+                      selected.resumedAt && { label:'Work Resumed', time: selected.resumedAt, color:'#2563eb', icon:'▶', note:'Work resumed after pause' },
+                      selected.solvedAt && { label:'Marked Resolved', time: selected.solvedAt, color:'#16a34a', icon:'✅', note: selected.resolution||'Resolved by Command Center' },
+                      selected.closedAt && { label:'Customer Reviewed', time: selected.closedAt, color:'#16a34a', icon:'⭐', note: `Rating: ${selected.franchiseeRating||'—'}/5` },
+                    ].filter(Boolean).map((event, i) => (
+                      <div key={i} style={{ display:'flex', gap:14, marginBottom:18, position:'relative' }}>
+                        <div style={{
+                          width:40, height:40, borderRadius:'50%', background: event.color+'18',
+                          border:`2px solid ${event.color}`, display:'flex', alignItems:'center', justifyContent:'center',
+                          fontSize:16, flexShrink:0, zIndex:1, background:'#fff',
+                        }}>{event.icon}</div>
+                        <div style={{ paddingTop:8 }}>
+                          <div style={{ fontWeight:700, fontSize:13, color:'#111827' }}>{event.label}</div>
+                          <div style={{ fontSize:11, color:'#64748b', marginTop:2 }}>{fmtDt(event.time)}</div>
+                          {event.note && <div style={{ fontSize:12, color:'#374151', marginTop:2 }}>{event.note}</div>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── WORKFLOW TAB ── */}
+              {modalTab === 'workflow' && (
+                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                  <div style={{ fontWeight:700, fontSize:14, color:'#374151' }}>⚙️ Manage Complaint Workflow</div>
+
+                  {/* Step 1: Assign Staff */}
+                  <div style={{ border:'1.5px solid #ddd6fe', borderRadius:12, padding:16, background: selected.assignedStaffName ? '#f5f3ff' : '#fff' }}>
+                    <div style={{ fontWeight:700, fontSize:13, color:'#5b21b6', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ width:22, height:22, borderRadius:'50%', background:'#7c3aed', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>1</span>
+                      Assign Staff Member
+                    </div>
+                    {selected.assignedStaffName && (
+                      <div style={{ marginBottom:10, fontSize:12, color:'#166534', background:'#f0fdf4', padding:'6px 10px', borderRadius:8 }}>
+                        ✅ Currently assigned to: <b>{selected.assignedStaffName}</b>
+                      </div>
+                    )}
+                    <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+                      <select value={assignStaffId} onChange={e => setAssignStaffId(e.target.value)}
+                        style={{ flex:1, minWidth:180, padding:'8px 10px', border:'1.5px solid #ddd6fe', borderRadius:8, fontSize:13 }}>
+                        <option value="">Select staff member…</option>
+                        {(staffList||[]).map(s => (
+                          <option key={s._id} value={s._id}>{s.name} · {s.role}</option>
+                        ))}
+                      </select>
+                      <button onClick={handleAssign} disabled={busy || !assignStaffId}
+                        style={{ background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
+                          padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13,
+                          opacity: busy||!assignStaffId ? 0.6 : 1 }}>
+                        {busy ? 'Assigning…' : '👷 Assign'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Start Work */}
+                  <div style={{ border:'1.5px solid #bfdbfe', borderRadius:12, padding:16, background: selected.startedAt ? '#eff6ff' : '#fff' }}>
+                    <div style={{ fontWeight:700, fontSize:13, color:'#1d4ed8', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ width:22, height:22, borderRadius:'50%', background:'#2563eb', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>2</span>
+                      Start Work
+                    </div>
+                    {selected.startedAt ? (
+                      <div style={{ fontSize:12, color:'#1d4ed8', background:'#dbeafe', padding:'6px 10px', borderRadius:8 }}>
+                        ▶ Work started at {fmtDt(selected.startedAt)}
+                        {selected.elapsedSeconds > 0 && (
+                          <span style={{ marginLeft:8 }}>
+                            · ⏱ {Math.floor(selected.elapsedSeconds/3600)}h {Math.floor((selected.elapsedSeconds%3600)/60)}m elapsed
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ display:'flex', gap:10, alignItems:'center' }}>
+                        <div style={{ fontSize:12, color:'#6b7280', flex:1 }}>
+                          {selected.assignedStaffName ? 'Tap to mark work as started and begin tracking time.' : 'Assign a staff member first.'}
+                        </div>
+                        <button onClick={handleStartWork} disabled={busy || !selected.assignedStaffName || !!selected.startedAt}
+                          style={{ background:'#2563eb', color:'#fff', border:'none', borderRadius:8,
+                            padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13,
+                            opacity: busy||!selected.assignedStaffName||!!selected.startedAt ? 0.6 : 1 }}>
+                          ▶ Start Work
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Step 3: Pause / Resume */}
+                  <div style={{ border:'1.5px solid #fde68a', borderRadius:12, padding:16, background: selected.status==='PAUSED' ? '#fffbeb' : '#fff' }}>
+                    <div style={{ fontWeight:700, fontSize:13, color:'#92400e', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                      <span style={{ width:22, height:22, borderRadius:'50%', background:'#d97706', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>3</span>
+                      Pause / Resume Work
+                    </div>
+                    {selected.status === 'PAUSED' ? (
+                      <div>
+                        <div style={{ fontSize:12, color:'#92400e', background:'#fef3c7', padding:'6px 10px', borderRadius:8, marginBottom:10 }}>
+                          ⏸ <b>Paused:</b> {selected.pauseReason}
+                          {selected.spareNote && <span> · <b>Spare needed:</b> {selected.spareNote}</span>}
+                        </div>
+                        <button onClick={handleResume} disabled={busy}
+                          style={{ background:'#d97706', color:'#fff', border:'none', borderRadius:8,
+                            padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13, opacity: busy ? 0.6 : 1 }}>
+                          ▶ Resume Work
+                        </button>
+                      </div>
+                    ) : selected.status === 'IN_PROGRESS' ? (
+                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        <div style={{ fontSize:12, color:'#6b7280' }}>If spare parts or anything else is required, pause the work and note the reason.</div>
+                        <textarea rows={2} value={pauseReason} onChange={e => setPauseReason(e.target.value)}
+                          placeholder="Pause reason (e.g. Awaiting spare part / Customer unavailable)…"
+                          style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #fde68a', borderRadius:8, fontSize:13, resize:'vertical', boxSizing:'border-box' }} />
+                        <input type="text" value={spareNote} onChange={e => setSpareNote(e.target.value)}
+                          placeholder="Spare requirement note (optional)…"
+                          style={{ padding:'8px 10px', border:'1.5px solid #fde68a', borderRadius:8, fontSize:13 }} />
+                        <button onClick={handlePause} disabled={busy || !pauseReason.trim()}
+                          style={{ background:'#d97706', color:'#fff', border:'none', borderRadius:8,
+                            padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13, alignSelf:'flex-start',
+                            opacity: busy||!pauseReason.trim() ? 0.6 : 1 }}>
+                          ⏸ Pause Work
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:12, color:'#94a3b8' }}>Available when work is in progress.</div>
+                    )}
+                  </div>
+
+                  {/* Step 4: Mark Resolved */}
+                  {!['SOLVED','CLOSED'].includes(selected.status) && (
+                    <div style={{ border:'1.5px solid #bbf7d0', borderRadius:12, padding:16 }}>
+                      <div style={{ fontWeight:700, fontSize:13, color:'#166534', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                        <span style={{ width:22, height:22, borderRadius:'50%', background:'#16a34a', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>4</span>
+                        Mark Resolved & Request Customer Review
+                      </div>
+                      <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        <div style={{ fontSize:12, color:'#6b7280' }}>
+                          Once the technician completes the work, mark as resolved. The customer will be prompted to leave a review.
+                        </div>
+                        <textarea rows={3} value={resolutionNote} onChange={e => setResolutionNote(e.target.value)}
+                          placeholder="Describe how the issue was resolved…"
+                          style={{ width:'100%', padding:'8px 10px', border:'1.5px solid #bbf7d0', borderRadius:8, fontSize:13, resize:'vertical', boxSizing:'border-box' }} />
+                        <button onClick={handleResolve} disabled={busy || !resolutionNote.trim()}
+                          style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8,
+                            padding:'10px 20px', cursor:'pointer', fontWeight:700, fontSize:13, alignSelf:'flex-start',
+                            opacity: busy||!resolutionNote.trim() ? 0.6 : 1 }}>
+                          {busy ? 'Resolving…' : '✅ Mark Resolved & Request Review'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resolved state */}
+                  {['SOLVED','CLOSED'].includes(selected.status) && (
+                    <div style={{ border:'1.5px solid #bbf7d0', borderRadius:12, padding:16, background:'#f0fdf4' }}>
+                      <div style={{ fontWeight:700, color:'#166534', marginBottom:6 }}>✅ Complaint Resolved</div>
+                      <div style={{ fontSize:13, color:'#374151' }}>{selected.resolution}</div>
+                      {selected.status === 'CLOSED' && (
+                        <div style={{ marginTop:10, fontSize:13, color:'#166534' }}>
+                          ⭐ Customer rating: <b>{selected.franchiseeRating || '—'}/5</b>
+                          {selected.feedback && <span> · "{selected.feedback}"</span>}
+                        </div>
+                      )}
+                      {selected.status === 'SOLVED' && (
+                        <div style={{ marginTop:8, fontSize:12, color:'#64748b' }}>
+                          Waiting for customer to submit their review.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── HISTORY TAB ── */}
+              {modalTab === 'history' && (
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14, marginBottom:12, display:'flex', alignItems:'center', gap:6 }}>
+                    🔧 Vehicle Service History
+                  </div>
+                  <div style={{ fontSize:13, color:'#6b7280', marginBottom:16 }}>
+                    Previous services, jobs, and any prior complaints on this vehicle.
+                  </div>
+
+                  {/* Previous issues */}
+                  {selected.previousIssue && (
+                    <div style={{ border:'1px solid #fecaca', background:'#fff5f5', borderRadius:10, padding:12, marginBottom:14 }}>
+                      <div style={{ fontWeight:700, color:'#dc2626', marginBottom:4 }}>⚠ Previous Issue on Record</div>
+                      <div style={{ fontSize:13, color:'#374151' }}>{selected.previousIssue}</div>
+                    </div>
+                  )}
+
+                  {/* Service count */}
+                  <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16 }}>
+                    {[
+                      ['Services Completed', selected.serviceCount ?? 0, '#2563eb'],
+                      ['Days Open', daysSince(selected.createdAt), selected.daysSince > 7 ? '#dc2626' : '#d97706'],
+                      ['Days Since Handover', selected.handoverDate ? daysSince(selected.handoverDate) : '—', '#0891b2'],
+                    ].map(([k,v,color]) => (
+                      <div key={k} style={{ flex:'1 1 150px', background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px' }}>
+                        <div style={{ fontSize:11, color:'#94a3b8', marginBottom:4 }}>{k}</div>
+                        <div style={{ fontSize:22, fontWeight:800, color }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Job cards from localStorage related to this complaint */}
+                  {(() => {
+                    const allCards = JSON.parse(localStorage.getItem('ev_franchise_job_cards')||'[]');
+                    const related = allCards.filter(j => j.complaintId === selected._id);
+                    if (!related.length) return (
+                      <div style={{ textAlign:'center', padding:24, color:'#94a3b8', fontSize:13 }}>
+                        No job cards on record for this complaint.
+                      </div>
+                    );
+                    return (
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:13, marginBottom:8, color:'#374151' }}>
+                          Job Cards ({related.length})
+                        </div>
+                        {related.map((jc, i) => (
+                          <div key={i} style={{ border:'1px solid #e2e8f0', borderRadius:10, padding:'12px 14px', marginBottom:8, fontSize:12 }}>
+                            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                              <span style={{ fontWeight:700 }}>👷 {jc.staffName||'Unassigned'}</span>
+                              <span style={{ padding:'2px 9px', borderRadius:99, fontSize:11, fontWeight:700,
+                                background: jc.status==='COMPLETED'?'#dcfce7':jc.status==='PAUSED'?'#fef3c7':'#f3e8ff',
+                                color: jc.status==='COMPLETED'?'#166534':jc.status==='PAUSED'?'#92400e':'#7c3aed' }}>
+                                {jc.status}
+                              </span>
+                            </div>
+                            <div style={{ color:'#374151', marginBottom:4 }}>{jc.description}</div>
+                            <div style={{ display:'flex', gap:12, color:'#64748b', flexWrap:'wrap' }}>
+                              <span>⚡ {jc.priority}</span>
+                              {jc.startedAt && <span>▶ Started: {new Date(jc.startedAt).toLocaleString('en-IN')}</span>}
+                              {jc.completedAt && <span>✅ Completed: {new Date(jc.completedAt).toLocaleString('en-IN')}</span>}
+                            </div>
+                            {jc.pauseReason && <div style={{ marginTop:6, color:'#92400e', background:'#fef3c7', padding:'5px 8px', borderRadius:6 }}>⏸ {jc.pauseReason}</div>}
+                            {jc.remarks && <div style={{ marginTop:6, color:'#166534', background:'#f0fdf4', padding:'5px 8px', borderRadius:6 }}>📝 {jc.remarks}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="modal-footer">
+              <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN STAFF MANAGEMENT — Moved from Fleet Operator Portal
+// ══════════════════════════════════════════════════════════════════
+function AdminStaffManagement({ call }) {
+  const { data: apiStaff, loading, error, refresh } = useFetch(call, '/platform/all-staff');
+  const { data: pendingStaff, loading: psLoading } = useFetch(call, '/platform/pending-staff');
+  const [tab, setTab] = useState('active');
+  const [imageModal, setImageModal] = useState(null);
+  const { toast, show } = useToast();
+
+  const allPending    = pendingStaff || [];
+  const activeStaff   = allPending.filter(s => !s.removedFromFranchisee && s.status === 'APPROVED');
+  const removedStaff  = allPending.filter(s => s.removedFromFranchisee);
+  const pendingList   = allPending.filter(s => s.status === 'PENDING_APPROVAL' && !s.removedFromFranchisee);
+
+  const handleApprove = async (staffId, name) => {
+    if (!window.confirm(`Approve ${name}?`)) return;
+    try {
+      await call(`/platform/pending-staff/${staffId}/approve`, { method: 'put' });
+      show(`${name} approved successfully.`);
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Approval failed','error'); }
+  };
+
+  if (loading || psLoading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  const TABS = [
+    { id:'active',  label:'Active Staff',     count: activeStaff.length,  Icon: UserCheck },
+    { id:'pending', label:'Pending Approval', count: pendingList.length,  Icon: Clock },
+    { id:'removed', label:'Removed Staff',    count: removedStaff.length, Icon: UserX },
+  ];
+
+  return (
+    <>
+      <Toast toast={toast} />
+      {imageModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center' }}
+          onClick={() => setImageModal(null)}>
+          <img src={imageModal.url} alt={imageModal.title}
+            style={{ maxWidth:'88vw', maxHeight:'85vh', borderRadius:8, objectFit:'contain' }} />
+        </div>
+      )}
+      <PageHeader title="Staff Management" sub="Manage all staff across fleet operators. Approve new staff, view removals, and monitor the directory." />
+      <MetricGrid metrics={[
+        { label:'Active Staff',     value: activeStaff.length,  Icon: UserCheck, color:'#16a34a' },
+        { label:'Pending Approval', value: pendingList.length,  Icon: Clock,     color:'#d97706' },
+        { label:'Removed Staff',    value: removedStaff.length, Icon: UserX,     color:'#dc2626' },
+        { label:'Total (all time)', value: allPending.length,   Icon: Users,     color:'#2563eb' },
+      ]} />
+
+      {pendingList.length > 0 && (
+        <InfoBanner Icon={Clock}>
+          {pendingList.length} staff entry(s) awaiting approval.
+        </InfoBanner>
+      )}
+
+      {/* Tab bar */}
+      <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb', paddingBottom:0 }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            display:'flex', alignItems:'center', gap:6, padding:'8px 18px',
+            border:'none', background:'none', cursor:'pointer',
+            borderBottom: tab===t.id ? '2px solid #2563eb' : '2px solid transparent',
+            color: tab===t.id ? '#2563eb' : '#6b7280',
+            fontWeight: tab===t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
+          }}>
+            <t.Icon size={15} />
+            {t.label}
+            <span style={{
+              background: tab===t.id ? '#2563eb' : '#e5e7eb',
+              color: tab===t.id ? '#fff' : '#374151',
+              borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700,
+            }}>{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === 'active' && (
+        <Card title="Active Staff Directory" badge={`${activeStaff.length} active`}>
+          {!activeStaff.length
+            ? <div className="empty-state"><UserCheck size={36} style={{ opacity:.2 }} /><p>No active staff yet.</p></div>
+            : <AdminStaffFullTable rows={activeStaff} setImageModal={setImageModal} showFranchisee />
+          }
+        </Card>
+      )}
+      {tab === 'pending' && (
+        <Card title="Pending Approval" badge={`${pendingList.length} pending`}>
+          {!pendingList.length
+            ? <div className="empty-state"><Clock size={36} style={{ opacity:.2 }} /><p>No pending approvals.</p></div>
+            : <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {pendingList.map(s => (
+                  <div key={s._id} style={{ border:'1px solid #fde68a', background:'#fffbeb', borderRadius:10, padding:14, display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
+                      <div style={{ fontSize:12, color:'#64748b' }}>{s.role} · {s.phone} · {s.franchiseeId?.name||'Unknown Fleet'}</div>
+                    </div>
+                    <button onClick={() => handleApprove(s._id, s.name)}
+                      style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12 }}>
+                      ✅ Approve
+                    </button>
+                  </div>
+                ))}
+              </div>
+          }
+        </Card>
+      )}
+      {tab === 'removed' && (
+        <Card title="Removed Staff" badge={`${removedStaff.length}`}>
+          {!removedStaff.length
+            ? <div className="empty-state"><UserX size={36} style={{ opacity:.2 }} /><p>No removed staff.</p></div>
+            : <AdminStaffFullTable rows={removedStaff} setImageModal={setImageModal} showFranchisee showRemovedBadge />
+          }
+        </Card>
+      )}
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN STAFF ATTENDANCE — Moved from Fleet Operator Portal
+// ══════════════════════════════════════════════════════════════════
+function AdminStaffAttendance({ call }) {
+  const { data, loading, error } = useFetch(call, '/platform/staff-attendance');
+
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+  const fmtTime = d => d ? new Date(d).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' }) : '—';
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  const records = data || [];
+  const onDuty  = records.filter(r => r.status === 'ON_DUTY' || r.clockedIn);
+  const offDuty = records.filter(r => r.status !== 'ON_DUTY' && !r.clockedIn);
+
+  return (
+    <>
+      <PageHeader title="Staff Attendance" sub="Live duty status and daily attendance records across all fleet operators." />
+      <MetricGrid metrics={[
+        { label:'On Duty',    value: onDuty.length,  Icon: UserCheck, color:'#16a34a' },
+        { label:'Off Duty',   value: offDuty.length, Icon: UserX,     color:'#64748b' },
+        { label:'Total Staff', value: records.length, Icon: Users,    color:'#2563eb' },
+      ]} />
+
+      <Card title="Attendance Records" badge={`${records.length} staff`}>
+        {!records.length
+          ? <div className="empty-state"><Clock size={40} style={{ opacity:.2 }} /><p>No attendance data available.</p></div>
+          : <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+              <thead>
+                <tr style={{ borderBottom:'2px solid #f1f5f9' }}>
+                  {['Staff Name','Role','Fleet Operator','Date','Clock In','Clock Out','Status'].map(h => (
+                    <th key={h} style={{ padding:'10px 12px', textAlign:'left', color:'#64748b', fontWeight:700, fontSize:12 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r, i) => (
+                  <tr key={r._id||i} style={{ borderBottom:'1px solid #f8fafc', background: i%2===0?'#fff':'#fafafa' }}>
+                    <td style={{ padding:'9px 12px', fontWeight:600 }}>{r.name||r.staffName||'—'}</td>
+                    <td style={{ padding:'9px 12px', color:'#64748b' }}>{r.role||'—'}</td>
+                    <td style={{ padding:'9px 12px', color:'#64748b' }}>{r.franchiseeName||'—'}</td>
+                    <td style={{ padding:'9px 12px' }}>{fmt(r.date||r.clockInTime)}</td>
+                    <td style={{ padding:'9px 12px' }}>{fmtTime(r.clockInTime)}</td>
+                    <td style={{ padding:'9px 12px' }}>{r.clockOutTime ? fmtTime(r.clockOutTime) : <span style={{ color:'#d97706' }}>On Duty</span>}</td>
+                    <td style={{ padding:'9px 12px' }}>
+                      <span style={{
+                        padding:'2px 10px', borderRadius:99, fontSize:11, fontWeight:700,
+                        background: r.clockedIn||r.status==='ON_DUTY' ? '#dcfce7' : '#f1f5f9',
+                        color: r.clockedIn||r.status==='ON_DUTY' ? '#166534' : '#64748b',
+                      }}>
+                        {r.clockedIn||r.status==='ON_DUTY' ? '🟢 On Duty' : '⚫ Off Duty'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+        }
+      </Card>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN LEAVE APPROVALS — Moved from Fleet Operator Portal
+// ══════════════════════════════════════════════════════════════════
+function AdminLeaveApprovals({ call }) {
+  const { data, loading, error, refresh } = useFetch(call, '/platform/leave-requests');
+  const [tab, setTab] = useState('pending');
+  const { toast, show } = useToast();
+
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+  const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+
+  const handleDecision = async (id, staffName, action) => {
+    if (!window.confirm(`${action === 'approve' ? 'Approve' : 'Reject'} leave for ${staffName}?`)) return;
+    try {
+      await call(`/platform/leave-requests/${id}/${action}`, { method: 'put' });
+      show(`Leave ${action === 'approve' ? 'approved' : 'rejected'}.`);
+      refresh();
+    } catch(e) { show(e.response?.data?.message || 'Action failed','error'); }
+  };
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  const records = data || [];
+  const pending  = records.filter(r => r.status === 'PENDING');
+  const approved = records.filter(r => r.status === 'APPROVED');
+  const rejected = records.filter(r => r.status === 'REJECTED');
+  const display  = tab==='pending' ? pending : tab==='approved' ? approved : rejected;
+
+  return (
+    <>
+      <Toast toast={toast} />
+      <PageHeader title="Leave Approvals" sub="Review and approve leave requests submitted by staff across all fleet operators." />
+      <MetricGrid metrics={[
+        { label:'Pending',  value: pending.length,  Icon: Clock,       color:'#d97706' },
+        { label:'Approved', value: approved.length, Icon: UserCheck,   color:'#16a34a' },
+        { label:'Rejected', value: rejected.length, Icon: UserX,       color:'#dc2626' },
+        { label:'Total',    value: records.length,  Icon: FileText,    color:'#2563eb' },
+      ]} />
+
+      {pending.length > 0 && (
+        <InfoBanner Icon={Clock}>{pending.length} leave request(s) awaiting your decision.</InfoBanner>
+      )}
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb' }}>
+        {[['pending','Pending',pending.length],['approved','Approved',approved.length],['rejected','Rejected',rejected.length]].map(([key,label,cnt]) => (
+          <button key={key} onClick={() => setTab(key)} style={{
+            padding:'8px 18px', border:'none', background:'none', cursor:'pointer', fontWeight:700, fontSize:13,
+            borderBottom: tab===key ? '2px solid #2563eb' : '2px solid transparent',
+            color: tab===key ? '#2563eb' : '#6b7280', marginBottom:'-2px',
+            display:'flex', alignItems:'center', gap:6,
+          }}>
+            {label}
+            <span style={{ background: tab===key?'#2563eb':'#e5e7eb', color: tab===key?'#fff':'#374151', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        {!display.length && (
+          <div className="card">
+            <div className="empty-state"><FileText size={40} style={{ opacity:.2 }} /><p>No {tab} leave requests.</p></div>
+          </div>
+        )}
+        {display.map(r => (
+          <div key={r._id} className="card" style={{ padding:0, overflow:'hidden' }}>
+            <div style={{ padding:'14px 18px' }}>
+              <div style={{ display:'flex', justifyContent:'space-between', gap:12, flexWrap:'wrap', alignItems:'flex-start' }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{r.staffName||r.staff?.name||'Staff'}</div>
+                  <div style={{ fontSize:12, color:'#64748b', marginTop:2 }}>
+                    {r.role||r.staff?.role||'—'} · Fleet: {r.franchiseeName||'—'}
+                  </div>
+                  <div style={{ fontSize:12, color:'#374151', marginTop:6 }}>
+                    <b>Leave Type:</b> {r.leaveType||'Annual'} &nbsp;·&nbsp;
+                    <b>From:</b> {fmt(r.startDate)} &nbsp;·&nbsp;
+                    <b>To:</b> {fmt(r.endDate)} &nbsp;·&nbsp;
+                    <b>Duration:</b> {r.duration||r.days||'—'} day(s)
+                  </div>
+                  {r.reason && <div style={{ fontSize:12, color:'#374151', marginTop:4 }}><b>Reason:</b> {r.reason}</div>}
+                  <div style={{ fontSize:11, color:'#94a3b8', marginTop:4 }}>Submitted: {fmtDt(r.createdAt)}</div>
+                </div>
+                <span style={{
+                  padding:'4px 12px', borderRadius:99, fontSize:11, fontWeight:800,
+                  background: r.status==='APPROVED'?'#dcfce7':r.status==='REJECTED'?'#fee2e2':'#fef3c7',
+                  color: r.status==='APPROVED'?'#166534':r.status==='REJECTED'?'#dc2626':'#92400e',
+                }}>{r.status}</span>
+              </div>
+            </div>
+            {r.status === 'PENDING' && (
+              <div style={{ padding:'10px 18px', background:'#f8fafc', borderTop:'1px solid #f1f5f9', display:'flex', gap:8 }}>
+                <button onClick={() => handleDecision(r._id, r.staffName||'Staff', 'approve')}
+                  style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12 }}>
+                  ✅ Approve
+                </button>
+                <button onClick={() => handleDecision(r._id, r.staffName||'Staff', 'reject')}
+                  style={{ background:'#dc2626', color:'#fff', border:'none', borderRadius:8, padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12 }}>
+                  ✕ Reject
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN JOB MANAGEMENT — Moved from Fleet Operator Portal
+// ══════════════════════════════════════════════════════════════════
+function AdminJobManagement({ call }) {
+  const { data, loading, error } = useFetch(call, '/platform/all-jobs');
+  const [tab, setTab] = useState('all');
+  const [selected, setSelected] = useState(null);
+
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—';
+  const fmtDt = d => d ? new Date(d).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+  const fmtElapsed = s => { if(!s)return '0m'; const h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?`${h}h ${m}m`:`${m}m`; };
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  // Read job cards from localStorage
+  const allCards = JSON.parse(localStorage.getItem('ev_franchise_job_cards')||'[]');
+  const apiJobs  = data || [];
+
+  // Merge
+  const allJobs = allCards.length ? allCards : apiJobs;
+
+  const display = tab==='all' ? allJobs
+    : tab==='pending'     ? allJobs.filter(j=>j.status==='PENDING')
+    : tab==='in_progress' ? allJobs.filter(j=>j.status==='IN_PROGRESS')
+    : tab==='paused'      ? allJobs.filter(j=>j.status==='PAUSED')
+    : allJobs.filter(j=>j.status==='COMPLETED');
+
+  const STATUS_COLOR = { PENDING:'#7c3aed', IN_PROGRESS:'#2563eb', PAUSED:'#d97706', COMPLETED:'#16a34a' };
+
+  return (
+    <>
+      <PageHeader title="Jobs" sub="All vehicle service jobs and work orders across fleet operators." />
+      <MetricGrid metrics={[
+        { label:'Total Jobs',    value: allJobs.length,                                     Icon: ClipboardList, color:'#2563eb' },
+        { label:'In Progress',  value: allJobs.filter(j=>j.status==='IN_PROGRESS').length,  Icon: Activity,      color:'#2563eb' },
+        { label:'Paused',       value: allJobs.filter(j=>j.status==='PAUSED').length,       Icon: Clock,         color:'#d97706' },
+        { label:'Completed',    value: allJobs.filter(j=>j.status==='COMPLETED').length,    Icon: CheckCircle,   color:'#16a34a' },
+      ]} />
+
+      <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb', flexWrap:'wrap' }}>
+        {[
+          ['all','All',allJobs.length],
+          ['pending','⏳ Pending',allJobs.filter(j=>j.status==='PENDING').length],
+          ['in_progress','▶ In Progress',allJobs.filter(j=>j.status==='IN_PROGRESS').length],
+          ['paused','⏸ Paused',allJobs.filter(j=>j.status==='PAUSED').length],
+          ['completed','✅ Completed',allJobs.filter(j=>j.status==='COMPLETED').length],
+        ].map(([key,label,cnt]) => (
+          <button key={key} onClick={()=>setTab(key)} style={{
+            padding:'8px 16px', border:'none', background:'none', cursor:'pointer', fontWeight:700, fontSize:13,
+            borderBottom: tab===key?'2px solid #2563eb':'2px solid transparent',
+            color: tab===key?'#2563eb':'#6b7280', marginBottom:'-2px',
+            display:'flex', alignItems:'center', gap:6,
+          }}>
+            {label}
+            <span style={{ background:tab===key?'#2563eb':'#e5e7eb', color:tab===key?'#fff':'#374151', borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700 }}>{cnt}</span>
+          </button>
+        ))}
+      </div>
+
+      {!display.length && (
+        <div className="card">
+          <div className="empty-state"><ClipboardList size={40} style={{ opacity:.2 }} /><p>No {tab.replace('_',' ')} jobs.</p></div>
+        </div>
+      )}
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(340px,1fr))', gap:14 }}>
+        {display.map((jc, i) => {
+          const color = STATUS_COLOR[jc.status]||'#64748b';
+          return (
+            <div key={jc._id||jc.id||i} onClick={() => setSelected(selected?.id===jc.id?null:jc)}
+              style={{
+                border:`2px solid ${selected?.id===jc.id?color:'#e2e8f0'}`,
+                borderTop:`4px solid ${color}`, borderRadius:14, overflow:'hidden',
+                background:'#fff', cursor:'pointer', transition:'border-color .15s',
+                boxShadow: selected?.id===jc.id ? `0 0 0 3px ${color}22` : '0 1px 4px rgba(0,0,0,.06)',
+              }}>
+              <div style={{ padding:'14px 16px 10px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8, marginBottom:8 }}>
+                  <div style={{ fontWeight:800, fontSize:14, color:'#111827' }}>
+                    🚗 {jc.vehicleMake||''} {jc.vehicleModel||''}
+                  </div>
+                  <span style={{
+                    fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99, flexShrink:0,
+                    background:`${color}18`, color,
+                  }}>{jc.status}</span>
+                </div>
+                <div style={{ fontSize:12, color:'#64748b', marginBottom:6 }}>
+                  🔖 {jc.vehicleReg||'—'} &nbsp;·&nbsp; 👤 {jc.customerName||'—'}
+                </div>
+                <div style={{ fontSize:12, color:'#374151', lineHeight:1.5 }}>
+                  <b>Problem:</b> {jc.problem||jc.description||'—'}
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:10, alignItems:'center', padding:'8px 16px', background:'rgba(0,0,0,.025)', borderTop:'1px solid rgba(0,0,0,.06)', fontSize:12, color:'#475569', flexWrap:'wrap' }}>
+                <span>👷 {jc.staffName||'Unassigned'}</span>
+                <span style={{ padding:'1px 8px', borderRadius:99, fontSize:11, fontWeight:700,
+                  background: jc.priority==='URGENT'||jc.priority==='HIGH'?'#fee2e2':'#f1f5f9',
+                  color: jc.priority==='URGENT'||jc.priority==='HIGH'?'#dc2626':'#475569',
+                }}>⚡ {jc.priority||'NORMAL'}</span>
+                {(jc.elapsedSeconds||0)>0 && <span>⏱ {fmtElapsed(jc.elapsedSeconds)}</span>}
+              </div>
+              {selected?.id === jc.id && (
+                <div style={{ padding:16, borderTop:`2px solid ${color}`, background:'#f8fafc' }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+                    {[
+                      ['Customer', jc.customerName],
+                      ['Phone', jc.customerPhone],
+                      ['Vehicle', `${jc.vehicleMake||''} ${jc.vehicleModel||''}`],
+                      ['Reg No.', jc.vehicleReg],
+                      ['Staff', jc.staffName||'Unassigned'],
+                      ['Priority', jc.priority],
+                      ['Created', fmtDt(jc.createdAt)],
+                      jc.startedAt && ['Started', fmtDt(jc.startedAt)],
+                      jc.completedAt && ['Completed', fmtDt(jc.completedAt)],
+                    ].filter(Boolean).map(([k,v]) => (
+                      <div key={k} style={{ background:'#fff', border:'1px solid #e2e8f0', borderRadius:8, padding:'8px 10px', fontSize:12 }}>
+                        <div style={{ color:'#94a3b8', fontSize:11, marginBottom:2 }}>{k}</div>
+                        <div style={{ fontWeight:700, color:'#111827' }}>{v||'—'}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {jc.pauseReason && (
+                    <div style={{ background:'#fef3c7', border:'1px solid #fde68a', borderRadius:8, padding:'8px 10px', fontSize:12, color:'#92400e', marginBottom:8 }}>
+                      ⏸ <b>Pause Reason:</b> {jc.pauseReason}
+                    </div>
+                  )}
+                  {jc.remarks && (
+                    <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:8, padding:'8px 10px', fontSize:12, color:'#166534' }}>
+                      📝 <b>Remarks:</b> {jc.remarks}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+// STAFF COMMUNICATIONS / SUPPORT
+// ══════════════════════════════════════════════════════════════════
+function AdminStaffCommunications({call}) {
+  const [tab,setTab]=useState('notify'); const [staff,setStaff]=useState([]); const [history,setHistory]=useState([]); const [busy,setBusy]=useState(false);
+  const [form,setForm]=useState({title:'',message:'',banner:false,role:'ALL',hubId:'ALL',staffIds:[]});
+  const [hr,setHr]=useState({type:'document',userId:'',title:'',month:'',gross:'',net:'',url:'',dateKey:'',startTime:'09:00',endTime:'18:00',location:'',badge:'',description:'',checkTitle:'',items:''});
+  const load=async()=>{try{const [st,h]=await Promise.all([call('/platform/all-staff'),call('/platform/staff-notifications')]);setStaff(st||[]);setHistory(h||[])}catch(e){console.error(e)}};
+  useEffect(()=>{load()},[]);
+  const send=async()=>{if(!form.title||!form.message)return alert('Title and message are required');setBusy(true);try{await call('/platform/staff-notifications',{method:'post',data:form});setForm({...form,title:'',message:''});await load();alert('Notification sent to matching staff')}catch(e){alert(e.response?.data?.message||e.message)}finally{setBusy(false)}};
+  const create=async()=>{if(!hr.userId)return alert('Select a staff member');setBusy(true);try{if(hr.type==='document')await call('/platform/staff-documents',{method:'post',data:{userId:hr.userId,title:hr.title,type:'Staff Document',url:hr.url}});if(hr.type==='payslip')await call('/platform/staff-payslips',{method:'post',data:{userId:hr.userId,month:hr.month,gross:Number(hr.gross),net:Number(hr.net),url:hr.url,earnings:{Basic:hr.gross},deductions:{}}});if(hr.type==='shift')await call('/platform/staff-shifts',{method:'post',data:{userId:hr.userId,dateKey:hr.dateKey,startTime:hr.startTime,endTime:hr.endTime,location:hr.location,status:'SCHEDULED'}});if(hr.type==='recognition')await call('/platform/staff-recognition',{method:'post',data:{userId:hr.userId,title:hr.title,description:hr.description,badge:hr.badge}});if(hr.type==='checklist')await call('/platform/staff-checklists',{method:'post',data:{userId:hr.userId,dateKey:hr.dateKey||new Date().toISOString().slice(0,10),title:hr.checkTitle,items:hr.items.split('\n').filter(Boolean).map(label=>({label,done:false}))}});alert('Saved and connected to Staff Portal')}catch(e){alert(e.response?.data?.message||e.message)}finally{setBusy(false)}};
+  return <><PageHeader title="Staff Communications" sub="Send live announcements and publish staff resources from Command Center."/><div className="admin-feature-tabs"><button className={tab==='notify'?'active':''} onClick={()=>setTab('notify')}><Megaphone size={15}/> Notifications</button><button className={tab==='hr'?'active':''} onClick={()=>setTab('hr')}><FilePlus2 size={15}/> Staff publishing</button></div>{tab==='notify'?<div className="command-comm-grid"><div className="card"><div className="card-head"><div className="card-title">Send to staff</div><span className="badge">Live</span></div><div className="comm-banner-preview"><Megaphone size={20}/><div><b>{form.title||'Announcement preview'}</b><span>{form.message||'Your message will appear in Staff Notifications.'}</span></div></div><div className="form-grid"><label>Title<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="e.g. Service update"/></label><label>Audience<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option value="ALL">All staff</option><option value="STAFF">Staff</option><option value="TECHNICIAN">Technicians</option><option value="HUB_MANAGER">Hub Managers</option></select></label><label className="full">Message<textarea rows="5" value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write the message…"/></label><label className="switch-field full"><input type="checkbox" checked={form.banner} onChange={e=>setForm({...form,banner:e.target.checked})}/><span><b>Show as priority banner</b><small>Staff sees a banner-style notification.</small></span></label></div><button className="btn-primary" disabled={busy} onClick={send}><Send size={15}/> {busy?'Sending…':'Send notification'}</button></div><div className="card"><div className="card-head"><div className="card-title">Delivery history</div><span className="badge">{history.length}</span></div><div className="comm-history">{history.slice(0,12).map(n=><div className="comm-history-row" key={n._id}><span className={n.data?.banner?'banner-mark':''}>{n.data?.banner?'Banner':'Message'}</span><div><b>{n.title}</b><small>{n.userId?.name||n.userId?.email||'Staff'} · {new Date(n.createdAt).toLocaleString('en-IN')}</small></div></div>)}</div></div></div>:<div className="card"><div className="card-head"><div className="card-title">Publish staff resource</div><span className="badge">Connected</span></div><div className="form-grid"><label>Staff member<select value={hr.userId} onChange={e=>setHr({...hr,userId:e.target.value})}><option value="">Select staff</option>{staff.map(x=><option key={x._id} value={x._id}>{x.name} · {x.role}</option>)}</select></label><label>Resource<select value={hr.type} onChange={e=>setHr({...hr,type:e.target.value})}><option value="document">Document</option><option value="payslip">Payslip</option><option value="shift">Shift</option><option value="recognition">Recognition</option><option value="checklist">Daily checklist</option></select></label>{hr.type==='document'&&<><label>Document title<input value={hr.title} onChange={e=>setHr({...hr,title:e.target.value})}/></label><label>Document URL<input value={hr.url} onChange={e=>setHr({...hr,url:e.target.value})}/></label></>}{hr.type==='payslip'&&<><label>Month<input value={hr.month} onChange={e=>setHr({...hr,month:e.target.value})} placeholder="September 2026"/></label><label>Gross<input type="number" value={hr.gross} onChange={e=>setHr({...hr,gross:e.target.value})}/></label><label>Net take-home<input type="number" value={hr.net} onChange={e=>setHr({...hr,net:e.target.value})}/></label><label>Payslip URL<input value={hr.url} onChange={e=>setHr({...hr,url:e.target.value})}/></label></>}{hr.type==='shift'&&<><label>Date<input type="date" value={hr.dateKey} onChange={e=>setHr({...hr,dateKey:e.target.value})}/></label><label>Start<input type="time" value={hr.startTime} onChange={e=>setHr({...hr,startTime:e.target.value})}/></label><label>End<input type="time" value={hr.endTime} onChange={e=>setHr({...hr,endTime:e.target.value})}/></label><label>Location<input value={hr.location} onChange={e=>setHr({...hr,location:e.target.value})}/></label></>}{hr.type==='recognition'&&<><label>Title<input value={hr.title} onChange={e=>setHr({...hr,title:e.target.value})}/></label><label>Badge<input value={hr.badge} onChange={e=>setHr({...hr,badge:e.target.value})}/></label><label className="full">Description<textarea rows="3" value={hr.description} onChange={e=>setHr({...hr,description:e.target.value})}/></label></>}{hr.type==='checklist'&&<><label>Checklist title<input value={hr.checkTitle} onChange={e=>setHr({...hr,checkTitle:e.target.value})}/></label><label>Date<input type="date" value={hr.dateKey} onChange={e=>setHr({...hr,dateKey:e.target.value})}/></label><label className="full">Items <textarea rows="7" value={hr.items} onChange={e=>setHr({...hr,items:e.target.value})} placeholder="Inspect charger\nCheck cable\nTake proof photos"/></label></>}</div><button className="btn-primary" disabled={busy} onClick={create}><CheckCircle size={15}/> Publish to Staff</button></div>}</>;
+}
+
+function AdminStaffSupport({call}) { const {data,loading,refresh}=useFetch(call,'/platform/support-tickets'); const [reply,setReply]=useState({}); const update=async(id,status)=>{try{await call(`/platform/support-tickets/${id}`,{method:'put',data:{status,message:reply[id]||''}});setReply(r=>({...r,[id]:''}));refresh()}catch(e){alert(e.response?.data?.message||e.message)}}; return <><PageHeader title="Staff Support" sub="Manage staff requests and continue the conversation."/><div className="feature-stack">{loading?<Loader/>:!(data||[]).length?<div className="empty-state"><MessageSquare size={40}/><p>No staff support tickets.</p></div>:(data||[]).map(t=><div className="card support-admin-card" key={t._id}><div className="card-head"><div><div className="card-title">#{t.ticketNo} · {t.subject}</div><div className="page-sub">{t.userId?.name||'Staff'} · {t.category} · {t.priority}</div></div><span className="status-pill">{t.status}</span></div><p className="support-admin-desc">{t.description}</p><div className="admin-thread">{(t.messages||[]).slice(-5).map((m,i)=><div key={i}><b>{m.senderRole}</b><span>{m.message}</span></div>)}</div><div className="admin-reply"><input placeholder="Reply to staff…" value={reply[t._id]||''} onChange={e=>setReply(r=>({...r,[t._id]:e.target.value}))}/><button onClick={()=>update(t._id,'IN_PROGRESS')}><Send size={15}/></button><button onClick={()=>update(t._id,'RESOLVED')}><CheckCircle size={15}/> Resolve</button></div></div>)}</div></>}
