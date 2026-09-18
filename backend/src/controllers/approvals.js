@@ -213,7 +213,8 @@ exports.availableVehicles = async (req, res) => {
 
     // 2. CommandVehicle — created by Command Center and assigned to a fleet operator
     const cmdDocs = await CommandVehicle.find({
-      status: { $in: ['ASSIGNED', 'ACTIVE'] },
+      status: 'ACTIVE',
+      fleetInventoryStatus: 'ACTIVE',
       fleetOperatorId: { $exists: true, $ne: null },
       $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }],
     }).sort('-assignedAt').lean();

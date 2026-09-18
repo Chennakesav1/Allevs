@@ -109,3 +109,68 @@ exports.updateInventoryPart = async (req, res) => {
     res.status(500).json({ message: err.message || 'Failed to update part.' });
   }
 };
+
+// ── Configure Command Center vehicle into Fleet Inventory ────────────
+exports.configureFleetVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    const vehicle = await CommandVehicle.findOne({
+      _id: req.params.id,
+      fleetOperatorId: req.user._id,
+      status: 'ASSIGNED',
+    });
+    if (!vehicle) return res.status(404).json({ message: 'Assigned vehicle not found.' });
+
+    const body = req.body || {};
+    const enabledPlans = Array.isArray(body.enabledPlans) ? body.enabledPlans.map(String) : [];
+    const allowed = new Set(['DAILY','WEEKLY','MONTHLY']);
+    const plans = enabledPlans.filter(p => allowed.has(p));
+    if (!plans.length) return res.status(400).json({ message: 'Select at least one rental plan.' });
+
+    const rentalPlans = {
+      daily:   { enabled: plans.includes('DAILY'),   amount: Number(body.dailyAmount || 0) },
+      weekly:  { enabled: plans.includes('WEEKLY'),  amount: Number(body.weeklyAmount || 0) },
+      monthly: { enabled: plans.includes('MONTHLY'), amount: Number(body.monthlyAmount || 0) },
+    };
+    for (const key of ['daily','weekly','monthly']) {
+      if (rentalPlans[key].enabled && rentalPlans[key].amount <= 0)
+        return res.status(400).json({ message: `${key[0].toUpperCase()+key.slice(1)} rental amount must be greater than zero.` });
+    }
+
+    vehicle.rentalPlans = rentalPlans;
+    vehicle.securityDeposit = Math.max(0, Number(body.securityDeposit || 0));
+    vehicle.discountPercent = Math.min(100, Math.max(0, Number(body.discountPercent || 0)));
+    vehicle.fleetInventoryStatus = 'ACTIVE';
+    vehicle.status = 'ACTIVE';
+    vehicle.activatedAt = new Date();
+    vehicle.activatedBy = req.user._id;
+    if (body.description !== undefined) vehicle.description = String(body.description);
+    await vehicle.save();
+
+    return res.json(vehicle.toObject());
+  } catch (e) {
+    return res.status(400).json({ message: e.message });
+  }
+};
+
+exports.updateFleetVehicle = async (req, res) => {
+  try {
+    const { CommandVehicle } = require('../models');
+    const vehicle = await CommandVehicle.findOne({ _id:req.params.id, fleetOperatorId:req.user._id, status:'ACTIVE' });
+    if (!vehicle) return res.status(404).json({ message:'Fleet vehicle not found.' });
+    const body=req.body||{};
+    const enabledPlans=Array.isArray(body.enabledPlans)?body.enabledPlans.map(String):[];
+    const plans=enabledPlans.filter(p=>['DAILY','WEEKLY','MONTHLY'].includes(p));
+    if (!plans.length) return res.status(400).json({message:'Select at least one rental plan.'});
+    vehicle.rentalPlans={
+      daily:{enabled:plans.includes('DAILY'),amount:Number(body.dailyAmount||0)},
+      weekly:{enabled:plans.includes('WEEKLY'),amount:Number(body.weeklyAmount||0)},
+      monthly:{enabled:plans.includes('MONTHLY'),amount:Number(body.monthlyAmount||0)},
+    };
+    vehicle.securityDeposit=Math.max(0,Number(body.securityDeposit||0));
+    vehicle.discountPercent=Math.min(100,Math.max(0,Number(body.discountPercent||0)));
+    if(body.description!==undefined) vehicle.description=String(body.description);
+    await vehicle.save();
+    res.json(vehicle.toObject());
+  } catch(e){res.status(400).json({message:e.message});}
+};

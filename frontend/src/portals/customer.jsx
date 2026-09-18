@@ -145,6 +145,7 @@ function cachedCall(callFn, path) {
 const CUSTOMER_PREFETCH_PATHS = [
   '/customer/vehicles',
   '/customer/purchases',
+  '/customer/purchases',
   '/customer/wallet',
   '/customer/wallet/transactions',
   '/customer/complaints',
@@ -777,7 +778,7 @@ function Shell({ user, page, setPage, call, logout }) {
             </button>
 
             <nav className="mobile-menu-nav">
-              {navItems.map(({ id, label, Icon }) => (
+              {!user ? <SidebarSkeleton count={navItems.length} /> : navItems.map(({ id, label, Icon }) => (
                 <button
                   key={id}
                   className={`mobile-menu-item${page === id ? ' active' : ''}`}
@@ -811,7 +812,7 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {navItems.map(({ id, label, Icon }) => (
+          {!user ? <SidebarSkeleton count={navItems.length} /> : navItems.map(({ id, label, Icon }) => (
             <button
               key={id}
               className={'nav-item' + (page === id ? ' active' : '')}
@@ -852,7 +853,7 @@ function Shell({ user, page, setPage, call, logout }) {
         </header>
 
         <main className="page-body customer-page-body">
-          <div className="customer-page-content">
+          <div className="customer-page-transition" key={page}>
             <PageRouter page={page} call={call} setPage={setPage} />
           </div>
         </main>
@@ -1015,6 +1016,20 @@ function DataTable({ rows = [], cols = [] }) {
   );
 }
 
+// Sidebar skeleton — shown while nav data / user is loading
+function SidebarSkeleton({ count = 8 }) {
+  return (
+    <div className="sidebar-skeleton-nav">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="sidebar-skel-item">
+          <div className="sidebar-skel-icon" style={{ animationDelay: `${i * 60}ms` }} />
+          <div className="sidebar-skel-label" style={{ animationDelay: `${i * 60 + 30}ms` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Loader() {
   // Lightweight content loader: never repeats the branded/logo splash between pages.
   // The allEV logo is reserved for the actual app shell/login, not data fetching.
@@ -1026,6 +1041,44 @@ function Loader() {
           <strong>Loading</strong>
           <span>Please wait a moment…</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Shimmer skeleton cards for Available Vehicles section
+function VehicleSkeletonGrid({ count = 6 }) {
+  return (
+    <div className="vehicle-skeleton-grid">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="vehicle-skeleton-card" style={{ animationDelay: `${i * 60}ms` }}>
+          <div className="skel-img skel-shimmer" />
+          <div className="skel-body">
+            <div className="skel-line skel-line-lg skel-shimmer" />
+            <div className="skel-line skel-line-sm skel-shimmer" />
+            <div className="skel-specs">
+              <div className="skel-spec-chip skel-shimmer" />
+              <div className="skel-spec-chip skel-shimmer" />
+              <div className="skel-spec-chip skel-shimmer" style={{ width: 48 }} />
+            </div>
+            <div className="skel-price skel-shimmer" />
+            <div className="skel-line skel-line-xs skel-shimmer" style={{ marginBottom: 12 }} />
+          </div>
+          <div className="skel-btn skel-shimmer" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Lightweight vehicle loading state — no branded/logo splash between page loads.
+function EVLoadingScreen({ label = 'Finding vehicles near you…' }) {
+  return (
+    <div className="vehicle-loading-inline" role="status" aria-live="polite">
+      <div className="compact-loader-spinner" aria-hidden="true" />
+      <div>
+        <strong>{label}</strong>
+        <span>Checking the latest availability</span>
       </div>
     </div>
   );
@@ -1097,9 +1150,9 @@ function PaymentSuccessScreen({ successData, vehicle, onDone }) {
           </div>
         </div>
 
-        <div className="success-title">Purchase Confirmed! 🎉</div>
+        <div className="success-title">Payment Successful! 🎉</div>
         <div className="success-amount">₹{successData.amount}</div>
-        <div className="success-sub">Your vehicle purchase is confirmed</div>
+        <div className="success-sub">Your payment has been received and your vehicle booking is confirmed.</div>
 
         <div className="success-details-card">
           {[
@@ -1144,8 +1197,9 @@ function CustDashboard({ call, setPage }) {
   const { data: w, loading: lw } = useFetch(call, '/customer/wallet');
   const { data: complaints, loading: lc } = useFetch(call, '/customer/complaints');
   const [user, setUser] = React.useState(null);
-  React.useEffect(() => { cachedCall(call, '/customer/profile').then(setUser).catch(() => {}); }, []);
+  React.useEffect(() => { call('/customer/profile').then(setUser).catch(() => {}); }, []);
 
+  if ((lv && !v) || (lb && !b)) return <Loader />;
 
   const purchases = Array.isArray(b) ? b : [];
   const handedOver = purchases.filter(p => p.status === 'HANDED_OVER');
@@ -1292,6 +1346,7 @@ function CustDashboard({ call, setPage }) {
 function CustVehicles({ call, setPage }) {
   const { data: purchasesRaw, loading: lp } = useFetch(call, '/customer/purchases');
   const purchaseRecords = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+  if (lp && !purchasesRaw) return <Loader />;
 
   // Only show vehicles that have been HANDED_OVER by the franchisee
   const handedOver = purchaseRecords.filter(p => p.status === 'HANDED_OVER');
@@ -1389,6 +1444,7 @@ function CustBookings({ call, setPage }) {
   const [pickup, setPickup] = useState(null);
   const [filter, setFilter] = useState('all');
 
+  if (loading && !purchasesRaw) return <Loader />;
 
   const STATUS_CFG = {
     BOOKED:           { label: 'Awaiting Payment',     color: '#d97706', bg: '#fef3c7', icon: '🕐' },
@@ -1416,7 +1472,7 @@ function CustBookings({ call, setPage }) {
   const activePurchases = purchases.filter(r => !['COMPLETED','CANCELLED'].includes(r.status));
 
   return <>
-    <PageHeader title="My Purchases" sub="Your purchased vehicles, payment status and franchise handover details." />
+    <PageHeader title="My Bookings" sub="Rental plans, payment status and fleet operator handover details." />
     <MetricGrid metrics={[
       { label: 'Total Purchases',   value: purchases.length,                                    Icon: ClipboardList, color: '#2563eb' },
       { label: 'Awaiting Handover', value: activePurchases.filter(r => r.status === 'PAYMENT_DONE').length, Icon: Car,          color: '#7c3aed' },
@@ -1471,9 +1527,13 @@ function CustBookings({ call, setPage }) {
                   <strong>{r.saleQuantity ?? 1} vehicle{(r.saleQuantity ?? 1) !== 1 ? 's' : ''}</strong>
                 </div>
                 <div className="pc-stat">
-                  <span>Unit Price</span>
-                  <strong>₹{(r.pricePerDay || 0).toLocaleString('en-IN')}</strong>
+                  <span>{r.rentalPlan && r.rentalPlan!=='SALE' ? 'Rental Plan' : 'Unit Price'}</span>
+                  <strong>{r.rentalPlan && r.rentalPlan!=='SALE' ? `${r.rentalPlan} · ${r.planUnits||r.durationDays||1}` : `₹${(r.pricePerDay || 0).toLocaleString('en-IN')}`}</strong>
                 </div>
+                {r.rentalPlan && r.rentalPlan!=='SALE' && <div className="pc-stat">
+                  <span>Security Deposit</span>
+                  <strong>₹{Number(r.securityDeposit||0).toLocaleString('en-IN')}</strong>
+                </div>}
                 <div className="pc-stat pc-stat--highlight">
                   <span>Total Paid</span>
                   <strong>₹{(r.totalAmount || 0).toLocaleString('en-IN')}</strong>
@@ -1501,8 +1561,8 @@ function CustBookings({ call, setPage }) {
                 {r.handoverDate
                   ? <>✅ Handed over on <strong>{new Date(r.handoverDate).toLocaleDateString('en-IN')}</strong> — purchase complete</>
                   : r.status === 'BOOKED'
-                    ? <>🕐 Complete payment to proceed with your purchase</>
-                    : <>⏳ Payment confirmed. Visit the franchisee to collect your vehicle.</>
+                    ? <>🕐 Complete payment to confirm your booking</>
+                    : <>⏳ Payment confirmed. The fleet operator will coordinate your vehicle handover.</>
                 }
               </div>
 
@@ -1561,6 +1621,7 @@ function CustWallet({ call }) {
   const [success, setSuccess]           = React.useState(null); // { amount, newBalance, paymentId }
   const [error, setError]               = React.useState('');
 
+  if ((lw && !w) || (lt && !tx)) return <Loader />;
 
   const balance = w?.balance ?? 0;
   const txList  = Array.isArray(tx) ? tx : [];
@@ -1786,6 +1847,7 @@ function CustInvoices({ call }) {
     }
   };
 
+  if (loading && !invoicesRaw) return <Loader />;
 
   const fmt = (n) => `\u20b9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const date = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -1906,6 +1968,7 @@ function CustComplaints({ call }) {
 
   const activeVehicles = options?.activeVehicles || [];
   // Only block on first load with no cache
+  if (loading && !data) return <Loader />;
   if (error && !data)   return <Err msg={error} />;
   const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
 
@@ -2110,20 +2173,17 @@ function CustAvailableVehicles({ call, setPage }) {
     };
 
     load();
-    // Silent background refresh: only while the customer is viewing the tab.
-    // This keeps the portal fresh without creating loading flicker or needless requests.
-    const refreshIfVisible = () => {
-      if (document.visibilityState !== 'visible') return;
+    // Background refresh every 10 s — uses cachedCall so no flicker
+    const interval = setInterval(() => {
+      // Invalidate vehicle/franchisee cache before background refresh
       _cache.forEach((_, k) => {
         if (k.startsWith('/customer/available-vehicles') || k.startsWith('/customer/complaint-options')) {
           _cache.delete(k);
         }
       });
       load(true);
-    };
-    const interval = setInterval(refreshIfVisible, 30_000);
-    document.addEventListener('visibilitychange', refreshIfVisible);
-    return () => { alive = false; clearInterval(interval); document.removeEventListener('visibilitychange', refreshIfVisible); };
+    }, 10_000);
+    return () => { alive = false; clearInterval(interval); };
   }, []);
 
   const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
@@ -2150,11 +2210,20 @@ function CustAvailableVehicles({ call, setPage }) {
   const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
 
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
+  const [imgLoaded, setImgLoaded] = useState({});
 
   return <>
     <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
 
-    {location?.pincode && (
+    {/* Loading state — EV logo + skeleton grid */}
+    {loading && (
+      <>
+        <EVLoadingScreen label="Finding vehicles near you…" />
+        <VehicleSkeletonGrid count={6} />
+      </>
+    )}
+
+    {!loading && location?.pincode && (
       <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14,animation:'slide-up .4s ease'}}>
         <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
         <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
@@ -2182,7 +2251,8 @@ function CustAvailableVehicles({ call, setPage }) {
       </div>
     )}
 
-    <>
+    {!loading && (
+      <>
         {/* Category filter tabs */}
         <div className="filter-tabs" style={{animation:'slide-up .35s ease .05s both'}}>
           {categories.map(c => (
@@ -2209,9 +2279,12 @@ function CustAvailableVehicles({ call, setPage }) {
                 <div className="vbc-img">
                   {v.images?.length > 0 ? (
                     <>
+                      {!imgLoaded[v._id] && <div className="vbc-img-loading" />}
                       <img
                         src={v.images[0].url}
                         alt={v.make}
+                        onLoad={() => setImgLoaded(p => ({ ...p, [v._id]: true }))}
+                        style={{ opacity: imgLoaded[v._id] ? 1 : 0, transition: 'opacity .35s ease' }}
                       />
                     </>
                   ) : (
@@ -2227,13 +2300,21 @@ function CustAvailableVehicles({ call, setPage }) {
                     {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
                     {v.chargingType && <span>🔌 {v.chargingType}</span>}
                   </div>
-                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:4}}>
-                    ✅ {v.quantity} unit{Number(v.quantity)===1?'':'s'} available · {v.franchiseeName || 'EV CORE franchise'}
+                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:6}}>
+                    ✓ {v.quantity || 0} available · {v.franchiseeName || 'EV CORE Fleet'}
                   </div>
-                  <div className="vbc-price">
-                    <span className="price-amt">₹{v.pricePerDay?.toLocaleString('en-IN')}</span>
-                    <span className="price-unit"> / unit</span>
-                  </div>
+                  {v.rentalPlans ? (
+                    <div className="vbc-rental-prices">
+                      {v.rentalPlans.daily?.enabled && <div><span>Daily</span><strong>₹{Number(v.rentalPlans.daily.amount).toLocaleString('en-IN')}</strong><small>/day</small></div>}
+                      {v.rentalPlans.weekly?.enabled && <div><span>Weekly</span><strong>₹{Number(v.rentalPlans.weekly.amount).toLocaleString('en-IN')}</strong><small>/week</small></div>}
+                      {v.rentalPlans.monthly?.enabled && <div><span>Monthly</span><strong>₹{Number(v.rentalPlans.monthly.amount).toLocaleString('en-IN')}</strong><small>/month</small></div>}
+                    </div>
+                  ) : (
+                    <div className="vbc-price">
+                      <span className="price-amt">₹{Number(v.salePrice || v.pricePerDay || 0).toLocaleString('en-IN')}</span>
+                      <span className="price-unit"> / vehicle</span>
+                    </div>
+                  )}
                 </div>
                 <button className="vbc-btn">View Details →</button>
               </div>
@@ -2241,8 +2322,9 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
         )}
       </>
+    )}
 
-    {/* Detail modal*/}
+    {/* Detail modal */}
     {selected && (
       <div className="modal-overlay" onClick={() => setSelected(null)}>
         <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(580px,100%)' }}>
@@ -2264,12 +2346,23 @@ function CustAvailableVehicles({ call, setPage }) {
             <div className="kv-list" style={{ marginTop: 12 }}>
               {[
                 ['Registration', selected.registrationNo],
-                ['Battery', `${selected.batteryCapacityKwh} kWh`],
-                ['Range', `${selected.rangeKm} km`],
-                ['Charging', selected.chargingType],
-                ['Price', `₹${(selected.pricePerDay||0).toLocaleString('en-IN')} / unit`],
-                ['Available Stock', `${selected.quantity ?? 0} unit(s) in stock`],
-                ['Franchisee', selected.franchiseeName || 'EV CORE franchise'],
+                ['Chassis / VIN', selected.chassisNo],
+                ['Motor Number', selected.motorNo],
+                ['Insurance Expiry', selected.insuranceExpiry ? new Date(selected.insuranceExpiry).toLocaleDateString('en-IN') : null],
+                ['Odometer', selected.odometerKm != null ? `${Number(selected.odometerKm).toLocaleString('en-IN')} km` : null],
+                ['Seating', selected.seatingCapacity ? `${selected.seatingCapacity} persons` : null],
+                ['Top Speed', selected.topSpeedKph ? `${selected.topSpeedKph} km/h` : null],
+                ['Battery', selected.batteryCapacityKwh ? `${selected.batteryCapacityKwh} kWh` : '—'],
+                ['Range', selected.rangeKm ? `${selected.rangeKm} km` : '—'],
+                ['Charging', selected.chargingType || '—'],
+                ['Daily Plan', selected.rentalPlans?.daily?.enabled ? `₹${Number(selected.rentalPlans.daily.amount).toLocaleString('en-IN')} / day` : null],
+                ['Weekly Plan', selected.rentalPlans?.weekly?.enabled ? `₹${Number(selected.rentalPlans.weekly.amount).toLocaleString('en-IN')} / week` : null],
+                ['Monthly Plan', selected.rentalPlans?.monthly?.enabled ? `₹${Number(selected.rentalPlans.monthly.amount).toLocaleString('en-IN')} / month` : null],
+                ['Security Deposit', selected.rentalPlans ? `₹${Number(selected.securityDeposit||0).toLocaleString('en-IN')}` : null],
+                ['Discount', selected.rentalPlans && Number(selected.discountPercent||0) ? `${Number(selected.discountPercent)}% off` : null],
+                ['Sale Price', !selected.rentalPlans ? `₹${(selected.pricePerDay||0).toLocaleString('en-IN')} / unit` : null],
+                ['Available Stock', `${selected.quantity ?? 0} vehicle(s)`],
+                ['Fleet Operator', selected.franchiseeName || 'EV CORE Fleet'],
               ].map(([k, v]) => v && (
                 <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
               ))}
@@ -2278,7 +2371,7 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
           <div className="modal-footer">
             <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
-            <button className="btn-primary" onClick={() => setPurchaseVehicle(selected)}>🛒 Buy Now</button>
+            <button className="btn-primary" onClick={() => setPurchaseVehicle(selected)}>{selected.rentalPlans ? '🛵 Book Rental' : '🛒 Buy Now'}</button>
           </div>
         </div>
       </div>
@@ -2305,7 +2398,9 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
   const [pincode, setPincode] = useState('');
   const [addrData, setAddrData] = useState(null);
   const [area, setArea] = useState('');
-  const [quantity, setQuantity] = useState(1);
+  const quantity = 1;
+  const [rentalPlan, setRentalPlan] = useState(vehicle.rentalPlans ? (vehicle.rentalPlans.daily?.enabled ? 'DAILY' : vehicle.rentalPlans.weekly?.enabled ? 'WEEKLY' : 'MONTHLY') : 'SALE');
+  const [rentalDuration, setRentalDuration] = useState(1);
   const [pincodeLoading, setPincodeLoading] = useState(false);
   const [pincodeError, setPincodeError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2336,13 +2431,19 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
     }).catch(() => {}).finally(() => setWalletLoading(false));
   }, []);
 
-  // Price calculations
-  const unitPrice = Number(vehicle.pricePerDay || 0);
-  const subtotal = unitPrice * quantity;
+  // Price calculations — rental listings are priced by plan × duration × vehicles.
+  const isRental = !!vehicle.rentalPlans;
+  const selectedPlanData = isRental ? vehicle.rentalPlans?.[rentalPlan.toLowerCase()] : null;
+  const unitPrice = Number(isRental ? (selectedPlanData?.amount || 0) : (vehicle.pricePerDay || 0));
+  const billingUnits = isRental ? rentalDuration : 1;
+  const subtotal = unitPrice * billingUnits * quantity;
+  const listingDiscount = isRental ? Math.floor(subtotal * Number(vehicle.discountPercent || 0) / 100) : 0;
   const couponDiscount = couponApplied
-    ? (couponApplied.type === 'PERCENT' ? Math.floor(subtotal * couponApplied.discount / 100) : Math.min(couponApplied.discount, subtotal))
+    ? (couponApplied.type === 'PERCENT' ? Math.floor(Math.max(0, subtotal - listingDiscount) * couponApplied.discount / 100) : Math.min(couponApplied.discount, Math.max(0, subtotal - listingDiscount)))
     : 0;
-  const afterCoupon = Math.max(0, subtotal - couponDiscount);
+  const afterDiscounts = Math.max(0, subtotal - listingDiscount - couponDiscount);
+  const securityDeposit = isRental ? Number(vehicle.securityDeposit || 0) * quantity : 0;
+  const afterCoupon = afterDiscounts + securityDeposit;
   const walletDeduction = useWallet ? Math.min(walletBalance, afterCoupon) : 0;
   const finalAmount = Math.max(0, afterCoupon - walletDeduction);
 
@@ -2408,21 +2509,23 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
 
   const startPayment = async () => {
     if (!pincode || pincode.length !== 6 || !addrData) { setMsg({type:'error',text:'Please enter a valid pincode.'}); return; }
-    if (quantity < 1 || quantity > Number(vehicle.quantity || 0)) { setMsg({type:'error',text:`Please select 1 to ${vehicle.quantity || 0} vehicles.`}); return; }
+    if (quantity !== 1) { setMsg({type:'error',text:'Each customer can book only 1 vehicle per booking.'}); return; }
+    if (isRental && !selectedPlanData?.enabled) { setMsg({type:'error',text:'Please select an available rental plan.'}); return; }
+    if (isRental && rentalDuration < 1) { setMsg({type:'error',text:'Please select a valid rental duration.'}); return; }
     setBusy(true); setMsg({type:'',text:''});
     try {
       const order = await call('/customer/purchases/create-order', {
         method: 'POST',
         data: {
-          vehicleId: vehicle._id, franchiseeId: vehicle.franchiseeId, pincode,
+          vehicleId: vehicle._id, vehicleSource: vehicle._source, franchiseeId: vehicle.franchiseeId, pincode,
           state: addrData.state, district: addrData.district, area: area || addrData.area,
           fullAddress: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`,
-          purchaseDate: new Date().toISOString(), saleQuantity: quantity, durationDays: quantity,
+          purchaseDate: new Date().toISOString(), saleQuantity: quantity, durationDays: isRental ? rentalDuration : quantity, rentalPlan: isRental ? rentalPlan : 'SALE', planUnits: isRental ? rentalDuration : 1,
           walletAmount: walletDeduction, couponCode: couponApplied?.code, couponDiscount,
         }
       });
       if (finalAmount === 0) {
-        setSuccessData({ vehicleName: `${vehicle.make} ${vehicle.model}`, amount: subtotal.toLocaleString('en-IN'), quantity, purchaseDate: new Date().toLocaleDateString('en-IN'), address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`, pickup: vehicle.franchiseeName || 'Selected Franchisee', paymentId: 'WALLET-' + Date.now() });
+        setSuccessData({ vehicleName: `${vehicle.make} ${vehicle.model}`, amount: finalAmount.toLocaleString('en-IN'), quantity, purchaseDate: new Date().toLocaleDateString('en-IN'), address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`, pickup: vehicle.franchiseeName || 'Selected Franchisee', paymentId: 'WALLET-' + Date.now() });
         setStep('success'); setBusy(false); return;
       }
       if (!window.Razorpay) { setMsg({type:'error',text:'Razorpay SDK is not loaded.'}); setBusy(false); return; }
@@ -2432,8 +2535,26 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         order_id: order.orderId, redirect: false,
         handler: async response => {
           try {
-            await call('/customer/purchases/verify-payment', { method: 'POST', data: { rentalId: order.purchaseId, purchaseId: order.purchaseId, razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature } });
-            setSuccessData({ vehicleName: `${vehicle.make} ${vehicle.model}`, amount: (order.amount / 100).toLocaleString('en-IN'), quantity, purchaseDate: new Date().toLocaleDateString('en-IN'), address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`, pickup: vehicle.franchiseeName || 'Selected Franchisee', paymentId: response.razorpay_payment_id });
+            const verification = await call('/customer/purchases/verify-payment', {
+              method: 'POST',
+              data: {
+                rentalId: order.purchaseId,
+                purchaseId: order.purchaseId,
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature
+              }
+            });
+            if (!verification?.success) throw new Error(verification?.message || 'Payment verification failed.');
+            setSuccessData({
+              vehicleName: `${vehicle.make} ${vehicle.model}`,
+              amount: (order.amount / 100).toLocaleString('en-IN'),
+              quantity,
+              purchaseDate: new Date().toLocaleDateString('en-IN'),
+              address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`,
+              pickup: vehicle.franchiseeName || 'Selected Franchisee',
+              paymentId: verification.paymentId || response.razorpay_payment_id
+            });
             setStep('success');
           } catch (e) { setMsg({type:'error',text:e.response?.data?.message||'Payment verification failed.'}); }
           finally { setBusy(false); }
@@ -2447,7 +2568,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
   };
 
   const STEPS = ['address', 'quantity', 'payment'];
-  const STEP_LABELS = ['Location', 'Quantity', 'Payment'];
+  const STEP_LABELS = isRental ? ['Location', 'Plan & Quantity', 'Payment'] : ['Location', 'Quantity', 'Payment'];
   const stepIdx = STEPS.indexOf(step);
 
   if (step === 'success' && successData) return <PaymentSuccessScreen successData={successData} vehicle={vehicle} onDone={onSuccess} />;
@@ -2503,6 +2624,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                     placeholder="Enter 6-digit pincode"
                     onChange={e => { const v = e.target.value.replace(/\D/g,'').slice(0,6); setPincode(v); setAddrData(null); setPincodeError(''); if (v.length === 6) lookupPincode(v); }}
                   />
+                  {pincodeLoading && <div className="pincode-spinner" />}
                 </div>
                 {pincodeError && <div className="bk-field-err">{pincodeError}</div>}
               </div>
@@ -2531,7 +2653,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
             </div>
           )}
 
-          {/* ── STEP 2: Quantity ── */}
+          {/* ── STEP 2: Rental plan ── */}
           {step === 'quantity' && (
             <div className="bk-step-content">
               <div className="bk-vehicle-card">
@@ -2541,26 +2663,53 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 }
                 <div className="bk-vehicle-info">
                   <div className="bk-vehicle-name">{vehicle.make} {vehicle.model}</div>
-                  <div className="bk-vehicle-meta">{vehicle.category || '2-Wheeler'} · {vehicle.color || '—'}</div>
-                  <div className="bk-vehicle-price">₹{unitPrice.toLocaleString('en-IN')} <span>/ vehicle</span></div>
+                  <div className="bk-vehicle-meta">{vehicle.category || 'Vehicle'} · {vehicle.registrationNo || 'Fleet vehicle'}</div>
+                  <div className="bk-vehicle-price">{isRental ? 'Flexible rental' : `₹${unitPrice.toLocaleString('en-IN')}`} <span>{isRental ? 'choose a plan below' : '/ vehicle'}</span></div>
                 </div>
               </div>
 
-              <div className="bk-qty-section">
-                <div className="bk-qty-label">How many vehicles would you like?</div>
-                <div className="bk-qty-controls">
-                  <button type="button" className="bk-qty-btn" onClick={() => setQuantity(q => Math.max(1, q - 1))}>−</button>
-                  <div className="bk-qty-num">{quantity}</div>
-                  <button type="button" className="bk-qty-btn bk-qty-btn-plus" onClick={() => setQuantity(q => Math.min(Number(vehicle.quantity || 1), q + 1))}>+</button>
-                </div>
-                <div className="bk-qty-avail">{vehicle.quantity || 0} units available at this franchise</div>
-              </div>
+              {isRental && (
+                <>
+                  <div className="bk-plan-heading">Choose your rental plan</div>
+                  <div className="bk-rental-plan-grid">
+                    {[
+                      ['DAILY','Daily','day','daily'],
+                      ['WEEKLY','Weekly','week','weekly'],
+                      ['MONTHLY','Monthly','month','monthly'],
+                    ].map(([key,label,unit,field]) => vehicle.rentalPlans?.[field]?.enabled && (
+                      <button type="button" key={key} className={`bk-rental-plan-card${rentalPlan===key?' active':''}`} onClick={()=>{setRentalPlan(key);setRentalDuration(1);}}>
+                        <span className="bk-plan-check">{rentalPlan===key?'✓':''}</span>
+                        <strong>{label}</strong>
+                        <b>₹{Number(vehicle.rentalPlans[field].amount).toLocaleString('en-IN')}</b>
+                        <small>per {unit}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="bk-rental-controls">
+                    <div className="bk-qty-section bk-single-vehicle-note">
+                      <div className="bk-qty-label">Vehicle</div>
+                      <div className="bk-single-vehicle"><Car size={16}/> 1 vehicle per booking</div>
+                      <div className="bk-qty-avail">{vehicle.quantity || 0} vehicle(s) currently available</div>
+                    </div>
+                    <div className="bk-qty-section">
+                      <div className="bk-qty-label">Rental duration</div>
+                      <div className="bk-duration-input"><input type="number" min="1" max="365" value={rentalDuration} onChange={e=>setRentalDuration(Math.max(1,Math.min(365,Number(e.target.value)||1)))} /><span>{rentalPlan==='DAILY'?'days':rentalPlan==='WEEKLY'?'weeks':'months'}</span></div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {!isRental && <div className="bk-single-vehicle-note bk-qty-section">
+                <div className="bk-qty-label">Vehicle</div>
+                <div className="bk-single-vehicle"><Car size={16}/> 1 vehicle per booking</div>
+                <div className="bk-qty-avail">{vehicle.quantity || 0} unit(s) currently available</div>
+              </div>}
 
               <div className="bk-price-preview">
-                <div className="bk-price-row">
-                  <span>{quantity} × ₹{unitPrice.toLocaleString('en-IN')}</span>
-                  <strong>₹{subtotal.toLocaleString('en-IN')}</strong>
-                </div>
+                <div className="bk-price-row"><span>{quantity} vehicle{quantity!==1?'s':''} × ₹{unitPrice.toLocaleString('en-IN')} × {billingUnits}{isRental?' '+(rentalPlan==='DAILY'?'day(s)':rentalPlan==='WEEKLY'?'week(s)':'month(s)'):''}</span><strong>₹{subtotal.toLocaleString('en-IN')}</strong></div>
+                {isRental && Number(vehicle.discountPercent||0)>0 && <div className="bk-price-row"><span>Fleet discount ({Number(vehicle.discountPercent)}%)</span><strong className="bk-discount">−₹{listingDiscount.toLocaleString('en-IN')}</strong></div>}
+                {isRental && <div className="bk-price-row"><span>Security deposit</span><strong>₹{securityDeposit.toLocaleString('en-IN')}</strong></div>}
+                <div className="bk-price-row bk-total-row"><span>Estimated total</span><strong>₹{afterCoupon.toLocaleString('en-IN')}</strong></div>
               </div>
             </div>
           )}
@@ -2573,9 +2722,10 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 <div className="bk-order-title">Order Summary</div>
                 {[
                   ['Vehicle', `${vehicle.make} ${vehicle.model}`],
-                  ['Quantity', `${quantity} vehicle${quantity !== 1 ? 's' : ''}`],
-                  ['Unit Price', `₹${unitPrice.toLocaleString('en-IN')}`],
-                  ['Subtotal', `₹${subtotal.toLocaleString('en-IN')}`],
+                  ['Plan', isRental ? `${rentalPlan} · ${rentalDuration} ${rentalPlan==='DAILY'?'day(s)':rentalPlan==='WEEKLY'?'week(s)':'month(s)'}` : 'Vehicle Purchase'],
+                  ['Rate', `₹${unitPrice.toLocaleString('en-IN')} / ${isRental ? rentalPlan==='DAILY'?'day':rentalPlan==='WEEKLY'?'week':'month' : 'vehicle'}`],
+                  ['Rental Amount', `₹${subtotal.toLocaleString('en-IN')}`],
+                  ...(isRental ? [['Fleet Discount', `−₹${listingDiscount.toLocaleString('en-IN')}`],['Security Deposit', `₹${securityDeposit.toLocaleString('en-IN')}`]] : []),
                   ['Pickup at', vehicle.franchiseeName || '—'],
                 ].map(([k, v]) => (
                   <div className="bk-order-row" key={k}>
@@ -2585,6 +2735,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 ))}
               </div>
 
+              {!isRental && <>
               {/* Coupon */}
               <div className="bk-section">
                 <div className="bk-section-label">🏷️ Coupon Code</div>
@@ -2615,10 +2766,13 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 <div className="bk-wallet-row">
                   <div className="bk-wallet-bal">
                     <Wallet size={16} />
-                    <strong>₹{walletBalance.toLocaleString('en-IN')}</strong>
+                    {walletLoading
+                      ? <span className="bk-wallet-loading">Loading…</span>
+                      : <strong>₹{walletBalance.toLocaleString('en-IN')}</strong>
+                    }
                     <span className="bk-wallet-label">available</span>
                   </div>
-                  {(
+                  {!walletLoading && (
                     <label className="bk-wallet-toggle">
                       <input
                         type="checkbox"
@@ -2639,7 +2793,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 </div>
 
                 {/* Zero-balance notice */}
-                {walletBalance === 0 && (
+                {!walletLoading && walletBalance === 0 && (
                   <div className="bk-wallet-zero-notice">
                     <span>Your wallet balance is ₹0.</span>
                     <button className="bk-recharge-trigger" onClick={() => setShowRecharge(true)}>
@@ -2676,6 +2830,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                   </div>
                 )}
               </div>
+
+              </>}
 
               {/* Total */}
               <div className="bk-total-box">
@@ -3149,6 +3305,7 @@ function CustChargingStations({ call }) {
     );
   };
 
+  if (loading && !rawHubs) return <Loader />;
   if (error   && !rawHubs) return <Err msg={error} />;
 
   const onlineCount = (rawHubs || []).filter(h => h.status === 'ONLINE').length;
@@ -3193,7 +3350,8 @@ function CustChargingStations({ call }) {
           )}
           {locStatus === 'getting' && (
             <div className="cs-loc-status getting">
-              <span>Locating…</span>
+              <div className="cs-loc-spinner" />
+              <span>Getting your location…</span>
             </div>
           )}
           {locStatus === 'done' && (
@@ -3566,6 +3724,7 @@ function CustProfile({ call, setPage }) {
     });
   }, [user]);
 
+  if (loading && !user) return <Loader />;
   const name = user?.name || 'Customer';
   const initial = name.trim().charAt(0).toUpperCase() || 'C';
   const profileImage = user?.profileImage;

@@ -6,7 +6,7 @@
  */
 const crypto     = require('crypto');
 const nodemailer = require('nodemailer');
-const { VehicleRental, PendingVehicle, Invoice, User, Financial, Job } = require('../models');
+const { VehicleRental, PendingVehicle, Invoice, User, Financial, Job, Payment, CustomerPayment } = require('../models');
 const audit = require('../services/audit');
 
 // ── Razorpay helper ──────────────────────────────────────────────────
@@ -226,117 +226,118 @@ async function sendInvoiceEmail(customer, rental, inv) {
 exports.createOrder = async (req, res) => {
   try {
     const {
-      vehicleId, franchiseeId, pincode, state, district, area, fullAddress,
-      purchaseDate, saleQuantity, durationDays,
+      vehicleId, vehicleSource, franchiseeId, pincode, state, district, area, fullAddress,
+      purchaseDate, saleQuantity, durationDays, rentalPlan, planUnits,
     } = req.body;
     if (!vehicleId) return res.status(400).json({ message: 'vehicleId is required' });
 
-    const vehicle = await PendingVehicle.findById(vehicleId);
-    if (!vehicle || vehicle.status !== 'APPROVED')
-      return res.status(404).json({ message: 'Vehicle not found or not available' });
+    const { CommandVehicle } = require('../models');
+    let vehicle = null;
+    let source = vehicleSource === 'command_center' || vehicleSource === 'COMMAND_VEHICLE' ? 'COMMAND_VEHICLE' : 'PENDING_VEHICLE';
+    if (source === 'COMMAND_VEHICLE') {
+      vehicle = await CommandVehicle.findOne({ _id: vehicleId, status: 'ACTIVE', fleetInventoryStatus: 'ACTIVE' });
+    } else {
+      vehicle = await PendingVehicle.findOne({ _id: vehicleId, status: 'APPROVED' });
+    }
+    if (!vehicle) return res.status(404).json({ message: 'Vehicle not found or not available' });
 
-    // The vehicle's franchisee is authoritative. A customer may choose which
-    // nearest franchisee to browse, but the booking can only belong to the
-    // franchisee that owns the selected vehicle. This guarantees that only
-    // that franchisee can perform the handover.
-    if (!vehicle.franchiseeId) {
-      return res.status(400).json({ message: 'This vehicle is not assigned to a franchisee and cannot be booked.' });
-    }
-    if (franchiseeId && String(franchiseeId) !== String(vehicle.franchiseeId)) {
-      return res.status(409).json({ message: 'Selected franchisee does not own this vehicle.' });
-    }
-    const franchisee = await User.findOne({ _id: vehicle.franchiseeId, role: 'FRANCHISEE', active: true })
-      .select('name address').lean();
-    if (!franchisee) return res.status(404).json({ message: "The vehicle's franchisee is not available." });
+    if (!vehicle.franchiseeId && !vehicle.fleetOperatorId)
+      return res.status(400).json({ message: 'This vehicle is not assigned to a fleet operator and cannot be booked.' });
+
+    const ownerId = vehicle.franchiseeId || vehicle.fleetOperatorId;
+    if (franchiseeId && String(franchiseeId) !== String(ownerId))
+      return res.status(409).json({ message: 'Selected fleet operator does not own this vehicle.' });
+
+    const franchisee = await User.findOne({ _id: ownerId, role: 'FRANCHISEE', active: true }).select('name address').lean();
+    if (!franchisee) return res.status(404).json({ message: 'The fleet operator for this vehicle is not available.' });
     const fa = franchisee.address || {};
 
-    const purchaseQty = Math.max(1, Number(saleQuantity || durationDays || 1));
-    if (vehicle.quantity == null) { vehicle.quantity = 1; await vehicle.save(); }
-    if (Number(vehicle.quantity) <= 0) return res.status(409).json({ message: 'Vehicle is currently out of stock' });
-    if (purchaseQty > Number(vehicle.quantity)) return res.status(409).json({ message: `Only ${vehicle.quantity} unit(s) available.` });
-    const unitPrice = Number(vehicle.salePrice ?? vehicle.pricePerDay ?? 0);
-    if (unitPrice <= 0) return res.status(400).json({ message: 'Vehicle sale price is not configured.' });
-    const amount = Math.round(unitPrice * purchaseQty * 100); // paise (vehicle price × quantity)
+    const stockQty = Math.max(0, Number(vehicle.quantity ?? 1));
+    if (stockQty <= 0) return res.status(409).json({ message: 'Vehicle is currently out of stock' });
+    // One vehicle per customer booking. Inventory quantity is stock, not booking quantity.
+    const vehicleCount = 1;
+    const durationUnits = Math.max(1, Number(planUnits || durationDays || 1));
+    if (stockQty < 1) return res.status(409).json({ message: 'Vehicle is currently out of stock' });
 
-    const rz      = getRazorpay();
+    const isCommandRental = source === 'COMMAND_VEHICLE' && vehicle.rentalPlans;
+    let selectedPlan = 'SALE';
+    let rate = Number(vehicle.salePrice ?? vehicle.pricePerDay ?? 0);
+    let rentalSubtotal = rate * vehicleCount;
+    let discountPercent = 0;
+    let discountAmount = 0;
+    let securityDeposit = 0;
+
+    if (isCommandRental) {
+      selectedPlan = String(rentalPlan || '').toUpperCase();
+      if (!['DAILY','WEEKLY','MONTHLY'].includes(selectedPlan))
+        return res.status(400).json({ message: 'Please select a rental plan.' });
+      const plan = vehicle.rentalPlans[selectedPlan.toLowerCase()];
+      if (!plan?.enabled || Number(plan.amount) <= 0)
+        return res.status(400).json({ message: 'Selected rental plan is not available for this vehicle.' });
+      rate = Number(plan.amount);
+      rentalSubtotal = rate * durationUnits * vehicleCount;
+      discountPercent = Math.min(100, Math.max(0, Number(vehicle.discountPercent || 0)));
+      discountAmount = Math.round(rentalSubtotal * discountPercent / 100);
+      securityDeposit = Math.max(0, Number(vehicle.securityDeposit || 0)) * vehicleCount;
+    }
+
+    const rentalTotal = Math.max(0, rentalSubtotal - discountAmount + securityDeposit);
+    if (rentalTotal <= 0) return res.status(400).json({ message: 'Vehicle rental amount is not configured.' });
+
+    const rz = getRazorpay();
     const rzOrder = await rz.orders.create({
-      amount,
-      currency: 'INR',
-      receipt:  `vehicle_sale_${Date.now()}`,
-      notes: { vehicleId: String(vehicleId), customerId: String(req.user._id) },
+      amount: Math.round(rentalTotal * 100), currency: 'INR',
+      receipt: `vehicle_booking_${Date.now()}`,
+      notes: { vehicleId: String(vehicleId), customerId: String(req.user._id), rentalPlan: selectedPlan },
     });
+
+    const snapshot = {
+      make: vehicle.make, model: vehicle.model, year: vehicle.year, color: vehicle.color,
+      category: vehicle.category, registrationNo: vehicle.registrationNo, chassisNo: vehicle.chassisNo,
+      motorNo: vehicle.motorNo, insuranceExpiry: vehicle.insuranceExpiry, odometerKm: vehicle.odometerKm,
+      seatingCapacity: vehicle.seatingCapacity, topSpeedKph: vehicle.topSpeedKph,
+      batteryCapacityKwh: vehicle.batteryCapacityKwh, rangeKm: vehicle.rangeKm,
+      chargingType: vehicle.chargingType, images: vehicle.images, description: vehicle.description,
+      pricePerDay: Number(vehicle.pricePerDay || 0),
+      salePrice: Number(vehicle.salePrice || 0),
+      rentalPlans: vehicle.rentalPlans || null,
+      securityDeposit, discountPercent, discountAmount,
+      franchiseeId: ownerId, franchiseeName: franchisee.name,
+    };
+    const pickupLocation = {
+      name: franchisee.name,
+      address: [fa.line1, fa.line2, fa.city, fa.district, fa.state, fa.pincode].filter(Boolean).join(', '),
+      city: fa.city || '', district: fa.district || '', state: fa.state || '', pincode: fa.pincode || '',
+      lat: Number(fa.latitude ?? fa.lat) || undefined, lng: Number(fa.longitude ?? fa.lng) || undefined,
+    };
 
     const rental = await VehicleRental.create({
-      customerId:      req.user._id,
-      vehicleId,
-      franchiseeId:     vehicle.franchiseeId || undefined,
-      franchiseeName:   franchisee?.name || vehicle.franchiseeName || 'EV CORE franchise',
-      pickupLocation: {
-        name: franchisee?.name || vehicle.franchiseeName || 'EV CORE franchise',
-        address: [fa.line1, fa.line2, fa.city, fa.district, fa.state, fa.pincode].filter(Boolean).join(', '),
-        city: fa.city || '',
-        district: fa.district || '',
-        state: fa.state || '',
-        pincode: fa.pincode || '',
-        lat: Number(fa.latitude ?? fa.lat) || undefined,
-        lng: Number(fa.longitude ?? fa.lng) || undefined,
-      },
+      customerId: req.user._id, vehicleId, vehicleSource: source, franchiseeId: ownerId,
+      franchiseeName: franchisee.name, pickupLocation,
       pincode, state, district, area, fullAddress,
       customerLocation: { pincode, state, district, area, fullAddress },
-      purchaseDate: purchaseDate || new Date(),
-      saleQuantity: purchaseQty,
-      durationDays: purchaseQty, // legacy-compatible quantity field
-      price: unitPrice,
-      pricePerDay: unitPrice,
-      salePrice: unitPrice,
-      totalAmount: unitPrice * purchaseQty,
-      razorpayOrderId: rzOrder.id,
-      paymentStatus:   'PENDING',
-      status:          'BOOKED',
+      purchaseDate: purchaseDate || new Date(), saleQuantity: vehicleCount, durationDays: durationUnits,
+      rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate,
+      securityDeposit, discountPercent, discountAmount,
+      price: rate, pricePerDay: Number(vehicle.pricePerDay || rate), totalAmount: rentalTotal,
+      razorpayOrderId: rzOrder.id, paymentStatus: 'PENDING', status: 'BOOKED',
       bookingHistory: [{
-        event: 'BOOKING_CREATED',
-        at: new Date(),
-        paymentStatus: 'PENDING',
-        status: 'BOOKED',
+        event: 'BOOKING_CREATED', at: new Date(), paymentStatus: 'PENDING', status: 'BOOKED',
+        rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate, vehicleCount, securityDeposit, discountPercent, discountAmount,
         customerLocation: { pincode, state, district, area, fullAddress },
-        franchisee: { id: vehicle.franchiseeId, name: franchisee?.name || vehicle.franchiseeName || 'EV CORE franchise' },
-        pickupLocation: {
-          name: franchisee?.name || vehicle.franchiseeName || 'EV CORE franchise',
-          address: [fa.line1, fa.line2, fa.city, fa.district, fa.state, fa.pincode].filter(Boolean).join(', '),
-          city: fa.city || '', district: fa.district || '', state: fa.state || '', pincode: fa.pincode || '',
-          lat: Number(fa.latitude ?? fa.lat) || undefined,
-          lng: Number(fa.longitude ?? fa.lng) || undefined,
-        },
-        vehicle: { make: vehicle.make, model: vehicle.model, year: vehicle.year, registrationNo: vehicle.registrationNo },
-        purchaseDate: purchaseDate || new Date(), saleQuantity: purchaseQty, price: unitPrice, totalAmount: unitPrice * purchaseQty,
+        franchisee: { id: ownerId, name: franchisee.name }, pickupLocation,
+        vehicle: snapshot, purchaseDate: purchaseDate || new Date(), saleQuantity: vehicleCount,
+        price: rate, totalAmount: rentalTotal,
       }],
-      vehicleSnapshot: {
-        make:               vehicle.make,
-        model:              vehicle.model,
-        year:               vehicle.year,
-        color:              vehicle.color,
-        category:           vehicle.category,
-        registrationNo:     vehicle.registrationNo,
-        batteryCapacityKwh: vehicle.batteryCapacityKwh,
-        rangeKm:            vehicle.rangeKm,
-        chargingType:       vehicle.chargingType,
-        pricePerDay:        unitPrice,
-        salePrice:         unitPrice,
-        images:             vehicle.images,
-        description:        vehicle.description,
-        franchiseeId:       vehicle.franchiseeId || undefined,
-        franchiseeName:     franchisee?.name || vehicle.franchiseeName || 'EV CORE franchise',
-      },
+      vehicleSnapshot: snapshot,
     });
 
-    res.status(201).json({
-      purchaseId: rental._id,
-      rentalId: rental._id,
-      orderId:  rzOrder.id,
-      amount:   rzOrder.amount,
-      currency: rzOrder.currency,
-      keyId:    process.env.RAZORPAY_KEY_ID,
-      vehicle:  { make: vehicle.make, model: vehicle.model, salePrice: unitPrice },
+    return res.status(201).json({
+      purchaseId: rental._id, rentalId: rental._id, orderId: rzOrder.id,
+      amount: rzOrder.amount, currency: rzOrder.currency, keyId: process.env.RAZORPAY_KEY_ID,
+      rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate,
+      securityDeposit, discountAmount, totalAmount: rentalTotal,
+      vehicle: { make: vehicle.make, model: vehicle.model, salePrice: rate },
     });
   } catch (e) {
     console.error('createOrder error:', e);
@@ -367,17 +368,50 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ message: 'Payment signature verification failed' });
     }
 
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature ||
+        String(razorpay_order_id) !== String(rental.razorpayOrderId)) {
+      return res.status(400).json({ message: 'Payment order verification failed' });
+    }
+
+    // Confirm the payment server-to-server so the browser cannot report a
+    // successful payment for a different order, amount, or non-captured payment.
+    const rz = getRazorpay();
+    const razorpayPayment = await rz.payments.fetch(razorpay_payment_id);
+    if (String(razorpayPayment.order_id) !== String(rental.razorpayOrderId))
+      return res.status(400).json({ message: 'Payment does not belong to this booking.' });
+    if (Number(razorpayPayment.amount) !== Math.round(Number(rental.totalAmount || 0) * 100))
+      return res.status(400).json({ message: 'Payment amount mismatch.' });
+    if (razorpayPayment.currency !== 'INR')
+      return res.status(400).json({ message: 'Payment currency mismatch.' });
+    if (razorpayPayment.status !== 'captured')
+      return res.status(400).json({ message: `Payment is not captured (${razorpayPayment.status}).` });
+
     // IMPORTANT: stock changes only after Razorpay signature verification succeeds.
     // The atomic update prevents two successful customers from consuming the same last unit.
     if (rental.paymentStatus === 'PAID') {
-      return res.json({ success: true, rental, alreadyProcessed: true });
+      const existingInvoice = await Invoice.findOne({ rentalId: rental._id }).sort('-createdAt').lean();
+      const existingPayment = await CustomerPayment.findOne({ rentalId: rental._id, franchiseeId: rental.franchiseeId }).sort('-createdAt').lean();
+      return res.json({
+        success: true,
+        message: 'Payment successful',
+        rental,
+        invoiceId: existingInvoice?._id || null,
+        invoiceNo: existingInvoice?.invoiceNo || null,
+        payment: existingPayment || null,
+        alreadyProcessed: true,
+      });
     }
-    const purchaseQty = Number(rental.saleQuantity || rental.durationDays || 1);
-    const stock = await PendingVehicle.findOneAndUpdate(
-      { _id: rental.vehicleId, status: 'APPROVED', $or: [{ quantity: { $gte: purchaseQty } }, { quantity: { $exists: false } }] },
-      [{ $set: { quantity: { $subtract: [{ $ifNull: ['$quantity', 1] }, purchaseQty] } } }],
-      { new: true }
-    );
+    const purchaseQty = Number(rental.saleQuantity || 1);
+    const stockQuery = { _id: rental.vehicleId, $or: [{ quantity: { $gte: purchaseQty } }, { quantity: { $exists: false } }] };
+    const stock = rental.vehicleSource === 'COMMAND_VEHICLE'
+      ? await require('../models').CommandVehicle.findOneAndUpdate(
+          { ...stockQuery, status:'ACTIVE', fleetInventoryStatus:'ACTIVE' },
+          [{ $set: { quantity: { $subtract: [{ $ifNull: ['$quantity', 1] }, purchaseQty] } } }], { new:true }
+        )
+      : await PendingVehicle.findOneAndUpdate(
+          { ...stockQuery, status:'APPROVED' },
+          [{ $set: { quantity: { $subtract: [{ $ifNull: ['$quantity', 1] }, purchaseQty] } } }], { new:true }
+        );
     if (!stock) {
       rental.paymentStatus = 'FAILED';
       rental.bookingHistory = rental.bookingHistory || [];
@@ -399,13 +433,38 @@ exports.verifyPayment = async (req, res) => {
     });
     await rental.save();
 
-    await audit(req.user._id, 'PAYMENT', 'VehicleRental', rental._id);
-    if (stock.franchiseeId) {
-      await Financial.create({
-        franchiseeId: stock.franchiseeId, kind: 'REVENUE', category: 'VEHICLE_SALE',
-        amount: rental.totalAmount || 0, referenceId: rental._id,
-        description: `${stock.make || ''} ${stock.model || ''} vehicle purchase payment`,
-      });
+    try {
+      await audit(req.user._id, 'PAYMENT', 'VehicleRental', rental._id);
+    } catch (e) {
+      console.error('Payment audit error:', e.message);
+    }
+    const ownerFranchiseeId = stock.franchiseeId || stock.fleetOperatorId || rental.franchiseeId;
+    if (ownerFranchiseeId) {
+      try {
+        const existingRevenue = await Financial.findOne({ franchiseeId: ownerFranchiseeId, referenceId: rental._id, kind: 'REVENUE' });
+        if (!existingRevenue) {
+          await Financial.create({
+            franchiseeId: ownerFranchiseeId, kind: 'REVENUE', category: rental.rentalPlan === 'SALE' ? 'VEHICLE_SALE' : 'VEHICLE_RENTAL',
+            amount: rental.totalAmount || 0, referenceId: rental._id,
+            description: `${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} ${rental.rentalPlan === 'SALE' ? 'vehicle purchase' : rental.rentalPlan.toLowerCase() + ' rental'} payment`,
+          });
+        }
+      } catch (e) {
+        console.error('Franchise financial ledger error after successful payment:', e.message);
+      }
+
+      // Notifications are helpful but must never turn a successful payment into
+      // an HTTP 500 after Razorpay has already captured the customer's money.
+      try {
+        await M.Notification.create({
+          userId: ownerFranchiseeId, type: 'VEHICLE_BOOKING_PAID',
+          title: rental.rentalPlan === 'SALE' ? 'Vehicle Purchase Paid' : 'New Rental Booking Paid',
+          message: `${req.user?.name || 'Customer'} booked ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} (${rental.rentalPlan}). Payment received.`,
+          data: { rentalId: rental._id, vehicleId: rental.vehicleId, rentalPlan: rental.rentalPlan, planUnits: rental.planUnits, amount: rental.totalAmount },
+        });
+      } catch (e) {
+        console.error('Franchise payment notification error:', e.message);
+      }
     }
 
     // ── Generate Invoice ──────────────────────────────────────────
@@ -413,27 +472,118 @@ exports.verifyPayment = async (req, res) => {
     const subtotal = rental.totalAmount || 0;
     const total    = subtotal;
 
-    const inv = await Invoice.create({
-      invoiceNo:  invoiceNo(),
-      customerId: rental.customerId,
-      rentalId:   rental._id,
-      items: [{
-        description: `${vs.make || ''} ${vs.model || ''} Vehicle Purchase (${rental.durationDays || 1} unit${(rental.durationDays || 1) !== 1 ? 's' : ''})`,
-        qty:  rental.durationDays || 1,
-        rate: rental.pricePerDay  || 0,
-        amount: subtotal,
-      }],
-      subtotal,
-      tax:   0,
-      total,
-      status: 'PAID',
-    });
+    let inv = await Invoice.findOne({ rentalId: rental._id }).sort('-createdAt');
+    if (!inv) {
+      inv = await Invoice.create({
+        invoiceNo:  invoiceNo(),
+        customerId: rental.customerId,
+        rentalId:   rental._id,
+        items: [{
+          description: rental.rentalPlan && rental.rentalPlan !== 'SALE'
+            ? `${vs.make || ''} ${vs.model || ''} — ${rental.rentalPlan} rental (${rental.planUnits || rental.durationDays || 1} period${(rental.planUnits || rental.durationDays || 1) !== 1 ? 's' : ''})`
+            : `${vs.make || ''} ${vs.model || ''} Vehicle Purchase (${rental.saleQuantity || 1} unit${(rental.saleQuantity || 1) !== 1 ? 's' : ''})`,
+          qty:  rental.rentalPlan && rental.rentalPlan !== 'SALE' ? (rental.planUnits || 1) * (rental.saleQuantity || 1) : (rental.saleQuantity || 1),
+          rate:  rental.rentalRate || rental.pricePerDay || 0,
+          amount: subtotal,
+        }],
+        subtotal,
+        tax:   0,
+        total,
+        status: 'PAID',
+        paidAt: new Date(),
+      });
+    } else if (inv.status !== 'PAID') {
+      inv.status = 'PAID';
+      inv.paidAt = inv.paidAt || new Date();
+      await inv.save();
+    }
 
-    // ── Send invoice email (non-blocking) ─────────────────────────
+    // ── Create the franchisee-visible customer payment ledger record ──
     const customer = await User.findById(req.user._id).lean();
+    const paymentPayload = {
+      customerId: rental.customerId,
+      franchiseeId: ownerFranchiseeId || rental.franchiseeId,
+      rentalId: rental._id,
+      invoiceId: inv._id,
+      amount: Number(rental.totalAmount || 0),
+      currency: 'INR',
+      status: 'PAID',
+      method: 'RAZORPAY',
+      provider: 'RAZORPAY',
+      razorpayOrderId: razorpay_order_id,
+      razorpayPaymentId: razorpay_payment_id,
+      razorpaySignature: razorpay_signature,
+      paymentDate: new Date(),
+      customerSnapshot: {
+        name: customer?.name || req.user?.name || '',
+        email: customer?.email || req.user?.email || '',
+        phone: customer?.phone || req.user?.phone || '',
+        address: customer?.address || null,
+      },
+      vehicleSnapshot: rental.vehicleSnapshot || {},
+      rentalPlan: rental.rentalPlan,
+      planUnits: rental.planUnits || rental.durationDays || 1,
+      rentalRate: rental.rentalRate || rental.pricePerDay || 0,
+      securityDeposit: rental.securityDeposit || 0,
+      discountPercent: rental.discountPercent || 0,
+      discountAmount: rental.discountAmount || 0,
+      customerLocation: rental.customerLocation || {
+        pincode: rental.pincode, state: rental.state, district: rental.district,
+        area: rental.area, fullAddress: rental.fullAddress,
+      },
+      pickupLocation: rental.pickupLocation || null,
+    };
+
+    let customerPayment = await CustomerPayment.findOne({ razorpayPaymentId: razorpay_payment_id });
+    if (!customerPayment) {
+      customerPayment = await CustomerPayment.create(paymentPayload);
+    }
+
+    // Keep the generic Payment collection in sync for existing payment screens/APIs.
+    let payment = await Payment.findOne({ razorpayPaymentId: razorpay_payment_id });
+    if (!payment) {
+      payment = await Payment.create({
+        customerId: rental.customerId,
+        invoiceId: inv._id,
+        rentalId: rental._id,
+        franchiseeId: ownerFranchiseeId || rental.franchiseeId,
+        amount: Number(rental.totalAmount || 0),
+        method: 'RAZORPAY',
+        status: 'PAID',
+        provider: 'RAZORPAY',
+        providerRef: razorpay_payment_id,
+        orderId: razorpay_order_id,
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        signature: razorpay_signature,
+        customerName: customer?.name || '',
+        customerEmail: customer?.email || '',
+        customerPhone: customer?.phone || '',
+        customerAddress: customer?.address || null,
+        vehicleSnapshot: rental.vehicleSnapshot || {},
+        rentalPlan: rental.rentalPlan,
+        planUnits: rental.planUnits || rental.durationDays || 1,
+      });
+    }
+
+    if (customerPayment && !customerPayment.paymentId) {
+      customerPayment.paymentId = payment._id;
+      customerPayment.invoiceId = inv._id;
+      await customerPayment.save();
+    }
+
     sendInvoiceEmail(customer, rental, inv); // fire-and-forget
 
-    res.json({ success: true, rental, invoiceId: inv._id, invoiceNo: inv.invoiceNo });
+    res.json({
+      success: true,
+      message: 'Payment successful',
+      rental,
+      invoiceId: inv._id,
+      invoiceNo: inv.invoiceNo,
+      paymentId: razorpay_payment_id,
+      franchiseeId: ownerFranchiseeId || rental.franchiseeId,
+      customerPaymentId: customerPayment?._id || null,
+    });
   } catch (e) {
     console.error('verifyPayment error:', e);
     res.status(500).json({ message: e.message });
@@ -494,6 +644,25 @@ exports.franchisePurchases = async (req, res) => {
       .sort('-createdAt');
     res.json(purchases);
   } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+// ── GET /franchise/customer-payments ─────────────────────────────────
+// Payment ledger scoped strictly to the logged-in franchisee.
+exports.franchiseCustomerPayments = async (req, res) => {
+  try {
+    const payments = await CustomerPayment
+      .find({ franchiseeId: req.user._id })
+      .populate('customerId', 'name email phone address')
+      .populate('invoiceId', 'invoiceNo total status paidAt')
+      .populate('rentalId', 'purchaseDate rentalPlan planUnits rentalRate securityDeposit discountAmount totalAmount paymentStatus razorpayOrderId razorpayPaymentId franchiseeName pickupLocation customerLocation vehicleSnapshot')
+      .sort('-paymentDate -createdAt')
+      .lean();
+
+    res.json(payments || []);
+  } catch (e) {
+    console.error('franchiseCustomerPayments error:', e);
     res.status(500).json({ message: e.message });
   }
 };

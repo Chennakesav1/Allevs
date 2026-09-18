@@ -142,6 +142,7 @@ fr.get( '/inventory',          Fr.inventory);
 fr.get( '/staff',              Fr.staff);
 fr.get( '/jobs',               Fr.jobs);
 fr.get( '/purchases',             Rn.franchisePurchases);
+fr.get( '/customer-payments',     Rn.franchiseCustomerPayments);
 fr.put( '/purchases/:id/handover', Rn.handover);
 fr.get( '/complaints',          P.franchise.complaints);
 fr.get( '/fault-vehicles',       P.franchise.faultVehicles);
@@ -179,6 +180,8 @@ fr.get( '/pending-staff',           Ap.myStaff);
 fr.put( '/pending-staff/:id/remove', Ap.removeStaffFromFranchisee);
 // ── Command Center assigned vehicles (fleet operator view) ────────
 fr.get( '/assigned-vehicles',       Ad.assignedVehicles);
+fr.put( '/assigned-vehicles/:id/activate', Fr.configureFleetVehicle);
+fr.put( '/fleet-inventory/:id',        Fr.updateFleetVehicle);
 // ── Hub list for Charge Hubs map (reuses same Ad.hubs controller) ─
 fr.get( '/hubs',                    Ad.hubs);
 // ── Pending vehicles (fleet operator submissions) ─────────────────

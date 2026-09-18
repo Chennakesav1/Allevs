@@ -1126,3 +1126,16 @@ select.fld-input { cursor: pointer; }
 /* Staff communications workspace */
 .command-comm-grid{max-width:1280px}.admin-feature-tabs{margin-top:4px}.command-comm-grid .card,.support-admin-card{box-shadow:0 8px 26px rgba(15,23,42,.045)}.comm-banner-preview{border:1px solid #dbeafe}.form-grid label input:focus,.form-grid label select:focus,.form-grid label textarea:focus{border-color:#93c5fd;box-shadow:0 0 0 3px #eff6ff}.admin-reply button:last-child{display:inline-flex;align-items:center;gap:5px;background:#ecfdf5;color:#047857;padding:9px 11px;font-size:10px;font-weight:750}
 @media(max-width:768px){.command-comm-grid{grid-template-columns:1fr!important}.form-grid{grid-template-columns:1fr!important}.admin-feature-tabs{overflow:auto}.admin-feature-tabs button{white-space:nowrap}.comm-history{max-height:360px;overflow:auto}.support-admin-card .card-head{align-items:flex-start}}
+
+/* Command Center vehicle intake */
+.command-vehicle-media{margin-top:14px;padding:14px;border:1px solid #dbe3ef;border-radius:14px;background:#f8fafc}
+.command-vehicle-media-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.command-vehicle-media-head strong{display:block;font-size:13px;color:#111827}
+.command-vehicle-media-head small{display:block;margin-top:3px;font-size:11px;color:#64748b}
+.command-upload-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid #bfdbfe;border-radius:9px;background:#fff;color:#1d4ed8;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}
+.command-vehicle-photo-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+.command-vehicle-photo{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:#e5e7eb;border:1px solid #dbe3ef}
+.command-vehicle-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.command-vehicle-photo button{position:absolute;right:4px;top:4px;width:22px;height:22px;border:0;border-radius:50%;background:rgba(15,23,42,.8);color:#fff;font-weight:900;cursor:pointer}
+.command-vehicle-photo-empty{grid-column:1/-1;min-height:80px;border:1px dashed #cbd5e1;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;color:#94a3b8;font-size:11px;font-weight:700;background:#fff}
+@media(max-width:700px){.command-vehicle-media-head{align-items:flex-start;flex-direction:column}.command-vehicle-photo-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}

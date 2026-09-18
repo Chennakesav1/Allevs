@@ -3597,60 +3597,32 @@ tr:hover td { background: #fafbff; }
   }
 }
 
+/* ── Fleet rental booking ───────────────────────────────────────── */
+.bk-plan-heading{font-size:14px;font-weight:800;color:#0f172a;margin:18px 0 9px;}
+.bk-rental-plan-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.bk-rental-plan-card{position:relative;text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:14px;padding:13px;cursor:pointer;transition:.18s;min-height:108px;box-shadow:0 3px 12px rgba(15,23,42,.04);}
+.bk-rental-plan-card:hover{transform:translateY(-1px);border-color:#93c5fd;}
+.bk-rental-plan-card.active{border-color:#2563eb;background:#eff6ff;box-shadow:0 6px 18px rgba(37,99,235,.12);}
+.bk-rental-plan-card strong{display:block;font-size:12px;color:#475569;margin-bottom:7px;}
+.bk-rental-plan-card b{display:block;font-size:17px;color:#0f172a;}
+.bk-rental-plan-card small{display:block;margin-top:2px;font-size:10px;color:#64748b;}
+.bk-plan-check{position:absolute;top:8px;right:8px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:900;color:#fff;background:transparent;}
+.bk-rental-plan-card.active .bk-plan-check{background:#2563eb;}
+.bk-rental-controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;}
+.bk-duration-input{display:flex;align-items:center;gap:8px;}
+.bk-duration-input input{width:90px;border:1px solid #dbe3ef;border-radius:10px;padding:10px;font-weight:800;font-size:16px;box-sizing:border-box;}
+.bk-duration-input span{font-size:11px;color:#64748b;font-weight:700;}
+.bk-total-row{margin-top:6px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:13px;}
+.bk-total-row strong{font-size:18px;color:#0f172a;}
+.bk-discount{color:#16a34a!important;}
+@media(max-width:620px){.bk-rental-plan-grid{grid-template-columns:1fr;}.bk-rental-plan-card{min-height:auto;}.bk-rental-controls{grid-template-columns:1fr;}}
 
-/* ================================================================
-   CUSTOMER PORTAL — FAST / NO PAGE LOADER POLISH
-   Existing styles remain untouched above. These rules only remove
-   data-loading animation/flicker from the customer experience.
-================================================================ */
-
-.customer-shell .customer-page-content {
-  min-width: 0;
-  width: 100%;
-  animation: none !important;
-}
-
-/* Data fetching is cache-first/background-revalidated. Never show
-   the branded or generic loader inside customer pages. */
-.customer-shell .page-center-loader,
-.customer-shell .sidebar-skeleton-nav,
-.customer-shell .vehicle-skeleton-grid,
-.customer-shell .vehicle-loading-inline,
-.customer-shell .pincode-spinner,
-.customer-shell .cs-loc-spinner,
-.customer-shell .vbc-img-loading {
-  display: none !important;
-}
-
-/* No route-enter animation/flicker when moving between customer sections. */
-.customer-shell .customer-page-transition {
-  animation: none !important;
-}
-
-/* Keep interactions crisp without expensive broad transitions. */
-.customer-shell button,
-.customer-shell a,
-.customer-shell input,
-.customer-shell select,
-.customer-shell textarea {
-  -webkit-tap-highlight-color: transparent;
-}
-
-.customer-shell .vehicle-browse-card,
-.customer-shell .cust-app-icon-tile,
-.customer-shell .metric-card,
-.customer-shell .card {
-  will-change: auto;
-}
-
-/* Respect reduced motion while keeping the portal visually stable. */
-@media (prefers-reduced-motion: reduce) {
-  .customer-shell *,
-  .customer-shell *::before,
-  .customer-shell *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-    transition-duration: .01ms !important;
-  }
-}
+/* Fleet rental listing: show configured rental economics, never the command-center unit reference price */
+.vbc-rental-prices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:7px 0 9px}
+.vbc-rental-prices>div{display:flex;flex-direction:column;min-width:0;padding:7px 8px;border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc}
+.vbc-rental-prices span{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#64748b}
+.vbc-rental-prices strong{font-size:13px;font-weight:850;color:#0f172a;line-height:1.25;margin-top:2px}
+.vbc-rental-prices small{font-size:9px;color:#94a3b8;margin-top:1px}
+.bk-single-vehicle-note{border:1px solid #dbeafe;background:#f8fbff;border-radius:12px;padding:10px 12px}
+.bk-single-vehicle{display:flex;align-items:center;gap:7px;color:#1e3a8a;font-weight:800;font-size:13px}
+@media(max-width:700px){.vbc-rental-prices{grid-template-columns:1fr;gap:5px}.vbc-rental-prices>div{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:5px}.vbc-rental-prices small{margin:0}}

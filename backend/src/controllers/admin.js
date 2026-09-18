@@ -228,6 +228,12 @@ exports.createVehicle = async (req, res) => {
       pricePerDay: Number(req.body.pricePerDay) || 0,
       batteryCapacityKwh: req.body.batteryCapacityKwh ? Number(req.body.batteryCapacityKwh) : undefined,
       rangeKm: req.body.rangeKm ? Number(req.body.rangeKm) : undefined,
+      chassisNo: req.body.chassisNo || undefined,
+      motorNo: req.body.motorNo || undefined,
+      insuranceExpiry: req.body.insuranceExpiry ? new Date(req.body.insuranceExpiry) : undefined,
+      odometerKm: req.body.odometerKm !== undefined && req.body.odometerKm !== '' ? Number(req.body.odometerKm) : undefined,
+      seatingCapacity: req.body.seatingCapacity !== undefined && req.body.seatingCapacity !== '' ? Number(req.body.seatingCapacity) : undefined,
+      topSpeedKph: req.body.topSpeedKph !== undefined && req.body.topSpeedKph !== '' ? Number(req.body.topSpeedKph) : undefined,
       status:    'UNASSIGNED',
       createdBy:  req.user._id,
     });
@@ -242,11 +248,17 @@ exports.createVehicle = async (req, res) => {
 exports.updateVehicle = async (req, res) => {
   try {
     const { CommandVehicle } = require('../models');
-    const allowed = ['category','make','model','year','color','registrationNo','batteryCapacityKwh','rangeKm','chargingType','pricePerDay','quantity','description','images'];
+    const allowed = ['category','make','model','year','color','registrationNo','chassisNo','motorNo','insuranceExpiry','odometerKm','seatingCapacity','topSpeedKph','batteryCapacityKwh','rangeKm','chargingType','pricePerDay','quantity','description','images'];
     const updates = {};
     allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
     if (updates.quantity !== undefined)   updates.quantity = Math.max(0, Number(updates.quantity));
     if (updates.pricePerDay !== undefined) updates.pricePerDay = Number(updates.pricePerDay);
+    if (updates.batteryCapacityKwh !== undefined) updates.batteryCapacityKwh = Number(updates.batteryCapacityKwh);
+    if (updates.rangeKm !== undefined) updates.rangeKm = Number(updates.rangeKm);
+    if (updates.odometerKm !== undefined) updates.odometerKm = Number(updates.odometerKm);
+    if (updates.seatingCapacity !== undefined) updates.seatingCapacity = Number(updates.seatingCapacity);
+    if (updates.topSpeedKph !== undefined) updates.topSpeedKph = Number(updates.topSpeedKph);
+    if (updates.insuranceExpiry) updates.insuranceExpiry = new Date(updates.insuranceExpiry);
     const vehicle = await CommandVehicle.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
     res.json({
@@ -290,6 +302,7 @@ exports.assignVehicle = async (req, res) => {
         assignedAt:         new Date(),
         assignedBy:         req.user._id,
         status:             'ASSIGNED',
+        fleetInventoryStatus: 'SETUP_REQUIRED',
       },
       { new: true }
     );

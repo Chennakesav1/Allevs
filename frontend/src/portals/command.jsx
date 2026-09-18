@@ -2235,7 +2235,7 @@ function AdminVehicleInventory({ call }) {
   const { toast, show } = useToast();
 
   // Vehicle form
-  const EMPTY_VEH = { category:'', make:'', model:'', year:'', color:'', registrationNo:'', batteryCapacityKwh:'', rangeKm:'', chargingType:'', pricePerDay:'', quantity:'1', description:'' };
+  const EMPTY_VEH = { category:'', make:'', model:'', year:'', color:'', registrationNo:'', chassisNo:'', motorNo:'', insuranceExpiry:'', odometerKm:'', seatingCapacity:'', topSpeedKph:'', batteryCapacityKwh:'', rangeKm:'', chargingType:'', pricePerDay:'', quantity:'1', description:'', images:[] };
   const [vehForm, setVehForm] = useState(EMPTY_VEH);
   const [savingVeh, setSavingVeh] = useState(false);
   const vf = k => e => setVehForm(f => ({ ...f, [k]: e.target.value }));
@@ -2257,15 +2257,34 @@ function AdminVehicleInventory({ call }) {
   useEffect(() => { loadVehicles(); }, []);
   useEffect(() => { loadParts(); }, []);
 
+  const [uploadingVehImages, setUploadingVehImages] = useState(false);
+
+  const uploadVehicleImages = async (files) => {
+    const picked = Array.from(files || []).filter(Boolean).slice(0, 5 - (vehForm.images?.length || 0));
+    if (!picked.length) return;
+    setUploadingVehImages(true);
+    try {
+      const fd = new FormData();
+      picked.forEach(file => fd.append('files', file));
+      const result = await call('/uploads', { method:'post', data:fd });
+      const uploaded = (result?.files || []).map(f => ({ name:f.name, url:f.url }));
+      setVehForm(f => ({ ...f, images:[...(f.images || []), ...uploaded] }));
+      show(`✓ ${uploaded.length} vehicle photo${uploaded.length !== 1 ? 's' : ''} uploaded`);
+    } catch (e) {
+      show(e.response?.data?.message || e.message || 'Vehicle image upload failed', 'error');
+    } finally { setUploadingVehImages(false); }
+  };
+
   const saveVehicle = async () => {
-    if (!vehForm.make.trim() || !vehForm.model.trim()) { show('Make and Model are required', 'error'); return; }
+    if (!vehForm.category || !vehForm.make.trim() || !vehForm.model.trim()) { show('Category, Make and Model are required', 'error'); return; }
+    if (!vehForm.images?.length) { show('Please upload at least one vehicle image', 'error'); return; }
     setSavingVeh(true);
     try {
       const payload = { ...vehForm, batteryCapacityKwh: Number(vehForm.batteryCapacityKwh)||undefined, rangeKm: Number(vehForm.rangeKm)||undefined, pricePerDay: Number(vehForm.pricePerDay)||0, quantity: Number(vehForm.quantity)||1 };
       const v = await call('/admin/vehicles', { method:'post', data:payload });
       setVehicles(prev => [v, ...prev]);
       setShowAddVeh(false); setVehForm(EMPTY_VEH);
-      show('✓ Vehicle added to inventory!');
+      show('✓ Vehicle added with photos and full details!');
     } catch (e) { show(e.response?.data?.message || 'Failed to add vehicle', 'error'); }
     finally { setSavingVeh(false); }
   };
@@ -2290,7 +2309,7 @@ function AdminVehicleInventory({ call }) {
       const updated = await call(`/admin/vehicles/${assignVeh._id}/assign`, { method:'put', data:{ fleetOperatorId: assignToId } });
       setVehicles(prev => prev.map(v => v._id === updated._id ? updated : v));
       setAssignVeh(null); setAssignToId('');
-      show('✓ Vehicle assigned! It now appears in the fleet operator\'s inventory.');
+      show('✓ Vehicle assigned! It is now waiting in the fleet operator\'s Inventory for rental-plan setup.');
     } catch (e) { show(e.response?.data?.message || 'Assignment failed', 'error'); }
     finally { setAssigning(false); }
   };
@@ -2309,7 +2328,7 @@ function AdminVehicleInventory({ call }) {
     <Toast toast={toast} />
     <PageHeader
       title="Inventory Management"
-      sub="Create vehicles and spare parts from the Command Center — assign vehicles to fleet operators to make them available for customers."
+      sub="Create vehicles and spare parts from the Command Center — assign vehicles to fleet operators. Fleet operators configure rental plans before vehicles are published to customers."
       actions={
         <div style={{ display:'flex', gap:8 }}>
           <button className="btn-ghost" onClick={() => { setShowAddPart(true); setActiveTab('parts'); }}>
@@ -2523,6 +2542,30 @@ function AdminVehicleInventory({ call }) {
                 <input className="fld-input" placeholder="e.g. TN09AB1234" value={vehForm.registrationNo} onChange={vf('registrationNo')} />
               </div>
               <div className="fld">
+                <label className="fld-label">Chassis / VIN Number</label>
+                <input className="fld-input" placeholder="Vehicle chassis / VIN" value={vehForm.chassisNo} onChange={vf('chassisNo')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Motor Number</label>
+                <input className="fld-input" placeholder="Motor / engine number" value={vehForm.motorNo} onChange={vf('motorNo')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Insurance Expiry</label>
+                <input className="fld-input" type="date" value={vehForm.insuranceExpiry} onChange={vf('insuranceExpiry')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Odometer (km)</label>
+                <input className="fld-input" type="number" min="0" placeholder="e.g. 12450" value={vehForm.odometerKm} onChange={vf('odometerKm')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Seating Capacity</label>
+                <input className="fld-input" type="number" min="1" placeholder="e.g. 2" value={vehForm.seatingCapacity} onChange={vf('seatingCapacity')} />
+              </div>
+              <div className="fld">
+                <label className="fld-label">Top Speed (km/h)</label>
+                <input className="fld-input" type="number" min="0" placeholder="e.g. 80" value={vehForm.topSpeedKph} onChange={vf('topSpeedKph')} />
+              </div>
+              <div className="fld">
                 <label className="fld-label">Battery Capacity (kWh)</label>
                 <input className="fld-input" type="number" placeholder="e.g. 2.9" value={vehForm.batteryCapacityKwh} onChange={vf('batteryCapacityKwh')} />
               </div>
@@ -2538,12 +2581,30 @@ function AdminVehicleInventory({ call }) {
                 </select>
               </div>
               <div className="fld">
-                <label className="fld-label">Price per Unit (₹) <span style={{color:'#dc2626'}}>*</span></label>
+                <label className="fld-label">Reference Sale Price (₹)</label>
                 <input className="fld-input" type="number" placeholder="e.g. 125000" value={vehForm.pricePerDay} onChange={vf('pricePerDay')} />
               </div>
               <div className="fld">
                 <label className="fld-label">Quantity</label>
                 <input className="fld-input" type="number" min="1" placeholder="1" value={vehForm.quantity} onChange={vf('quantity')} />
+              </div>
+            </div>
+            <div className="command-vehicle-media">
+              <div className="command-vehicle-media-head">
+                <div><strong>Vehicle Photos</strong><small>Upload clear exterior, dashboard and vehicle-detail photos. Up to 5.</small></div>
+                <label className="command-upload-btn">
+                  <UploadCloud size={15} /> {uploadingVehImages ? 'Uploading…' : 'Upload Photos'}
+                  <input type="file" accept="image/*" multiple hidden disabled={uploadingVehImages || (vehForm.images?.length || 0) >= 5} onChange={e => { uploadVehicleImages(e.target.files); e.target.value=''; }} />
+                </label>
+              </div>
+              <div className="command-vehicle-photo-grid">
+                {(vehForm.images || []).map((img, i) => (
+                  <div className="command-vehicle-photo" key={`${img.url}-${i}`}>
+                    <img src={img.url} alt={img.name || 'Vehicle'} />
+                    <button type="button" onClick={() => setVehForm(f => ({ ...f, images:(f.images || []).filter((_, idx) => idx !== i) }))}>×</button>
+                  </div>
+                ))}
+                {!vehForm.images?.length && <div className="command-vehicle-photo-empty"><Image size={22}/><span>Add the vehicle photos here</span></div>}
               </div>
             </div>
             <div className="fld" style={{ marginTop:10 }}>

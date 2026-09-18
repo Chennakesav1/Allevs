@@ -37,11 +37,14 @@ const NAV_ITEMS = {
     { id: 'dashboard',        label: 'Dashboard',           Icon: LayoutDashboard, cat: 'Overview'   },
 
     // ── Fleet ──
-    { id: 'inventory',        label: 'Inventory',           Icon: Package,         cat: 'Fleet'      },
+    { id: 'inventory',        label: 'Fleet Inventory',     Icon: Package,         cat: 'Fleet'      },
     { id: 'rentals',          label: 'Vehicle Sales',       Icon: Car,             cat: 'Fleet'      },
     { id: 'fault-vehicles',   label: 'Fault Vehicles',      Icon: AlertTriangle,   cat: 'Fleet'      },
 
     // ── Customers ──
+    { id: 'customer-payments',label: 'Customer Payments',   Icon: Wallet,          cat: 'Customers'  },
+
+
     { id: 'complaints',       label: 'Customer Complaints', Icon: Bell,            cat: 'Customers'  },
 
     // ── Network ──
@@ -284,6 +287,7 @@ function PageRouter({ page, call, user, setPage }) {
     financials:       <FranFinancials call={call} />,
     inventory:        <FranInventory  call={call} user={user} setPage={setPage} />,
     rentals:          <FranRentals   call={call} />,
+    'customer-payments': <FranCustomerPayments call={call} />,
     complaints:       <FranComplaints call={call} />,
     'fault-vehicles': <FaultVehicles call={call} />,
     'charge-hubs':    <FranChargeHubs call={call} />,
@@ -592,125 +596,170 @@ function FranFinancials({ call }) {
 // ══════════════════════════════════════════════════════════════════
 function FranInventory({ call, user, setPage }) {
   const { data: assignedVehicles, loading: avLoading, refresh: refreshAssigned } = useFetch(call, '/franchise/assigned-vehicles');
-  const [activeTab, setActiveTab] = useState('assigned');
+  const [activeTab, setActiveTab] = useState('setup');
+  const [setupVehicle, setSetupVehicle] = useState(null);
+  const [editingVehicle, setEditingVehicle] = useState(null);
   const { toast, show } = useToast();
 
   if (avLoading) return <Loader />;
 
-  // Command Center assigned vehicles
-  const cmdVehicles   = (assignedVehicles || []).map(v => ({ ...v, _source: 'command_center' }));
-  const totalVehicles = cmdVehicles.length;
+  const vehicles = assignedVehicles || [];
+  const setupVehicles = vehicles.filter(v => v.fleetInventoryStatus !== 'ACTIVE');
+  const activeVehicles = vehicles.filter(v => v.fleetInventoryStatus === 'ACTIVE');
 
-  const INV_TABS = [
-    { id: 'assigned',  label: 'Assigned by Command', Icon: Truck,    count: cmdVehicles.length },
-  ];
+  const activate = async (form, vehicle) => {
+    try {
+      await call(`/franchise/assigned-vehicles/${vehicle._id}/activate`, { method:'put', data:form });
+      show('✓ Vehicle moved to Fleet Inventory and is now ready for customer booking.');
+      setSetupVehicle(null);
+      refreshAssigned();
+    } catch(e) { show(e.response?.data?.message || 'Could not activate vehicle', 'error'); }
+  };
+
+  const update = async (form, vehicle) => {
+    try {
+      await call(`/franchise/fleet-inventory/${vehicle._id}`, { method:'put', data:form });
+      show('✓ Fleet rental plans updated.');
+      setEditingVehicle(null);
+      refreshAssigned();
+    } catch(e) { show(e.response?.data?.message || 'Could not update vehicle', 'error'); }
+  };
 
   return <>
     <Toast toast={toast} />
     <PageHeader
-      title="Inventory"
-      sub="Vehicles assigned by Command Center appear here as your inventory — visible to customers."
+      title="Fleet Inventory"
+      sub="Configure vehicles assigned by Command Center before publishing them to customers."
     />
 
     <MetricGrid metrics={[
-      { label: 'Total Vehicles',      value: totalVehicles,      Icon: Car,   color: '#2563eb' },
-      { label: 'Assigned by Command', value: cmdVehicles.length, Icon: Truck, color: '#16a34a' },
+      { label:'Needs Setup', value:setupVehicles.length, Icon:Clock, color:'#d97706' },
+      { label:'Live Inventory', value:activeVehicles.length, Icon:CheckCircle, color:'#16a34a' },
+      { label:'Total Assigned', value:vehicles.length, Icon:Car, color:'#2563eb' },
     ]} />
 
-
-
-    {/* ── Subtab Bar ── */}
-    <div style={{ display:'flex', gap:0, borderBottom:'2px solid #e5e7eb', marginBottom:16 }}>
-      {INV_TABS.map(t => (
-        <button key={t.id} onClick={() => setActiveTab(t.id)}
-          style={{
-            display:'flex', alignItems:'center', gap:7, padding:'10px 22px',
-            border:'none', background:'none', cursor:'pointer',
-            borderBottom: activeTab === t.id ? '2px solid #2563eb' : '2px solid transparent',
-            color: activeTab === t.id ? '#2563eb' : '#6b7280',
-            fontWeight: activeTab === t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
-            transition:'all 0.15s',
-          }}>
-          <t.Icon size={15} />
-          {t.label}
-          <span style={{
-            background: activeTab === t.id ? '#2563eb' : '#e5e7eb',
-            color: activeTab === t.id ? '#fff' : '#374151',
-            borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700
-          }}>{t.count}</span>
-        </button>
-      ))}
+    <div className="fleet-inventory-tabs">
+      <button className={activeTab==='setup'?'active':''} onClick={()=>setActiveTab('setup')}>
+        <Clock size={16}/> Setup Required <span>{setupVehicles.length}</span>
+      </button>
+      <button className={activeTab==='active'?'active':''} onClick={()=>setActiveTab('active')}>
+        <CheckCircle size={16}/> Fleet Inventory <span>{activeVehicles.length}</span>
+      </button>
     </div>
 
-    {/* ── Assigned by Command Center Tab ── */}
-    {activeTab === 'assigned' && (
-      <Card title="Assigned by Command Center" badge={`${cmdVehicles.length} vehicles`}>
-        {cmdVehicles.length === 0
-          ? <div className="empty-state" style={{ padding: '40px 24px' }}>
-              <Truck size={40} style={{ opacity: .25, marginBottom: 12 }} />
-              <p style={{ color:'#6b7280', lineHeight:1.6 }}>
-                No vehicles assigned to you yet.<br />
-                The Command Center will assign vehicles here — they will be visible to your customers automatically.
-              </p>
+    {activeTab==='setup' && <div className="fleet-vehicle-list">
+      {!setupVehicles.length && <div className="card fleet-empty">
+        <CheckCircle size={42}/><h3>All assigned vehicles are configured</h3>
+        <p>New Command Center assignments will appear here first.</p>
+      </div>}
+      {setupVehicles.map(v => <div className="fleet-vehicle-card setup" key={v._id}>
+        <div className="fleet-vehicle-main">
+          <div className="fleet-vehicle-thumb">{v.images?.[0]?.url ? <img src={v.images[0].url} alt=""/> : <Car size={28}/>}</div>
+          <div className="fleet-vehicle-copy">
+            <div className="fleet-vehicle-title">{v.make} {v.model}</div>
+            <div className="fleet-vehicle-meta">{v.year || 'Year —'} · {v.color || 'Colour —'} · {v.registrationNo || 'Registration pending'}</div>
+            <div className="fleet-source"><Truck size={13}/> Assigned by Command Center</div>
+          </div>
+          <span className="fleet-status setup">Setup Required</span>
+        </div>
+        <div className="fleet-vehicle-details">
+          <div><span>Battery</span><b>{v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}</b></div>
+          <div><span>Range</span><b>{v.rangeKm ? `${v.rangeKm} km` : '—'}</b></div>
+          <div><span>Stock</span><b>{v.quantity ?? 1}</b></div>
+        </div>
+        <button className="btn-primary fleet-configure-btn" onClick={()=>setSetupVehicle(v)}>
+          <Package size={15}/> Move to Fleet Inventory
+        </button>
+      </div>)}
+    </div>}
+
+    {activeTab==='active' && <div className="fleet-vehicle-list">
+      {!activeVehicles.length && <div className="card fleet-empty"><Package size={42}/><h3>No live fleet inventory</h3><p>Configure a Command Center vehicle to publish it for customer booking.</p></div>}
+      {activeVehicles.map(v => {
+        const rp=v.rentalPlans||{};
+        const plans=[rp.daily?.enabled&&`Daily ₹${Number(rp.daily.amount).toLocaleString('en-IN')}`,rp.weekly?.enabled&&`Weekly ₹${Number(rp.weekly.amount).toLocaleString('en-IN')}`,rp.monthly?.enabled&&`Monthly ₹${Number(rp.monthly.amount).toLocaleString('en-IN')}`].filter(Boolean);
+        return <div className="fleet-vehicle-card live" key={v._id}>
+          <div className="fleet-vehicle-main">
+            <div className="fleet-vehicle-thumb">{v.images?.[0]?.url ? <img src={v.images[0].url} alt=""/> : <Car size={28}/>}</div>
+            <div className="fleet-vehicle-copy">
+              <div className="fleet-vehicle-title">{v.make} {v.model}</div>
+              <div className="fleet-vehicle-meta">{v.registrationNo || 'No registration'} · {v.quantity ?? 0} unit(s) available</div>
+              <div className="fleet-plan-chips">{plans.map(x=><span key={x}>{x}</span>)}</div>
             </div>
-          : <>
-              <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'12px 16px', marginBottom:16, fontSize:13, color:'#166534', display:'flex', alignItems:'center', gap:8 }}>
-                <CheckCircle size={16} /> These vehicles are assigned by Command Center and are <strong>live in your customer portal</strong>.
-              </div>
-              <div className="table-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Vehicle</th>
-                      <th>Category</th>
-                      <th>Reg. No.</th>
-                      <th>Battery / Range</th>
-                      <th>Charging</th>
-                      <th>Price / Unit</th>
-                      <th>Qty</th>
-                      <th>Assigned On</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cmdVehicles.map((v, i) => (
-                      <tr key={v._id || i}>
-                        <td>
-                          <div style={{ fontWeight:700, fontSize:13 }}>{v.make} {v.model}</div>
-                          <div style={{ fontSize:11, color:'#9ca3af' }}>{v.year}{v.year && v.color ? ' · ' : ''}{v.color}</div>
-                        </td>
-                        <td style={{ fontSize:12 }}>{v.category || '—'}</td>
-                        <td style={{ fontFamily:'monospace', fontSize:11, color:'#1d4ed8' }}>{v.registrationNo || '—'}</td>
-                        <td style={{ fontSize:12 }}>
-                          {v.batteryCapacityKwh ? `${v.batteryCapacityKwh} kWh` : '—'}
-                          {v.rangeKm ? ` / ${v.rangeKm} km` : ''}
-                        </td>
-                        <td style={{ fontSize:12 }}>{v.chargingType || '—'}</td>
-                        <td style={{ fontWeight:700, fontSize:13 }}>₹{Number(v.pricePerDay || 0).toLocaleString('en-IN')}</td>
-                        <td style={{ textAlign:'center', fontWeight:700 }}>{v.quantity ?? 1}</td>
-                        <td style={{ fontSize:11, color:'#6b7280' }}>
-                          {v.assignedAt ? new Date(v.assignedAt).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' }) : '—'}
-                        </td>
-                        <td>
-                          <span className="status-pill" style={{ background:'#dcfce7', color:'#166534', fontSize:11 }}>
-                            ✓ Active
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-        }
-      </Card>
-    )}
+            <span className="fleet-status live"><CheckCircle size={12}/> Live</span>
+          </div>
+          <div className="fleet-finance-strip">
+            <div><span>Security Deposit</span><b>₹{Number(v.securityDeposit||0).toLocaleString('en-IN')}</b></div>
+            <div><span>Discount</span><b>{Number(v.discountPercent||0)}%</b></div>
+            <div><span>Customer Visibility</span><b>Published</b></div>
+          </div>
+          <button className="btn-ghost fleet-configure-btn" onClick={()=>setEditingVehicle(v)}><Pencil size={15}/> Edit Rental Plans</button>
+        </div>;
+      })}
+    </div>}
 
-
-
-
-
+    {(setupVehicle || editingVehicle) && <FleetRentalSetupModal
+      vehicle={setupVehicle || editingVehicle}
+      editing={!!editingVehicle}
+      onClose={()=>{setSetupVehicle(null);setEditingVehicle(null)}}
+      onSave={editingVehicle ? update : activate}
+    />}
   </>;
+}
+
+function FleetRentalSetupModal({ vehicle, editing, onClose, onSave }) {
+  const rp=vehicle.rentalPlans||{};
+  const [plans,setPlans]=useState({
+    DAILY: editing ? !!rp.daily?.enabled : true,
+    WEEKLY: editing ? !!rp.weekly?.enabled : true,
+    MONTHLY: editing ? !!rp.monthly?.enabled : true,
+  });
+  const [dailyAmount,setDailyAmount]=useState(editing ? rp.daily?.amount || '' : '');
+  const [weeklyAmount,setWeeklyAmount]=useState(editing ? rp.weekly?.amount || '' : '');
+  const [monthlyAmount,setMonthlyAmount]=useState(editing ? rp.monthly?.amount || '' : '');
+  const [securityDeposit,setSecurityDeposit]=useState(vehicle.securityDeposit || '');
+  const [discountPercent,setDiscountPercent]=useState(vehicle.discountPercent || '');
+  const [description,setDescription]=useState(vehicle.description || '');
+  const [saving,setSaving]=useState(false);
+
+  const submit=async()=>{
+    const enabledPlans=Object.keys(plans).filter(k=>plans[k]);
+    if(!enabledPlans.length){ alert('Select at least one rental plan.'); return; }
+    for(const [name,val] of [['Daily',dailyAmount],['Weekly',weeklyAmount],['Monthly',monthlyAmount]]){
+      if(plans[name.toUpperCase()] && Number(val)<=0){ alert(`${name} rental amount is required.`); return; }
+    }
+    setSaving(true);
+    try { await onSave({enabledPlans,dailyAmount:Number(dailyAmount||0),weeklyAmount:Number(weeklyAmount||0),monthlyAmount:Number(monthlyAmount||0),securityDeposit:Number(securityDeposit||0),discountPercent:Number(discountPercent||0),description},vehicle); }
+    finally { setSaving(false); }
+  };
+  return <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-drawer fleet-setup-modal" onClick={e=>e.stopPropagation()}>
+      <div className="modal-head">
+        <div><div className="modal-title">{editing?'Edit Fleet Listing':'Move to Fleet Inventory'}</div><div className="modal-subtitle">{vehicle.make} {vehicle.model} · customer rental configuration</div></div>
+        <button className="icon-btn" onClick={onClose}><X size={18}/></button>
+      </div>
+      <div className="modal-body">
+        <div className="fleet-setup-vehicle"><div className="fleet-vehicle-thumb">{vehicle.images?.[0]?.url?<img src={vehicle.images[0].url} alt=""/>:<Car size={28}/>}</div><div><strong>{vehicle.make} {vehicle.model}</strong><small>{vehicle.registrationNo || 'Registration not provided'} · {vehicle.quantity ?? 1} unit(s)</small></div></div>
+        <div className="fleet-setup-section"><div className="fleet-setup-heading">Rental Plans</div><p className="fleet-setup-help">Choose which plans customers can book. You can publish one or all three.</p>
+          {[
+            ['DAILY','Daily','₹ / day',dailyAmount,setDailyAmount],
+            ['WEEKLY','Weekly','₹ / week',weeklyAmount,setWeeklyAmount],
+            ['MONTHLY','Monthly','₹ / month',monthlyAmount,setMonthlyAmount],
+          ].map(([key,label,unit,val,setter])=><div className={'fleet-plan-row '+(plans[key]?'selected':'')} key={key}>
+            <label className="fleet-plan-check"><input type="checkbox" checked={plans[key]} onChange={e=>setPlans(p=>({...p,[key]:e.target.checked}))}/><span className="fleet-checkmark">✓</span><strong>{label}</strong></label>
+            <div className="fleet-plan-input"><span>{unit}</span><input type="number" min="0" value={val} onChange={e=>setter(e.target.value)} disabled={!plans[key]} placeholder="0"/></div>
+          </div>)}
+        </div>
+        <div className="fleet-form-grid">
+          <label>Security Deposit<input type="number" min="0" value={securityDeposit} onChange={e=>setSecurityDeposit(e.target.value)} placeholder="₹ 0"/></label>
+          <label>Discount %<input type="number" min="0" max="100" value={discountPercent} onChange={e=>setDiscountPercent(e.target.value)} placeholder="0"/></label>
+        </div>
+        <label className="fleet-description-label">Customer Listing Description<textarea rows="3" value={description} onChange={e=>setDescription(e.target.value)} placeholder="Add helpful vehicle/rental details for customers…"/></label>
+        <div className="fleet-publish-note"><Shield size={17}/><span><b>Customer publishing</b><br/>After you submit, this vehicle becomes available in the Customer Portal with the exact plans, deposit, discount and vehicle details above.</span></div>
+      </div>
+      <div className="modal-footer"><button className="btn-ghost" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving?'Publishing…':editing?'Save Changes':'Move to Fleet Inventory'}</button></div>
+    </div>
+  </div>;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2819,6 +2868,136 @@ function FranJobs({ call }) {
 // CUSTOMER COMPLAINTS + FAULT VEHICLES
 // ══════════════════════════════════════════════════════════════════
 
+function FranCustomerPayments({ call }) {
+  const { data, loading, error } = useFetch(call, '/franchise/customer-payments');
+  const [selected, setSelected] = useState(null);
+  const fmt = d => d ? new Date(d).toLocaleString('en-IN', {
+    day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'
+  }) : '—';
+  const money = n => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+  const rows = Array.isArray(data) ? data : [];
+  const paid = rows.filter(p => p.status === 'PAID');
+
+  if (loading) return <Loader />;
+  if (error) return <Err msg={error} />;
+
+  return <>
+    <PageHeader
+      title="Customer Payments"
+      sub="Payments received from customers for vehicles assigned to this franchisee."
+    />
+    <MetricGrid metrics={[
+      {label:'Customer Payments', value:rows.length, Icon:Wallet, color:'#2563eb'},
+      {label:'Paid', value:paid.length, Icon:CheckCircle, color:'#16a34a'},
+      {label:'Total Received', value:money(paid.reduce((sum,p)=>sum+Number(p.amount||0),0)), Icon:DollarSign, color:'#7c3aed'},
+    ]}/>
+
+    <Card title="Payment Ledger" badge={`${rows.length} records`}>
+      {!rows.length ? (
+        <div className="empty-state">
+          <Wallet size={40} style={{opacity:.25}}/>
+          <p>No customer payments have been received for this franchisee yet.</p>
+        </div>
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Customer</th>
+                <th>Vehicle</th>
+                <th>Plan</th>
+                <th>Amount</th>
+                <th>Payment ID</th>
+                <th>Status</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(p => {
+                const c = p.customerSnapshot || p.customerId || {};
+                const v = p.vehicleSnapshot || p.rentalId?.vehicleSnapshot || {};
+                const plan = p.rentalPlan && p.rentalPlan !== 'SALE'
+                  ? `${p.rentalPlan} · ${p.planUnits || 1}`
+                  : 'Purchase';
+                return (
+                  <tr key={p._id}>
+                    <td>{fmt(p.paymentDate || p.createdAt)}</td>
+                    <td>
+                      <strong>{c.name || 'Customer'}</strong>
+                      <div style={{fontSize:11,color:'#64748b'}}>{c.email || c.phone || '—'}</div>
+                    </td>
+                    <td>{[v.make,v.model].filter(Boolean).join(' ') || 'Vehicle'}</td>
+                    <td>{plan}</td>
+                    <td><strong>{money(p.amount)}</strong></td>
+                    <td style={{fontSize:11}}>{p.razorpayPaymentId || '—'}</td>
+                    <td>
+                      <span className="status-pill" style={{
+                        background:p.status==='PAID'?'#dcfce7':'#fef3c7',
+                        color:p.status==='PAID'?'#166534':'#92400e'
+                      }}>{p.status}</span>
+                    </td>
+                    <td>
+                      <button className="btn-ghost" onClick={() => setSelected(p)}>View Details</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+
+    {selected && <div className="modal-overlay" onClick={() => setSelected(null)}>
+      <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{width:'min(680px,100%)'}}>
+        <div className="modal-head">
+          <div>
+            <div className="modal-title">Customer Payment Details</div>
+            <div className="modal-subtitle">Complete payment, customer, rental and franchisee record</div>
+          </div>
+          <button className="icon-btn" onClick={() => setSelected(null)}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{fontWeight:800,fontSize:14,marginBottom:8}}>Customer</div>
+          {[
+            ['Name', selected.customerSnapshot?.name || selected.customerId?.name || '—'],
+            ['Email', selected.customerSnapshot?.email || selected.customerId?.email || '—'],
+            ['Phone', selected.customerSnapshot?.phone || selected.customerId?.phone || '—'],
+            ['Address', typeof (selected.customerSnapshot?.address || selected.customerId?.address) === 'object'
+              ? JSON.stringify(selected.customerSnapshot?.address || selected.customerId?.address)
+              : (selected.customerSnapshot?.address || selected.customerId?.address || '—')],
+          ].map(([k,v]) => <div key={k} className="kv-row"><span>{k}</span><strong>{v}</strong></div>)}
+
+          <div style={{fontWeight:800,fontSize:14,margin:'18px 0 8px'}}>Payment</div>
+          {[
+            ['Status',selected.status || '—'],
+            ['Amount',money(selected.amount)],
+            ['Payment Date',fmt(selected.paymentDate || selected.createdAt)],
+            ['Method',selected.method || '—'],
+            ['Razorpay Payment ID',selected.razorpayPaymentId || '—'],
+            ['Razorpay Order ID',selected.razorpayOrderId || '—'],
+            ['Invoice',selected.invoiceId?.invoiceNo || '—'],
+          ].map(([k,v]) => <div key={k} className="kv-row"><span>{k}</span><strong>{v}</strong></div>)}
+
+          <div style={{fontWeight:800,fontSize:14,margin:'18px 0 8px'}}>Vehicle / Rental</div>
+          {[
+            ['Vehicle', [selected.vehicleSnapshot?.make,selected.vehicleSnapshot?.model].filter(Boolean).join(' ') || '—'],
+            ['Registration',selected.vehicleSnapshot?.registrationNo || '—'],
+            ['Plan',selected.rentalPlan && selected.rentalPlan!=='SALE' ? selected.rentalPlan : 'Purchase'],
+            ['Plan Units',selected.planUnits || '—'],
+            ['Rental Rate',money(selected.rentalRate)],
+            ['Security Deposit',money(selected.securityDeposit)],
+            ['Discount',`${Number(selected.discountPercent||0)}% · ${money(selected.discountAmount)}`],
+            ['Customer Location',selected.customerLocation?.fullAddress || '—'],
+            ['Pickup Location',selected.pickupLocation?.address || selected.pickupLocation?.name || '—'],
+          ].map(([k,v]) => <div key={k} className="kv-row"><span>{k}</span><strong>{v}</strong></div>)}
+        </div>
+      </div>
+    </div>}
+  </>;
+}
+
 function FranRentals({ call }) {
   const { data, loading, error, refresh } = useFetch(call, '/franchise/purchases');
   const [busy, setBusy] = useState(null);
@@ -2842,7 +3021,7 @@ function FranRentals({ call }) {
 
   return <>
     <Toast toast={toast}/>
-    <PageHeader title="Vehicle Sales" sub="Paid vehicle purchases, customer details and handover management." />
+    <PageHeader title="Vehicle Sales & Rentals" sub="Customer bookings, payment details, rental plans and vehicle handover management." />
     <MetricGrid metrics={[
       {label:'Total Sales',value:rows.length,Icon:ClipboardList,color:'#2563eb'},
       {label:'Paid',value:rows.filter(r=>r.paymentStatus==='PAID').length,Icon:CheckCircle,color:'#16a34a'},
@@ -2862,9 +3041,12 @@ function FranRentals({ call }) {
           </div>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:12,marginTop:14}}>
             <div><small>Vehicle</small><strong>{vs.registrationNo||'—'}</strong></div>
-            <div><small>Purchase Date</small><strong>{fmt(r.purchaseDate||r.createdAt)}</strong></div>
-            <div><small>Quantity</small><strong>{r.saleQuantity||r.durationDays||1} vehicle(s)</strong></div>
-            <div><small>Vehicle Price</small><strong>₹{Number(r.price||r.pricePerDay||0).toLocaleString('en-IN')}</strong></div>
+            <div><small>Booking Date</small><strong>{fmt(r.purchaseDate||r.createdAt)}</strong></div>
+            <div><small>Plan</small><strong>{r.rentalPlan && r.rentalPlan!=='SALE' ? `${r.rentalPlan} · ${r.planUnits||r.durationDays||1}` : 'Purchase'}</strong></div>
+            <div><small>Vehicles</small><strong>{r.saleQuantity||1}</strong></div>
+            <div><small>Rental Rate</small><strong>₹{Number(r.rentalRate||r.price||r.pricePerDay||0).toLocaleString('en-IN')}</strong></div>
+            <div><small>Security Deposit</small><strong>₹{Number(r.securityDeposit||0).toLocaleString('en-IN')}</strong></div>
+            <div><small>Discount</small><strong>{Number(r.discountPercent||0)}%{Number(r.discountAmount||0)?` · −₹${Number(r.discountAmount).toLocaleString('en-IN')}`:''}</strong></div>
             <div><small>Amount Paid</small><strong>₹{Number(r.totalAmount||0).toLocaleString('en-IN')}</strong></div>
             <div><small>Handover Date</small><strong>{fmt(r.handoverDate)}</strong></div>
           </div>
@@ -2888,7 +3070,7 @@ function FranRentals({ call }) {
           {[
             ['Customer',selected.customerId?.name||'—'],['Email',selected.customerId?.email||'—'],['Phone',selected.customerId?.phone||'—'],
             ['Vehicle',`${selected.vehicleSnapshot?.make||''} ${selected.vehicleSnapshot?.model||''}`],['Registration',selected.vehicleSnapshot?.registrationNo||'—'],
-            ['Quantity',selected.saleQuantity||selected.durationDays||1],['Vehicle Price',`₹${Number(selected.price||selected.pricePerDay||0).toLocaleString('en-IN')}`],
+            ['Plan',selected.rentalPlan && selected.rentalPlan!=='SALE' ? `${selected.rentalPlan} · ${selected.planUnits||selected.durationDays||1}` : 'Purchase'],['Vehicles',selected.saleQuantity||1],['Rental Rate',`₹${Number(selected.rentalRate||selected.price||selected.pricePerDay||0).toLocaleString('en-IN')}`],['Security Deposit',`₹${Number(selected.securityDeposit||0).toLocaleString('en-IN')}`],['Discount',`${Number(selected.discountPercent||0)}% · ₹${Number(selected.discountAmount||0).toLocaleString('en-IN')}`],
             ['Amount Paid',`₹${Number(selected.totalAmount||0).toLocaleString('en-IN')}`],['Payment ID',selected.razorpayPaymentId||'—'],
             ['Purchase Date',fmt(selected.purchaseDate||selected.createdAt)],['Handover Date',fmt(selected.handoverDate)],
             ['Pickup / Handover Location',[selected.pickupLocation?.name||selected.franchiseeName,selected.pickupLocation?.address].filter(Boolean).join(' · ')||'—'],
