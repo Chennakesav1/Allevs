@@ -145,7 +145,6 @@ function cachedCall(callFn, path) {
 const CUSTOMER_PREFETCH_PATHS = [
   '/customer/vehicles',
   '/customer/purchases',
-  '/customer/purchases',
   '/customer/wallet',
   '/customer/wallet/transactions',
   '/customer/complaints',
@@ -778,7 +777,7 @@ function Shell({ user, page, setPage, call, logout }) {
             </button>
 
             <nav className="mobile-menu-nav">
-              {!user ? <SidebarSkeleton count={navItems.length} /> : navItems.map(({ id, label, Icon }) => (
+              {navItems.map(({ id, label, Icon }) => (
                 <button
                   key={id}
                   className={`mobile-menu-item${page === id ? ' active' : ''}`}
@@ -812,7 +811,7 @@ function Shell({ user, page, setPage, call, logout }) {
           <img src={allevLogo} alt="allEV" style={{height:"32px",objectFit:"contain"}} />
         </div>
         <nav className="sidebar-nav">
-          {!user ? <SidebarSkeleton count={navItems.length} /> : navItems.map(({ id, label, Icon }) => (
+          {navItems.map(({ id, label, Icon }) => (
             <button
               key={id}
               className={'nav-item' + (page === id ? ' active' : '')}
@@ -853,7 +852,7 @@ function Shell({ user, page, setPage, call, logout }) {
         </header>
 
         <main className="page-body customer-page-body">
-          <div className="customer-page-transition" key={page}>
+          <div className="customer-page-content">
             <PageRouter page={page} call={call} setPage={setPage} />
           </div>
         </main>
@@ -1016,20 +1015,6 @@ function DataTable({ rows = [], cols = [] }) {
   );
 }
 
-// Sidebar skeleton — shown while nav data / user is loading
-function SidebarSkeleton({ count = 8 }) {
-  return (
-    <div className="sidebar-skeleton-nav">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="sidebar-skel-item">
-          <div className="sidebar-skel-icon" style={{ animationDelay: `${i * 60}ms` }} />
-          <div className="sidebar-skel-label" style={{ animationDelay: `${i * 60 + 30}ms` }} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function Loader() {
   // Lightweight content loader: never repeats the branded/logo splash between pages.
   // The allEV logo is reserved for the actual app shell/login, not data fetching.
@@ -1041,44 +1026,6 @@ function Loader() {
           <strong>Loading</strong>
           <span>Please wait a moment…</span>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// Shimmer skeleton cards for Available Vehicles section
-function VehicleSkeletonGrid({ count = 6 }) {
-  return (
-    <div className="vehicle-skeleton-grid">
-      {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="vehicle-skeleton-card" style={{ animationDelay: `${i * 60}ms` }}>
-          <div className="skel-img skel-shimmer" />
-          <div className="skel-body">
-            <div className="skel-line skel-line-lg skel-shimmer" />
-            <div className="skel-line skel-line-sm skel-shimmer" />
-            <div className="skel-specs">
-              <div className="skel-spec-chip skel-shimmer" />
-              <div className="skel-spec-chip skel-shimmer" />
-              <div className="skel-spec-chip skel-shimmer" style={{ width: 48 }} />
-            </div>
-            <div className="skel-price skel-shimmer" />
-            <div className="skel-line skel-line-xs skel-shimmer" style={{ marginBottom: 12 }} />
-          </div>
-          <div className="skel-btn skel-shimmer" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Lightweight vehicle loading state — no branded/logo splash between page loads.
-function EVLoadingScreen({ label = 'Finding vehicles near you…' }) {
-  return (
-    <div className="vehicle-loading-inline" role="status" aria-live="polite">
-      <div className="compact-loader-spinner" aria-hidden="true" />
-      <div>
-        <strong>{label}</strong>
-        <span>Checking the latest availability</span>
       </div>
     </div>
   );
@@ -1197,9 +1144,8 @@ function CustDashboard({ call, setPage }) {
   const { data: w, loading: lw } = useFetch(call, '/customer/wallet');
   const { data: complaints, loading: lc } = useFetch(call, '/customer/complaints');
   const [user, setUser] = React.useState(null);
-  React.useEffect(() => { call('/customer/profile').then(setUser).catch(() => {}); }, []);
+  React.useEffect(() => { cachedCall(call, '/customer/profile').then(setUser).catch(() => {}); }, []);
 
-  if ((lv && !v) || (lb && !b)) return <Loader />;
 
   const purchases = Array.isArray(b) ? b : [];
   const handedOver = purchases.filter(p => p.status === 'HANDED_OVER');
@@ -1346,7 +1292,6 @@ function CustDashboard({ call, setPage }) {
 function CustVehicles({ call, setPage }) {
   const { data: purchasesRaw, loading: lp } = useFetch(call, '/customer/purchases');
   const purchaseRecords = Array.isArray(purchasesRaw) ? purchasesRaw : [];
-  if (lp && !purchasesRaw) return <Loader />;
 
   // Only show vehicles that have been HANDED_OVER by the franchisee
   const handedOver = purchaseRecords.filter(p => p.status === 'HANDED_OVER');
@@ -1444,7 +1389,6 @@ function CustBookings({ call, setPage }) {
   const [pickup, setPickup] = useState(null);
   const [filter, setFilter] = useState('all');
 
-  if (loading && !purchasesRaw) return <Loader />;
 
   const STATUS_CFG = {
     BOOKED:           { label: 'Awaiting Payment',     color: '#d97706', bg: '#fef3c7', icon: '🕐' },
@@ -1617,7 +1561,6 @@ function CustWallet({ call }) {
   const [success, setSuccess]           = React.useState(null); // { amount, newBalance, paymentId }
   const [error, setError]               = React.useState('');
 
-  if ((lw && !w) || (lt && !tx)) return <Loader />;
 
   const balance = w?.balance ?? 0;
   const txList  = Array.isArray(tx) ? tx : [];
@@ -1843,7 +1786,6 @@ function CustInvoices({ call }) {
     }
   };
 
-  if (loading && !invoicesRaw) return <Loader />;
 
   const fmt = (n) => `\u20b9${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const date = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
@@ -1964,7 +1906,6 @@ function CustComplaints({ call }) {
 
   const activeVehicles = options?.activeVehicles || [];
   // Only block on first load with no cache
-  if (loading && !data) return <Loader />;
   if (error && !data)   return <Err msg={error} />;
   const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
 
@@ -2169,17 +2110,20 @@ function CustAvailableVehicles({ call, setPage }) {
     };
 
     load();
-    // Background refresh every 10 s — uses cachedCall so no flicker
-    const interval = setInterval(() => {
-      // Invalidate vehicle/franchisee cache before background refresh
+    // Silent background refresh: only while the customer is viewing the tab.
+    // This keeps the portal fresh without creating loading flicker or needless requests.
+    const refreshIfVisible = () => {
+      if (document.visibilityState !== 'visible') return;
       _cache.forEach((_, k) => {
         if (k.startsWith('/customer/available-vehicles') || k.startsWith('/customer/complaint-options')) {
           _cache.delete(k);
         }
       });
       load(true);
-    }, 10_000);
-    return () => { alive = false; clearInterval(interval); };
+    };
+    const interval = setInterval(refreshIfVisible, 30_000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => { alive = false; clearInterval(interval); document.removeEventListener('visibilitychange', refreshIfVisible); };
   }, []);
 
   const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
@@ -2206,20 +2150,11 @@ function CustAvailableVehicles({ call, setPage }) {
   const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
 
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
-  const [imgLoaded, setImgLoaded] = useState({});
 
   return <>
     <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
 
-    {/* Loading state — EV logo + skeleton grid */}
-    {loading && (
-      <>
-        <EVLoadingScreen label="Finding vehicles near you…" />
-        <VehicleSkeletonGrid count={6} />
-      </>
-    )}
-
-    {!loading && location?.pincode && (
+    {location?.pincode && (
       <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14,animation:'slide-up .4s ease'}}>
         <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
         <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
@@ -2247,8 +2182,7 @@ function CustAvailableVehicles({ call, setPage }) {
       </div>
     )}
 
-    {!loading && (
-      <>
+    <>
         {/* Category filter tabs */}
         <div className="filter-tabs" style={{animation:'slide-up .35s ease .05s both'}}>
           {categories.map(c => (
@@ -2275,12 +2209,9 @@ function CustAvailableVehicles({ call, setPage }) {
                 <div className="vbc-img">
                   {v.images?.length > 0 ? (
                     <>
-                      {!imgLoaded[v._id] && <div className="vbc-img-loading" />}
                       <img
                         src={v.images[0].url}
                         alt={v.make}
-                        onLoad={() => setImgLoaded(p => ({ ...p, [v._id]: true }))}
-                        style={{ opacity: imgLoaded[v._id] ? 1 : 0, transition: 'opacity .35s ease' }}
                       />
                     </>
                   ) : (
@@ -2310,9 +2241,8 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
         )}
       </>
-    )}
 
-    {/* Detail modal */}
+    {/* Detail modal*/}
     {selected && (
       <div className="modal-overlay" onClick={() => setSelected(null)}>
         <div className="modal-drawer" onClick={e => e.stopPropagation()} style={{ width: 'min(580px,100%)' }}>
@@ -2573,7 +2503,6 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                     placeholder="Enter 6-digit pincode"
                     onChange={e => { const v = e.target.value.replace(/\D/g,'').slice(0,6); setPincode(v); setAddrData(null); setPincodeError(''); if (v.length === 6) lookupPincode(v); }}
                   />
-                  {pincodeLoading && <div className="pincode-spinner" />}
                 </div>
                 {pincodeError && <div className="bk-field-err">{pincodeError}</div>}
               </div>
@@ -2686,13 +2615,10 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 <div className="bk-wallet-row">
                   <div className="bk-wallet-bal">
                     <Wallet size={16} />
-                    {walletLoading
-                      ? <span className="bk-wallet-loading">Loading…</span>
-                      : <strong>₹{walletBalance.toLocaleString('en-IN')}</strong>
-                    }
+                    <strong>₹{walletBalance.toLocaleString('en-IN')}</strong>
                     <span className="bk-wallet-label">available</span>
                   </div>
-                  {!walletLoading && (
+                  {(
                     <label className="bk-wallet-toggle">
                       <input
                         type="checkbox"
@@ -2713,7 +2639,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 </div>
 
                 {/* Zero-balance notice */}
-                {!walletLoading && walletBalance === 0 && (
+                {walletBalance === 0 && (
                   <div className="bk-wallet-zero-notice">
                     <span>Your wallet balance is ₹0.</span>
                     <button className="bk-recharge-trigger" onClick={() => setShowRecharge(true)}>
@@ -3223,7 +3149,6 @@ function CustChargingStations({ call }) {
     );
   };
 
-  if (loading && !rawHubs) return <Loader />;
   if (error   && !rawHubs) return <Err msg={error} />;
 
   const onlineCount = (rawHubs || []).filter(h => h.status === 'ONLINE').length;
@@ -3268,8 +3193,7 @@ function CustChargingStations({ call }) {
           )}
           {locStatus === 'getting' && (
             <div className="cs-loc-status getting">
-              <div className="cs-loc-spinner" />
-              <span>Getting your location…</span>
+              <span>Locating…</span>
             </div>
           )}
           {locStatus === 'done' && (
@@ -3642,7 +3566,6 @@ function CustProfile({ call, setPage }) {
     });
   }, [user]);
 
-  if (loading && !user) return <Loader />;
   const name = user?.name || 'Customer';
   const initial = name.trim().charAt(0).toUpperCase() || 'C';
   const profileImage = user?.profileImage;

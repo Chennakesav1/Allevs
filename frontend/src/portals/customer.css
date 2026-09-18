@@ -3596,3 +3596,61 @@ tr:hover td { background: #fafbff; }
     display: none !important;
   }
 }
+
+
+/* ================================================================
+   CUSTOMER PORTAL — FAST / NO PAGE LOADER POLISH
+   Existing styles remain untouched above. These rules only remove
+   data-loading animation/flicker from the customer experience.
+================================================================ */
+
+.customer-shell .customer-page-content {
+  min-width: 0;
+  width: 100%;
+  animation: none !important;
+}
+
+/* Data fetching is cache-first/background-revalidated. Never show
+   the branded or generic loader inside customer pages. */
+.customer-shell .page-center-loader,
+.customer-shell .sidebar-skeleton-nav,
+.customer-shell .vehicle-skeleton-grid,
+.customer-shell .vehicle-loading-inline,
+.customer-shell .pincode-spinner,
+.customer-shell .cs-loc-spinner,
+.customer-shell .vbc-img-loading {
+  display: none !important;
+}
+
+/* No route-enter animation/flicker when moving between customer sections. */
+.customer-shell .customer-page-transition {
+  animation: none !important;
+}
+
+/* Keep interactions crisp without expensive broad transitions. */
+.customer-shell button,
+.customer-shell a,
+.customer-shell input,
+.customer-shell select,
+.customer-shell textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.customer-shell .vehicle-browse-card,
+.customer-shell .cust-app-icon-tile,
+.customer-shell .metric-card,
+.customer-shell .card {
+  will-change: auto;
+}
+
+/* Respect reduced motion while keeping the portal visually stable. */
+@media (prefers-reduced-motion: reduce) {
+  .customer-shell *,
+  .customer-shell *::before,
+  .customer-shell *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+}
