@@ -6,7 +6,8 @@
  */
 const crypto     = require('crypto');
 const nodemailer = require('nodemailer');
-const { VehicleRental, PendingVehicle, Invoice, User, Financial, Job, Payment, CustomerPayment } = require('../models');
+const M = require('../models');
+const { VehicleRental, PendingVehicle, Invoice, User, Financial, Job } = M;
 const audit = require('../services/audit');
 
 // ── Razorpay helper ──────────────────────────────────────────────────
@@ -227,7 +228,7 @@ exports.createOrder = async (req, res) => {
   try {
     const {
       vehicleId, vehicleSource, franchiseeId, pincode, state, district, area, fullAddress,
-      purchaseDate, saleQuantity, durationDays, rentalPlan, planUnits,
+      purchaseDate, saleQuantity, durationDays, rentalPlan, planUnits, aadharNumber, panNumber, kycDocuments,
     } = req.body;
     if (!vehicleId) return res.status(400).json({ message: 'vehicleId is required' });
 
@@ -284,6 +285,16 @@ exports.createOrder = async (req, res) => {
     const rentalTotal = Math.max(0, rentalSubtotal - discountAmount + securityDeposit);
     if (rentalTotal <= 0) return res.status(400).json({ message: 'Vehicle rental amount is not configured.' });
 
+    // Rental due date is calculated from the selected plan. Sales do not have a return due date.
+    const bookingStart = purchaseDate ? new Date(purchaseDate) : new Date();
+    const dueDate = selectedPlan === 'DAILY'
+      ? new Date(bookingStart.getTime() + durationUnits * 24 * 60 * 60 * 1000)
+      : selectedPlan === 'WEEKLY'
+        ? new Date(bookingStart.getTime() + durationUnits * 7 * 24 * 60 * 60 * 1000)
+        : selectedPlan === 'MONTHLY'
+          ? new Date(bookingStart.getTime() + durationUnits * 30 * 24 * 60 * 60 * 1000)
+          : null;
+
     const rz = getRazorpay();
     const rzOrder = await rz.orders.create({
       amount: Math.round(rentalTotal * 100), currency: 'INR',
@@ -293,7 +304,7 @@ exports.createOrder = async (req, res) => {
 
     const snapshot = {
       make: vehicle.make, model: vehicle.model, year: vehicle.year, color: vehicle.color,
-      category: vehicle.category, registrationNo: vehicle.registrationNo, chassisNo: vehicle.chassisNo,
+      bikeId: vehicle.bikeId || undefined, category: vehicle.category, registrationNo: vehicle.registrationNo, chassisNo: vehicle.chassisNo,
       motorNo: vehicle.motorNo, insuranceExpiry: vehicle.insuranceExpiry, odometerKm: vehicle.odometerKm,
       seatingCapacity: vehicle.seatingCapacity, topSpeedKph: vehicle.topSpeedKph,
       batteryCapacityKwh: vehicle.batteryCapacityKwh, rangeKm: vehicle.rangeKm,
@@ -316,7 +327,8 @@ exports.createOrder = async (req, res) => {
       franchiseeName: franchisee.name, pickupLocation,
       pincode, state, district, area, fullAddress,
       customerLocation: { pincode, state, district, area, fullAddress },
-      purchaseDate: purchaseDate || new Date(), saleQuantity: vehicleCount, durationDays: durationUnits,
+      kycSnapshot: { aadharNumber: String(aadharNumber||'').replace(/\s/g,''), panNumber: String(panNumber||'').trim().toUpperCase(), documents: kycDocuments || undefined },
+      purchaseDate: bookingStart, startDate: bookingStart, endDate: dueDate, dueDate, saleQuantity: vehicleCount, durationDays: durationUnits,
       rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate,
       securityDeposit, discountPercent, discountAmount,
       price: rate, pricePerDay: Number(vehicle.pricePerDay || rate), totalAmount: rentalTotal,
@@ -324,6 +336,7 @@ exports.createOrder = async (req, res) => {
       bookingHistory: [{
         event: 'BOOKING_CREATED', at: new Date(), paymentStatus: 'PENDING', status: 'BOOKED',
         rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate, vehicleCount, securityDeposit, discountPercent, discountAmount,
+        startDate: bookingStart, endDate: dueDate, dueDate,
         customerLocation: { pincode, state, district, area, fullAddress },
         franchisee: { id: ownerId, name: franchisee.name }, pickupLocation,
         vehicle: snapshot, purchaseDate: purchaseDate || new Date(), saleQuantity: vehicleCount,
@@ -336,7 +349,9 @@ exports.createOrder = async (req, res) => {
       purchaseId: rental._id, rentalId: rental._id, orderId: rzOrder.id,
       amount: rzOrder.amount, currency: rzOrder.currency, keyId: process.env.RAZORPAY_KEY_ID,
       rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate,
+      startDate: bookingStart, endDate: dueDate, dueDate,
       securityDeposit, discountAmount, totalAmount: rentalTotal,
+      bikeId: vehicle.bikeId || undefined,
       vehicle: { make: vehicle.make, model: vehicle.model, salePrice: rate },
     });
   } catch (e) {
@@ -368,38 +383,10 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ message: 'Payment signature verification failed' });
     }
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature ||
-        String(razorpay_order_id) !== String(rental.razorpayOrderId)) {
-      return res.status(400).json({ message: 'Payment order verification failed' });
-    }
-
-    // Confirm the payment server-to-server so the browser cannot report a
-    // successful payment for a different order, amount, or non-captured payment.
-    const rz = getRazorpay();
-    const razorpayPayment = await rz.payments.fetch(razorpay_payment_id);
-    if (String(razorpayPayment.order_id) !== String(rental.razorpayOrderId))
-      return res.status(400).json({ message: 'Payment does not belong to this booking.' });
-    if (Number(razorpayPayment.amount) !== Math.round(Number(rental.totalAmount || 0) * 100))
-      return res.status(400).json({ message: 'Payment amount mismatch.' });
-    if (razorpayPayment.currency !== 'INR')
-      return res.status(400).json({ message: 'Payment currency mismatch.' });
-    if (razorpayPayment.status !== 'captured')
-      return res.status(400).json({ message: `Payment is not captured (${razorpayPayment.status}).` });
-
     // IMPORTANT: stock changes only after Razorpay signature verification succeeds.
     // The atomic update prevents two successful customers from consuming the same last unit.
     if (rental.paymentStatus === 'PAID') {
-      const existingInvoice = await Invoice.findOne({ rentalId: rental._id }).sort('-createdAt').lean();
-      const existingPayment = await CustomerPayment.findOne({ rentalId: rental._id, franchiseeId: rental.franchiseeId }).sort('-createdAt').lean();
-      return res.json({
-        success: true,
-        message: 'Payment successful',
-        rental,
-        invoiceId: existingInvoice?._id || null,
-        invoiceNo: existingInvoice?.invoiceNo || null,
-        payment: existingPayment || null,
-        alreadyProcessed: true,
-      });
+      return res.json({ success: true, rental, alreadyProcessed: true });
     }
     const purchaseQty = Number(rental.saleQuantity || 1);
     const stockQuery = { _id: rental.vehicleId, $or: [{ quantity: { $gte: purchaseQty } }, { quantity: { $exists: false } }] };
@@ -433,38 +420,39 @@ exports.verifyPayment = async (req, res) => {
     });
     await rental.save();
 
-    try {
-      await audit(req.user._id, 'PAYMENT', 'VehicleRental', rental._id);
-    } catch (e) {
-      console.error('Payment audit error:', e.message);
-    }
+    await audit(req.user._id, 'PAYMENT', 'VehicleRental', rental._id);
     const ownerFranchiseeId = stock.franchiseeId || stock.fleetOperatorId || rental.franchiseeId;
     if (ownerFranchiseeId) {
-      try {
-        const existingRevenue = await Financial.findOne({ franchiseeId: ownerFranchiseeId, referenceId: rental._id, kind: 'REVENUE' });
-        if (!existingRevenue) {
-          await Financial.create({
-            franchiseeId: ownerFranchiseeId, kind: 'REVENUE', category: rental.rentalPlan === 'SALE' ? 'VEHICLE_SALE' : 'VEHICLE_RENTAL',
-            amount: rental.totalAmount || 0, referenceId: rental._id,
-            description: `${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} ${rental.rentalPlan === 'SALE' ? 'vehicle purchase' : rental.rentalPlan.toLowerCase() + ' rental'} payment`,
-          });
-        }
-      } catch (e) {
-        console.error('Franchise financial ledger error after successful payment:', e.message);
-      }
-
-      // Notifications are helpful but must never turn a successful payment into
-      // an HTTP 500 after Razorpay has already captured the customer's money.
-      try {
-        await M.Notification.create({
-          userId: ownerFranchiseeId, type: 'VEHICLE_BOOKING_PAID',
-          title: rental.rentalPlan === 'SALE' ? 'Vehicle Purchase Paid' : 'New Rental Booking Paid',
-          message: `${req.user?.name || 'Customer'} booked ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} (${rental.rentalPlan}). Payment received.`,
-          data: { rentalId: rental._id, vehicleId: rental.vehicleId, rentalPlan: rental.rentalPlan, planUnits: rental.planUnits, amount: rental.totalAmount },
-        });
-      } catch (e) {
-        console.error('Franchise payment notification error:', e.message);
-      }
+      const customerSnapshot = await User.findById(rental.customerId).select('name email phone address').lean();
+      await M.CustomerPayment.findOneAndUpdate(
+        { razorpayPaymentId: razorpay_payment_id },
+        {
+          franchiseeId: ownerFranchiseeId, customerId: rental.customerId, rentalId: rental._id,
+          vehicleId: rental.vehicleSource === 'COMMAND_VEHICLE' ? rental.vehicleId : undefined,
+          bikeId: rental.vehicleSnapshot?.bikeId || rental.bikeId || undefined,
+          purchaseDate: rental.purchaseDate,
+          dueDate: rental.dueDate || rental.endDate || undefined,
+          customerSnapshot, vehicleSnapshot: rental.vehicleSnapshot,
+          rentalPlan: rental.rentalPlan, planUnits: rental.planUnits, rentalRate: rental.rentalRate,
+          paymentType: rental.rentalPlan === 'SALE' ? 'SALE' : 'RENTAL',
+          paymentThrough: 'RAZORPAY',
+          description: `${rental.rentalPlan === 'SALE' ? 'Vehicle Purchase' : 'Rental Payment'} — ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} — ${rental.vehicleSnapshot?.bikeId || rental.bikeId || 'Bike ID not set'} — Customer: ${customerSnapshot?.name || 'Customer'}`,
+          securityDeposit: rental.securityDeposit, discountPercent: rental.discountPercent, discountAmount: rental.discountAmount,
+          amount: rental.totalAmount || 0, currency: 'INR', razorpayOrderId: razorpay_order_id,
+          razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature, status: 'PAID', paidAt: new Date(),
+        }, { upsert:true, new:true, setDefaultsOnInsert:true }
+      );
+      await Financial.create({
+        franchiseeId: ownerFranchiseeId, kind: 'REVENUE', category: rental.rentalPlan === 'SALE' ? 'VEHICLE_SALE' : 'VEHICLE_RENTAL',
+        amount: rental.totalAmount || 0, referenceId: rental._id,
+        description: `${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} ${rental.rentalPlan === 'SALE' ? 'vehicle purchase' : rental.rentalPlan.toLowerCase() + ' rental'} payment`,
+      });
+      await M.Notification.create({
+        userId: ownerFranchiseeId, type: 'VEHICLE_BOOKING_PAID',
+        title: rental.rentalPlan === 'SALE' ? 'Vehicle Purchase Paid' : 'New Rental Booking Paid',
+        message: `${req.user?.name || 'Customer'} booked ${rental.vehicleSnapshot?.make || ''} ${rental.vehicleSnapshot?.model || ''} (${rental.rentalPlan}). Payment received.`,
+        data: { rentalId: rental._id, vehicleId: rental.vehicleId, rentalPlan: rental.rentalPlan, planUnits: rental.planUnits, amount: rental.totalAmount },
+      });
     }
 
     // ── Generate Invoice ──────────────────────────────────────────
@@ -472,118 +460,30 @@ exports.verifyPayment = async (req, res) => {
     const subtotal = rental.totalAmount || 0;
     const total    = subtotal;
 
-    let inv = await Invoice.findOne({ rentalId: rental._id }).sort('-createdAt');
-    if (!inv) {
-      inv = await Invoice.create({
-        invoiceNo:  invoiceNo(),
-        customerId: rental.customerId,
-        rentalId:   rental._id,
-        items: [{
-          description: rental.rentalPlan && rental.rentalPlan !== 'SALE'
-            ? `${vs.make || ''} ${vs.model || ''} — ${rental.rentalPlan} rental (${rental.planUnits || rental.durationDays || 1} period${(rental.planUnits || rental.durationDays || 1) !== 1 ? 's' : ''})`
-            : `${vs.make || ''} ${vs.model || ''} Vehicle Purchase (${rental.saleQuantity || 1} unit${(rental.saleQuantity || 1) !== 1 ? 's' : ''})`,
-          qty:  rental.rentalPlan && rental.rentalPlan !== 'SALE' ? (rental.planUnits || 1) * (rental.saleQuantity || 1) : (rental.saleQuantity || 1),
-          rate:  rental.rentalRate || rental.pricePerDay || 0,
-          amount: subtotal,
-        }],
-        subtotal,
-        tax:   0,
-        total,
-        status: 'PAID',
-        paidAt: new Date(),
-      });
-    } else if (inv.status !== 'PAID') {
-      inv.status = 'PAID';
-      inv.paidAt = inv.paidAt || new Date();
-      await inv.save();
-    }
-
-    // ── Create the franchisee-visible customer payment ledger record ──
-    const customer = await User.findById(req.user._id).lean();
-    const paymentPayload = {
+    const inv = await Invoice.create({
+      invoiceNo:  invoiceNo(),
       customerId: rental.customerId,
-      franchiseeId: ownerFranchiseeId || rental.franchiseeId,
-      rentalId: rental._id,
-      invoiceId: inv._id,
-      amount: Number(rental.totalAmount || 0),
-      currency: 'INR',
+      rentalId:   rental._id,
+      items: [{
+        description: rental.rentalPlan && rental.rentalPlan !== 'SALE'
+          ? `${vs.make || ''} ${vs.model || ''} — ${rental.rentalPlan} rental (${rental.planUnits || rental.durationDays || 1} period${(rental.planUnits || rental.durationDays || 1) !== 1 ? 's' : ''})`
+          : `${vs.make || ''} ${vs.model || ''} Vehicle Purchase (${rental.saleQuantity || 1} unit${(rental.saleQuantity || 1) !== 1 ? 's' : ''})`,
+        qty:  rental.rentalPlan && rental.rentalPlan !== 'SALE' ? (rental.planUnits || 1) * (rental.saleQuantity || 1) : (rental.saleQuantity || 1),
+        rate: rental.rentalRate || rental.pricePerDay || 0,
+        amount: subtotal,
+      }],
+      subtotal,
+      tax:   0,
+      total,
       status: 'PAID',
-      method: 'RAZORPAY',
-      provider: 'RAZORPAY',
-      razorpayOrderId: razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-      paymentDate: new Date(),
-      customerSnapshot: {
-        name: customer?.name || req.user?.name || '',
-        email: customer?.email || req.user?.email || '',
-        phone: customer?.phone || req.user?.phone || '',
-        address: customer?.address || null,
-      },
-      vehicleSnapshot: rental.vehicleSnapshot || {},
-      rentalPlan: rental.rentalPlan,
-      planUnits: rental.planUnits || rental.durationDays || 1,
-      rentalRate: rental.rentalRate || rental.pricePerDay || 0,
-      securityDeposit: rental.securityDeposit || 0,
-      discountPercent: rental.discountPercent || 0,
-      discountAmount: rental.discountAmount || 0,
-      customerLocation: rental.customerLocation || {
-        pincode: rental.pincode, state: rental.state, district: rental.district,
-        area: rental.area, fullAddress: rental.fullAddress,
-      },
-      pickupLocation: rental.pickupLocation || null,
-    };
+    });
 
-    let customerPayment = await CustomerPayment.findOne({ razorpayPaymentId: razorpay_payment_id });
-    if (!customerPayment) {
-      customerPayment = await CustomerPayment.create(paymentPayload);
-    }
-
-    // Keep the generic Payment collection in sync for existing payment screens/APIs.
-    let payment = await Payment.findOne({ razorpayPaymentId: razorpay_payment_id });
-    if (!payment) {
-      payment = await Payment.create({
-        customerId: rental.customerId,
-        invoiceId: inv._id,
-        rentalId: rental._id,
-        franchiseeId: ownerFranchiseeId || rental.franchiseeId,
-        amount: Number(rental.totalAmount || 0),
-        method: 'RAZORPAY',
-        status: 'PAID',
-        provider: 'RAZORPAY',
-        providerRef: razorpay_payment_id,
-        orderId: razorpay_order_id,
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-        signature: razorpay_signature,
-        customerName: customer?.name || '',
-        customerEmail: customer?.email || '',
-        customerPhone: customer?.phone || '',
-        customerAddress: customer?.address || null,
-        vehicleSnapshot: rental.vehicleSnapshot || {},
-        rentalPlan: rental.rentalPlan,
-        planUnits: rental.planUnits || rental.durationDays || 1,
-      });
-    }
-
-    if (customerPayment && !customerPayment.paymentId) {
-      customerPayment.paymentId = payment._id;
-      customerPayment.invoiceId = inv._id;
-      await customerPayment.save();
-    }
-
+    // ── Send invoice email (non-blocking) ─────────────────────────
+    await M.CustomerPayment.findOneAndUpdate({ razorpayPaymentId: razorpay_payment_id }, { invoiceId: inv._id });
+    const customer = await User.findById(req.user._id).lean();
     sendInvoiceEmail(customer, rental, inv); // fire-and-forget
 
-    res.json({
-      success: true,
-      message: 'Payment successful',
-      rental,
-      invoiceId: inv._id,
-      invoiceNo: inv.invoiceNo,
-      paymentId: razorpay_payment_id,
-      franchiseeId: ownerFranchiseeId || rental.franchiseeId,
-      customerPaymentId: customerPayment?._id || null,
-    });
+    res.json({ success: true, rental, invoiceId: inv._id, invoiceNo: inv.invoiceNo });
   } catch (e) {
     console.error('verifyPayment error:', e);
     res.status(500).json({ message: e.message });
@@ -637,32 +537,273 @@ exports.downloadInvoice = async (req, res) => {
 exports.franchisePurchases = async (req, res) => {
   try {
     const filter = { franchiseeId: req.user._id };
-    const purchases = await VehicleRental
-      .find(filter)
-      .populate('customerId', 'name email phone')
-      .populate('vehicleId', 'make model registrationNo')
-      .sort('-createdAt');
-    res.json(purchases);
+    const purchases = await VehicleRental.find(filter)
+      .populate('customerId', 'name email phone address')
+      .populate('vehicleId', 'make model registrationNo year batteryCapacityKwh rangeKm rentalPlans securityDeposit bikeId')
+      .sort('-createdAt').lean();
+    res.json(purchases.map(r => ({
+      ...r,
+      bikeId: r.bikeId || r.vehicleSnapshot?.bikeId || r.vehicleId?.bikeId || null,
+      dueDate: r.dueDate || r.endDate || null,
+      vehicleSnapshot: { ...(r.vehicleSnapshot || {}), bikeId: r.bikeId || r.vehicleSnapshot?.bikeId || r.vehicleId?.bikeId || undefined },
+    })));
+  } catch (e) { res.status(500).json({ message: e.message }); }
+};
+
+
+// ── POST /customer/purchases/:id/extend-order ────────────────────────
+// Creates a Razorpay order for extending an active handed-over rental.
+exports.createExtensionOrder = async (req, res) => {
+  try {
+    const rental = await VehicleRental.findOne({ _id: req.params.id, customerId: req.user._id });
+    if (!rental) return res.status(404).json({ message: 'Rental not found' });
+    if (rental.rentalPlan === 'SALE') return res.status(400).json({ message: 'Vehicle purchases cannot be extended.' });
+    if (!['HANDED_OVER', 'ACTIVE'].includes(rental.status)) return res.status(400).json({ message: 'Vehicle must be handed over before it can be extended.' });
+    if (rental.paymentStatus !== 'PAID') return res.status(400).json({ message: 'Original rental payment is not completed.' });
+
+    const requestedPlan = String(req.body.plan || rental.rentalPlan || 'DAILY').toUpperCase();
+    if (!['DAILY','WEEKLY','MONTHLY'].includes(requestedPlan)) {
+      return res.status(400).json({ message: 'Please select Daily, Weekly or Monthly for the extension.' });
+    }
+    const units = Math.max(1, Math.min(365, Math.floor(Number(req.body.units || 1))));
+    const unitLabel = requestedPlan === 'DAILY' ? 'day' : requestedPlan === 'WEEKLY' ? 'week' : 'month';
+    const planData = rental.rentalPlans?.[requestedPlan.toLowerCase()] || rental.vehicleSnapshot?.rentalPlans?.[requestedPlan.toLowerCase()];
+    if (!planData?.enabled || Number(planData.amount) <= 0) {
+      return res.status(400).json({ message: `${unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} rental plan is not available for this vehicle.` });
+    }
+    const rate = Number(planData.amount);
+    const amount = Math.round(rate * units);
+    const rz = getRazorpay();
+    const rzOrder = await rz.orders.create({
+      amount: Math.round(amount * 100),
+      currency: 'INR',
+      receipt: `rental_extension_${Date.now()}`,
+      notes: {
+        rentalId: String(rental._id),
+        customerId: String(req.user._id),
+        bikeId: String(rental.bikeId || rental.vehicleSnapshot?.bikeId || ''),
+        paymentType: 'EXTENSION',
+        extensionUnits: String(units),
+        extensionPlan: requestedPlan,
+      },
+    });
+
+    rental.pendingExtension = { days: units, amount, orderId: rzOrder.id, createdAt: new Date(), unitLabel, plan: requestedPlan, rate };
+    rental.bookingHistory = rental.bookingHistory || [];
+    rental.bookingHistory.push({
+      event: 'EXTENSION_ORDER_CREATED',
+      at: new Date(),
+      orderId: rzOrder.id,
+      extensionUnits: units,
+      extensionPlan: requestedPlan,
+      extensionUnitLabel: unitLabel,
+      extensionAmount: amount,
+      dueDateBeforeExtension: rental.dueDate || rental.endDate || null,
+    });
+    await rental.save();
+
+    res.status(201).json({
+      success: true,
+      rentalId: rental._id,
+      orderId: rzOrder.id,
+      amount: rzOrder.amount,
+      currency: rzOrder.currency,
+      keyId: process.env.RAZORPAY_KEY_ID,
+      paymentType: 'EXTENSION',
+      extensionUnits: units,
+      extensionPlan: requestedPlan,
+      extensionUnitLabel: unitLabel,
+      extensionAmount: amount,
+      currentDueDate: rental.dueDate || rental.endDate || null,
+      bikeId: rental.bikeId || rental.vehicleSnapshot?.bikeId || null,
+      vehicle: rental.vehicleSnapshot || {},
+    });
   } catch (e) {
+    console.error('createExtensionOrder error:', e);
     res.status(500).json({ message: e.message });
   }
 };
 
-// ── GET /franchise/customer-payments ─────────────────────────────────
-// Payment ledger scoped strictly to the logged-in franchisee.
-exports.franchiseCustomerPayments = async (req, res) => {
+// ── POST /customer/purchases/:id/verify-extension ────────────────────
+exports.verifyExtensionPayment = async (req, res) => {
   try {
-    const payments = await CustomerPayment
-      .find({ franchiseeId: req.user._id })
-      .populate('customerId', 'name email phone address')
-      .populate('invoiceId', 'invoiceNo total status paidAt')
-      .populate('rentalId', 'purchaseDate rentalPlan planUnits rentalRate securityDeposit discountAmount totalAmount paymentStatus razorpayOrderId razorpayPaymentId franchiseeName pickupLocation customerLocation vehicleSnapshot')
-      .sort('-paymentDate -createdAt')
-      .lean();
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const rental = await VehicleRental.findOne({ _id: req.params.id, customerId: req.user._id });
+    if (!rental) return res.status(404).json({ message: 'Rental not found' });
+    if (rental.rentalPlan === 'SALE') return res.status(400).json({ message: 'Vehicle purchases cannot be extended.' });
+    if (!rental.pendingExtension || String(rental.pendingExtension.orderId) !== String(razorpay_order_id)) {
+      return res.status(400).json({ message: 'Extension payment order is invalid or expired.' });
+    }
 
-    res.json(payments || []);
+    const expectedSig = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+    if (expectedSig !== razorpay_signature) {
+      rental.bookingHistory = rental.bookingHistory || [];
+      rental.bookingHistory.push({ event: 'EXTENSION_PAYMENT_FAILED', at: new Date(), razorpayOrderId: razorpay_order_id, razorpayPaymentId: razorpay_payment_id || null, reason: 'Payment signature verification failed' });
+      await rental.save();
+      return res.status(400).json({ message: 'Payment signature verification failed' });
+    }
+
+    // Idempotency: never apply the same Razorpay payment twice.
+    const existing = await M.CustomerPayment.findOne({ razorpayPaymentId: razorpay_payment_id }).lean();
+    if (existing?.paymentType === 'EXTENSION') {
+      return res.json({ success: true, rental, payment: existing, alreadyProcessed: true });
+    }
+
+    const units = Math.max(1, Number(rental.pendingExtension.days || 1));
+    const plan = String(rental.pendingExtension.plan || rental.rentalPlan || 'DAILY').toUpperCase();
+    const unitLabel = plan === 'DAILY' ? 'day' : plan === 'WEEKLY' ? 'week' : 'month';
+    const amount = Number(rental.pendingExtension.amount || 0);
+    const selectedRate = Number(rental.pendingExtension.rate || amount / units || 0);
+    if (!(amount > 0)) return res.status(400).json({ message: 'Invalid extension amount.' });
+
+    const currentDue = rental.dueDate || rental.endDate || new Date();
+    const currentDueDate = new Date(currentDue);
+    const baseMs = Math.max(currentDueDate.getTime(), Date.now());
+    const multiplier = plan === 'DAILY' ? 1 : plan === 'WEEKLY' ? 7 : 30;
+    const newDueDate = new Date(baseMs + units * multiplier * 24 * 60 * 60 * 1000);
+    const nextExtensionCount = Number(rental.extensionCount || 0) + 1;
+    const customer = await User.findById(rental.customerId).select('name email phone address').lean();
+    const ownerFranchiseeId = rental.franchiseeId;
+    const vs = rental.vehicleSnapshot || {};
+    const bikeId = rental.bikeId || vs.bikeId || null;
+
+    rental.dueDate = newDueDate;
+    rental.endDate = newDueDate;
+    rental.rentalPlan = plan;
+    rental.rentalRate = selectedRate;
+    rental.planUnits = units;
+    rental.extensionCount = nextExtensionCount;
+    rental.pendingExtension = undefined;
+    rental.extensionHistory = rental.extensionHistory || [];
+    rental.extensionHistory.push({
+      extensionNumber: nextExtensionCount,
+      units,
+      plan,
+      unitLabel,
+      amount,
+      rate: selectedRate,
+      previousDueDate: currentDueDate,
+      newDueDate,
+      paymentThrough: 'RAZORPAY',
+      razorpayOrderId: razorpay_order_id,
+      razorpayPaymentId: razorpay_payment_id,
+      paidAt: new Date(),
+      paymentThrough: 'RAZORPAY',
+      customerId: rental.customerId,
+      customerName: customer?.name || req.user?.name || '',
+      bikeId,
+      vehicle: vs,
+    });
+    rental.bookingHistory = rental.bookingHistory || [];
+    rental.bookingHistory.push({
+      event: 'EXTENSION_PAYMENT_SUCCESS',
+      at: new Date(),
+      extensionNumber: nextExtensionCount,
+      extensionUnits: units,
+      extensionPlan: plan,
+      extensionUnitLabel: unitLabel,
+      extensionAmount: amount,
+      previousDueDate: currentDueDate,
+      dueDate: newDueDate,
+      razorpayOrderId: razorpay_order_id,
+      razorpayPaymentId: razorpay_payment_id,
+      bikeId,
+      customerName: customer?.name || req.user?.name || '',
+    });
+    await rental.save();
+
+    let invoice = null;
+    try {
+      invoice = await Invoice.create({
+        invoiceNo: `INV-EXT-${Date.now()}`,
+        customerId: rental.customerId,
+        rentalId: rental._id,
+        items: [{
+          description: `Rental Extension #${nextExtensionCount} — ${vs.make || ''} ${vs.model || ''} (${bikeId || 'Bike ID not set'}) — ${units} ${unitLabel}${units !== 1 ? 's' : ''}`,
+          qty: units,
+          rate: Number(rental.rentalRate || 0),
+          amount,
+        }],
+        subtotal: amount,
+        tax: 0,
+        total: amount,
+        status: 'PAID',
+        paidAt: new Date(),
+      });
+    } catch (invoiceErr) {
+      console.error('Extension invoice error:', invoiceErr.message);
+    }
+
+    const payment = await M.CustomerPayment.findOneAndUpdate(
+      { razorpayPaymentId: razorpay_payment_id },
+      {
+        franchiseeId: ownerFranchiseeId,
+        customerId: rental.customerId,
+        rentalId: rental._id,
+        vehicleId: rental.vehicleSource === 'COMMAND_VEHICLE' ? rental.vehicleId : undefined,
+        bikeId,
+        purchaseDate: rental.purchaseDate,
+        dueDate: newDueDate,
+        invoiceId: invoice?._id,
+        customerSnapshot: customer,
+        vehicleSnapshot: vs,
+        rentalPlan: rental.rentalPlan,
+        planUnits: rental.planUnits,
+        rentalRate: rental.rentalRate,
+        securityDeposit: 0,
+        discountPercent: 0,
+        discountAmount: 0,
+        paymentType: 'EXTENSION',
+        paymentThrough: 'RAZORPAY',
+        description: `Rental Extension #${nextExtensionCount} — ${vs.make || ''} ${vs.model || ''} — ${bikeId || 'Bike ID not set'} — Customer: ${customer?.name || req.user?.name || 'Customer'}`,
+        extensionCount: nextExtensionCount,
+        extensionUnits: units,
+        extensionDueDate: newDueDate,
+        amount,
+        currency: 'INR',
+        razorpayOrderId: razorpay_order_id,
+        razorpayPaymentId: razorpay_payment_id,
+        razorpaySignature: razorpay_signature,
+        status: 'PAID',
+        paidAt: new Date(),
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    if (ownerFranchiseeId) {
+      await Financial.create({
+        franchiseeId: ownerFranchiseeId,
+        kind: 'REVENUE',
+        category: 'RENTAL_EXTENSION',
+        amount,
+        referenceId: rental._id,
+        description: `Rental Extension #${nextExtensionCount} — ${vs.make || ''} ${vs.model || ''} (${bikeId || 'No Bike ID'}) — ${customer?.name || 'Customer'}`,
+      });
+      await M.Notification.create({
+        userId: ownerFranchiseeId,
+        type: 'RENTAL_EXTENSION_PAID',
+        title: `Rental Extension #${nextExtensionCount} Paid`,
+        message: `${customer?.name || 'Customer'} extended ${vs.make || ''} ${vs.model || ''} (${bikeId || 'No Bike ID'}) for ${units} ${unitLabel}${units !== 1 ? 's' : ''}. New due date: ${newDueDate.toLocaleDateString('en-IN')}.`,
+        data: { rentalId: rental._id, paymentId: payment._id, bikeId, extensionCount: nextExtensionCount, amount, dueDate: newDueDate },
+      });
+    }
+
+    await M.Notification.create({
+      userId: rental.customerId,
+      type: 'RENTAL_EXTENSION_PAID',
+      title: `Rental Extended Successfully · #${nextExtensionCount}`,
+      message: `Your ${vs.make || ''} ${vs.model || ''} (${bikeId || 'Bike ID not set'}) has been extended by ${units} ${unitLabel}${units !== 1 ? 's' : ''}. New due date: ${newDueDate.toLocaleDateString('en-IN')}.`,
+      data: { rentalId: rental._id, paymentId: payment._id, bikeId, extensionCount: nextExtensionCount, amount, dueDate: newDueDate },
+    });
+
+    if (invoice) sendInvoiceEmail(customer, rental, invoice);
+
+    res.json({ success: true, rental, payment, invoiceId: invoice?._id || null, extensionCount: nextExtensionCount, previousDueDate: currentDueDate, dueDate: newDueDate });
   } catch (e) {
-    console.error('franchiseCustomerPayments error:', e);
+    console.error('verifyExtensionPayment error:', e);
     res.status(500).json({ message: e.message });
   }
 };
@@ -693,6 +834,27 @@ exports.handover = async (req, res) => {
       return res.status(403).json({ message: 'You can only hand over vehicles sold by your franchisee.' });
 
     const now = new Date();
+    // Fleet operator may choose the physical Command Center bike at handover time.
+    if (req.body.vehicleId && String(req.body.vehicleId) !== String(rental.vehicleId || '')) {
+      const { CommandVehicle, CustomerPayment } = require('../models');
+      const selected = await CommandVehicle.findOne({ _id:req.body.vehicleId, fleetOperatorId:req.user._id, status:'ACTIVE', fleetInventoryStatus:'ACTIVE', $or:[{quantity:{$gt:0}},{quantity:{$exists:false}}] });
+      if (!selected) return res.status(409).json({ message:'Selected bike is not available in your active fleet inventory.' });
+      if (rental.vehicleSource === 'COMMAND_VEHICLE' && rental.vehicleId) {
+        await CommandVehicle.findByIdAndUpdate(rental.vehicleId, { $inc:{ quantity:1 } });
+      }
+      await CommandVehicle.findByIdAndUpdate(selected._id, { $inc:{ quantity:-1 } });
+      rental.vehicleId = selected._id;
+      rental.vehicleSource = 'COMMAND_VEHICLE';
+      rental.bikeId = selected.bikeId;
+      rental.vehicleSnapshot = {
+        ...rental.vehicleSnapshot, _id:selected._id, bikeId:selected.bikeId, make:selected.make, model:selected.model, year:selected.year, color:selected.color,
+        category:selected.category, registrationNo:selected.registrationNo, chassisNo:selected.chassisNo, motorNo:selected.motorNo, insuranceExpiry:selected.insuranceExpiry,
+        odometerKm:selected.odometerKm, seatingCapacity:selected.seatingCapacity, topSpeedKph:selected.topSpeedKph, batteryCapacityKwh:selected.batteryCapacityKwh,
+        rangeKm:selected.rangeKm, chargingType:selected.chargingType, images:selected.images, description:selected.description, rentalPlans:selected.rentalPlans,
+        securityDeposit:rental.securityDeposit, discountPercent:rental.discountPercent, discountAmount:rental.discountAmount, franchiseeId:req.user._id, franchiseeName:rental.franchiseeName
+      };
+      await CustomerPayment.updateMany({ rentalId:rental._id }, { $set:{ vehicleId:selected._id, bikeId:selected.bikeId, vehicleSnapshot:rental.vehicleSnapshot } });
+    }
     const vs = rental.vehicleSnapshot || {};
     // Create the customer's owned-vehicle record exactly once.
     const { Vehicle } = require('../models');
@@ -711,11 +873,31 @@ exports.handover = async (req, res) => {
       });
     }
 
-    rental.status      = 'HANDED_OVER';
+    rental.status      = rental.rentalPlan === 'SALE' ? 'HANDED_OVER' : 'ACTIVE';
     rental.handoverDate = now;
+    rental.bookingHistory = rental.bookingHistory || [];
+    rental.bookingHistory.push({event:'HANDOVER_COMPLETED',at:now,status:rental.status,paymentStatus:rental.paymentStatus,vehicleId:rental.vehicleId,bikeId:rental.bikeId,customerId:rental.customerId,franchiseeId:rental.franchiseeId});
     await rental.save();
 
+    // Keep the physical Command Center bike location in sync with the booking.
+    if (rental.vehicleSource === 'COMMAND_VEHICLE' && rental.vehicleId) {
+      try {
+        const { CommandVehicle } = require('../models');
+        await CommandVehicle.updateOne(
+          { _id: rental.vehicleId },
+          { $set: { fleetLocationStatus: 'AT_CUSTOMER', currentCustomerId: rental.customerId, currentRentalId: rental._id } }
+        );
+      } catch (_) {}
+    }
+
     await audit(req.user._id, 'SALE_HANDOVER', 'VehicleRental', rental._id);
+
+    try {
+      const admins = await User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean();
+      await Promise.all(admins.map(a => M.Notification.create({userId:a._id,type:'VEHICLE_HANDOVER',title:`Vehicle handed over · ${rental.bikeId || 'Bike'}`,message:`${rental.vehicleSnapshot?.make||''} ${rental.vehicleSnapshot?.model||''} was handed over to the customer.`,data:{rentalId:rental._id,vehicleId:rental.vehicleId,bikeId:rental.bikeId,customerId:rental.customerId,franchiseeId:rental.franchiseeId,status:rental.status}})));
+      const event={event:'HANDOVER_COMPLETED',rentalId:rental._id,vehicleId:rental.vehicleId,bikeId:rental.bikeId,customerId:rental.customerId,franchiseeId:rental.franchiseeId,status:rental.status};
+      if(req.io){ req.io.to(`user:${String(rental.customerId)}`).emit('vehicle:lifecycle',event); req.io.to(`user:${String(rental.franchiseeId)}`).emit('vehicle:lifecycle',event); req.io.to('command:center').emit('vehicle:lifecycle',event); }
+    } catch (_) {}
 
     // Notify customer (fire-and-forget)
     try {

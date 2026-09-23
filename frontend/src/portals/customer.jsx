@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { io } from 'socket.io-client';
 import { createPortal } from 'react-dom';
 import allevLogo from '../allevlogo.png';
 import axios from 'axios';
@@ -6,7 +7,7 @@ import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal
+  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal, Headphones, Search, Filter, ChevronRight, ChevronDown, MessageCircle, Clock3, CircleHelp, LifeBuoy, Inbox, CheckCheck, AlertCircle
 } from 'lucide-react';
 import './customer.css';
 
@@ -34,6 +35,7 @@ const NAV_ITEMS = {
     { id: 'wallet',              label: 'Wallet',             Icon: Wallet },
     { id: 'invoices',            label: 'Invoices',           Icon: FileText },
     { id: 'complaints',          label: 'Support',            Icon: Bell },
+    { id: 'notifications',      label: 'Notification Center', Icon: BellRing },
   ],
   staff: [
     { id: 'dashboard',   label: 'Dashboard',   Icon: LayoutDashboard },
@@ -224,6 +226,14 @@ export default function App() {
   const [pendingEmail, setPendingEmail] = useState('');
   const [pendingPassword, setPendingPassword] = useState('');
   const call = api();
+
+  useEffect(() => {
+    if (!token) return;
+    const socket=io((API||window.location.origin).replace(/\/api\/?$/,''),{auth:{token},transports:['websocket','polling']});
+    const onLifecycle=payload=>window.dispatchEvent(new CustomEvent('vehicle:lifecycle',{detail:payload}));
+    socket.on('vehicle:lifecycle',onLifecycle);
+    return ()=>socket.disconnect();
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -878,6 +888,7 @@ function PageRouter({ page, call, setPage }) {
       wallet:               <CustWallet            {...P} />,
       invoices:             <CustInvoices          {...P} />,
       complaints:           <CustComplaints        {...P} />,
+      notifications:        <CustNotifications     {...P} />,
       profile:               <CustProfile            {...P} />,
       'charging-stations':  <CustChargingStations  {...P} />,
     };
@@ -889,6 +900,7 @@ function PageRouter({ page, call, setPage }) {
       invoices: 'Invoices',
       complaints: 'Support',
       'charging-stations': 'Charging Stations',
+      notifications: 'Notification Center',
     };
     const showSectionBack = page !== 'dashboard' && page !== 'profile';
     return (
@@ -1150,9 +1162,9 @@ function PaymentSuccessScreen({ successData, vehicle, onDone }) {
           </div>
         </div>
 
-        <div className="success-title">Payment Successful! 🎉</div>
+        <div className="success-title">Purchase Confirmed! 🎉</div>
         <div className="success-amount">₹{successData.amount}</div>
-        <div className="success-sub">Your payment has been received and your vehicle booking is confirmed.</div>
+        <div className="success-sub">Your vehicle purchase is confirmed</div>
 
         <div className="success-details-card">
           {[
@@ -1201,8 +1213,9 @@ function CustDashboard({ call, setPage }) {
 
   if ((lv && !v) || (lb && !b)) return <Loader />;
 
-  const purchases = Array.isArray(b) ? b : [];
-  const handedOver = purchases.filter(p => p.status === 'HANDED_OVER');
+  const allPurchases = Array.isArray(b) ? b : [];
+  const handedOver = allPurchases.filter(p => ['HANDED_OVER','ACTIVE'].includes(p.status));
+  const purchases = allPurchases.filter(p => !['HANDED_OVER','ACTIVE'].includes(p.status));
   const pending = purchases.filter(p => ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING'].includes(p.status));
   const recent = [...purchases].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
   const complaintList = Array.isArray(complaints) ? complaints : (Array.isArray(complaints?.complaints) ? complaints.complaints : []);
@@ -1344,17 +1357,93 @@ function CustDashboard({ call, setPage }) {
 }
 
 function CustVehicles({ call, setPage }) {
-  const { data: purchasesRaw, loading: lp } = useFetch(call, '/customer/purchases');
+  const [refreshTick, setRefreshTick] = useState(0);
+  React.useEffect(() => {
+    const onLifecycle = () => setRefreshTick(x => x + 1);
+    window.addEventListener('vehicle:lifecycle', onLifecycle);
+    return () => window.removeEventListener('vehicle:lifecycle', onLifecycle);
+  }, []);
+  const { data: purchasesRaw, loading: lp } = useFetch(call, `/customer/purchases?vehicleRefresh=${refreshTick}`);
   const purchaseRecords = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+  const [extendRental, setExtendRental] = useState(null);
+  const [extensionUnits, setExtensionUnits] = useState(1);
+  const [extensionPlan, setExtensionPlan] = useState('DAILY');
+  const [extensionBusy, setExtensionBusy] = useState(false);
+  const [extensionMsg, setExtensionMsg] = useState('');
   if (lp && !purchasesRaw) return <Loader />;
 
-  // Only show vehicles that have been HANDED_OVER by the franchisee
-  const handedOver = purchaseRecords.filter(p => p.status === 'HANDED_OVER');
+  // Only show vehicles that have been HANDED_OVER by the franchisee.
+  // Rental bookings automatically move here after handover and disappear from Purchases.
+  const handedOver = purchaseRecords.filter(p => ['HANDED_OVER','ACTIVE'].includes(p.status));
+
+  const money = n => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—';
+  const unitLabel = p => p.rentalPlan === 'DAILY' ? 'day' : p.rentalPlan === 'WEEKLY' ? 'week' : 'month';
+  const addUnitsToDate = (d, units, plan) => {
+    const base = new Date(d || new Date());
+    const multiplier = plan === 'DAILY' ? 1 : plan === 'WEEKLY' ? 7 : 30;
+    return new Date(base.getTime() + Number(units || 0) * multiplier * 24 * 60 * 60 * 1000);
+  };
+
+  const openExtension = rental => {
+    setExtendRental(rental);
+    const available = ['DAILY','WEEKLY','MONTHLY'].filter(key => rental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()]?.enabled && Number(rental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()]?.amount || 0) > 0);
+    setExtensionPlan(available.includes(rental.rentalPlan) ? rental.rentalPlan : (available[0] || rental.rentalPlan || 'DAILY'));
+    setExtensionUnits(1);
+    setExtensionMsg('');
+  };
+
+  const payExtension = async () => {
+    if (!extendRental) return;
+    if (!window.Razorpay) { setExtensionMsg('Razorpay is not loaded. Please refresh the page and try again.'); return; }
+    setExtensionBusy(true);
+    setExtensionMsg('');
+    try {
+      const order = await call(`/customer/purchases/${extendRental._id}/extend-order`, {
+        method: 'POST',
+        data: { units: Number(extensionUnits), plan: extensionPlan },
+      });
+      const rzp = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amount,
+        currency: order.currency || 'INR',
+        name: 'allEV',
+        description: `Rental Extension #${Number(extendRental.extensionCount || 0) + 1} · ${extensionPlan} · ${order.bikeId || 'Bike'} · ${extendRental.vehicleSnapshot?.make || ''} ${extendRental.vehicleSnapshot?.model || ''}`, 
+        order_id: order.orderId,
+        prefill: { name: 'Customer' },
+        theme: { color: '#2563eb' },
+        handler: async response => {
+          try {
+            await call(`/customer/purchases/${extendRental._id}/verify-extension`, {
+              method: 'POST',
+              data: {
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+              },
+            });
+            setExtensionBusy(false);
+            setExtendRental(null);
+            setExtensionMsg('');
+            setRefreshTick(v => v + 1);
+          } catch (e) {
+            setExtensionBusy(false);
+            setExtensionMsg(e.response?.data?.message || 'Extension payment verification failed.');
+          }
+        },
+        modal: { ondismiss: () => setExtensionBusy(false) },
+      });
+      rzp.open();
+    } catch (e) {
+      setExtensionBusy(false);
+      setExtensionMsg(e.response?.data?.message || 'Could not create the extension payment order.');
+    }
+  };
 
   return <>
     <PageHeader
       title="My Vehicles"
-      sub="Vehicles handed over to you by the franchisee."
+      sub="Vehicles handed over to you by the fleet operator. Manage rental due dates and extensions here."
     />
 
     {handedOver.length === 0 ? (
@@ -1362,8 +1451,8 @@ function CustVehicles({ call, setPage }) {
         <div className="cust-no-vehicles-icon">🏍️</div>
         <div className="cust-no-vehicles-title">No vehicle available in My Vehicles</div>
         <div className="cust-no-vehicles-sub">
-          Vehicles will appear here once the franchisee completes handover.<br />
-          Check your purchase status in <strong>Purchases</strong>.
+          Vehicles will appear here once the fleet operator completes handover.<br />
+          Pending bookings remain available in <strong>Purchases</strong>.
         </div>
         <div className="cust-no-vehicles-actions">
           <button className="btn-primary" onClick={() => setPage('available-vehicles')}>Browse Vehicles</button>
@@ -1374,6 +1463,9 @@ function CustVehicles({ call, setPage }) {
       <div className="cust-vehicles-grid">
         {handedOver.map(p => {
           const vs = p.vehicleSnapshot || {};
+          const isRental = p.rentalPlan && p.rentalPlan !== 'SALE';
+          const dueDate = p.dueDate || p.endDate;
+          const dueSoon = isRental && dueDate && (new Date(dueDate).getTime() - Date.now()) <= 3 * 24 * 60 * 60 * 1000;
           return (
             <div key={p._id} className="cust-vehicle-card">
               {/* Card Header */}
@@ -1381,8 +1473,9 @@ function CustVehicles({ call, setPage }) {
                 <div className="cust-vc-header-info">
                   <div className="cust-vc-name">{vs.make} {vs.model}</div>
                   <div className="cust-vc-year">{vs.year} · {vs.color}</div>
+                  <div className="cust-vc-bike-id">🏷️ Bike ID: <strong>{p.bikeId || vs.bikeId || '—'}</strong></div>
                 </div>
-                <span className="cust-vc-owned-badge">✓ Owned</span>
+                <span className="cust-vc-owned-badge">✓ Handed Over</span>
               </div>
 
               {/* Vehicle Images */}
@@ -1394,9 +1487,7 @@ function CustVehicles({ call, setPage }) {
                   ))}
                 </div>
               )}
-              {!vs.images?.length && (
-                <div className="cust-vc-img-ph">🏍️</div>
-              )}
+              {!vs.images?.length && <div className="cust-vc-img-ph">🏍️</div>}
 
               {/* Specs */}
               <div className="cust-vc-specs">
@@ -1406,19 +1497,36 @@ function CustVehicles({ call, setPage }) {
                 {vs.category && <div className="cust-vc-spec"><span>🏷️</span>{vs.category}</div>}
               </div>
 
+              {/* Rental lifecycle banner */}
+              {isRental ? (
+                <div className={`cust-vc-rental-status${dueSoon ? ' due-soon' : ''}`}>
+                  <div className="cust-vc-rental-status-main">
+                    <span className="cust-vc-rental-status-icon">⏱️</span>
+                    <div><small>RENTAL DUE DATE</small><strong>{fmtDate(dueDate)}</strong></div>
+                  </div>
+                  <div className="cust-vc-rental-status-meta">
+                    <span>Plan <b>{p.rentalPlan}</b></span>
+                    <span>Extensions <b>{Number(p.extensionCount || 0)}</b></span>
+                  </div>
+                </div>
+              ) : (
+                <div className="cust-vc-owned-status">✓ Purchased vehicle · No rental due date</div>
+              )}
+
               {/* Details Grid */}
               <div className="cust-vc-details">
                 {[
+                  ['Bike ID', p.bikeId || vs.bikeId || '—'],
                   ['Registration No.', vs.registrationNo || '—'],
-                  ['Total Paid', `₹${Number(p.totalAmount || 0).toLocaleString('en-IN')}`],
-                  ['Quantity', `${p.saleQuantity ?? 1} unit${(p.saleQuantity ?? 1) > 1 ? 's' : ''}`],
-                  ['Purchase Date', p.purchaseDate ? new Date(p.purchaseDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : new Date(p.createdAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'})],
-                  ['Handover Date', p.handoverDate ? new Date(p.handoverDate).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—'],
+                  ['Total Paid', money(p.totalAmount)],
+                  ['Purchase Date', p.purchaseDate ? fmtDate(p.purchaseDate) : fmtDate(p.createdAt)],
+                  ['Handover Date', p.handoverDate ? fmtDate(p.handoverDate) : '—'],
+                  ['Due Date', isRental ? fmtDate(dueDate) : 'Not applicable'],
                   ['Franchisee', p.franchiseeName || '—'],
                 ].map(([k, val]) => (
                   <div key={k} className="cust-vc-detail-row">
                     <span className="cust-vc-detail-key">{k}</span>
-                    <strong className="cust-vc-detail-val">{val}</strong>
+                    <strong className={`cust-vc-detail-val${k === 'Due Date' && dueSoon ? ' danger' : ''}`}>{val}</strong>
                   </div>
                 ))}
               </div>
@@ -1429,20 +1537,91 @@ function CustVehicles({ call, setPage }) {
                   🏪 Picked up from: <strong>{[p.pickupLocation?.name || p.franchiseeName, p.pickupLocation?.address].filter(Boolean).join(' · ') || '—'}</strong>
                 </span>
               </div>
+
+              {/* Extend */}
+              {isRental && (
+                <div className="cust-vc-extension-box">
+                  <div>
+                    <strong>Need more time with this vehicle?</strong>
+                    <span>Extend your {p.rentalPlan.toLowerCase()} rental securely through Razorpay.</span>
+                  </div>
+                  <button className="cust-vc-extend-btn" onClick={() => openExtension(p)}>↗ Extend Rental</button>
+                </div>
+              )}
             </div>
           );
         })}
       </div>
     )}
+
+    {extendRental && (() => {
+      const vs = extendRental.vehicleSnapshot || {};
+      const plan = extensionPlan || extendRental.rentalPlan || 'DAILY';
+      const label = plan === 'DAILY' ? 'day' : plan === 'WEEKLY' ? 'week' : 'month';
+      const planData = extendRental.vehicleSnapshot?.rentalPlans?.[plan.toLowerCase()];
+      const rate = Number(planData?.amount || 0);
+      const amount = rate * Number(extensionUnits || 1);
+      const newDue = addUnitsToDate(extendRental.dueDate || extendRental.endDate, extensionUnits, plan);
+      const nextCount = Number(extendRental.extensionCount || 0) + 1;
+      return <div className="modal-overlay" onClick={() => !extensionBusy && setExtendRental(null)}>
+        <div className="cust-extension-modal" onClick={e => e.stopPropagation()}>
+          <div className="cust-extension-modal-head">
+            <div><span>RENTAL EXTENSION</span><h3>Extend {vs.make} {vs.model}</h3><p>{extendRental.bikeId || vs.bikeId || 'Bike ID not set'} · {extendRental.franchiseeName || 'Fleet Operator'}</p></div>
+            <button className="icon-btn" onClick={() => !extensionBusy && setExtendRental(null)}>✕</button>
+          </div>
+          <div className="cust-extension-vehicle">
+            <div className="cust-extension-bike">🏍️</div>
+            <div><strong>{vs.make} {vs.model}</strong><span>Bike ID: {extendRental.bikeId || vs.bikeId || '—'} · Reg: {vs.registrationNo || '—'}</span></div>
+          </div>
+          <div className="cust-extension-grid">
+            <div><small>CURRENT DUE DATE</small><strong>{fmtDate(extendRental.dueDate || extendRental.endDate)}</strong></div>
+            <div><small>EXTENSION #</small><strong>{nextCount}</strong></div>
+            <div><small>RATE</small><strong>{money(rate)} / {label}</strong></div>
+          </div>
+          <div className="cust-extension-choice">
+            <label>Choose your extension rental plan</label>
+            <div className="cust-extension-plan-grid">
+              {['DAILY','WEEKLY','MONTHLY'].map(key => {
+                const pd = extendRental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()];
+                if (!pd?.enabled || Number(pd.amount || 0) <= 0) return null;
+                const lbl = key === 'DAILY' ? 'Daily' : key === 'WEEKLY' ? 'Weekly' : 'Monthly';
+                const unit = key === 'DAILY' ? 'day' : key === 'WEEKLY' ? 'week' : 'month';
+                return <button type="button" key={key} className={`cust-extension-plan-card${extensionPlan === key ? ' active' : ''}`} disabled={extensionBusy} onClick={() => { setExtensionPlan(key); setExtensionUnits(1); }}>
+                  <span className="cust-extension-plan-check">{extensionPlan === key ? '✓' : ''}</span>
+                  <span className="cust-extension-plan-name">{lbl}</span>
+                  <strong>{money(pd.amount)}</strong>
+                  <small>per {unit}</small>
+                </button>;
+              })}
+            </div>
+            <label className="cust-extension-units-label">How many {label}s would you like to add?</label>
+            <div className="cust-extension-stepper">
+              <button type="button" disabled={extensionUnits <= 1 || extensionBusy} onClick={() => setExtensionUnits(v => Math.max(1, v - 1))}>−</button>
+              <strong>{extensionUnits}</strong>
+              <button type="button" disabled={extensionUnits >= 365 || extensionBusy} onClick={() => setExtensionUnits(v => Math.min(365, v + 1))}>+</button>
+            </div>
+            <div className="cust-extension-newdue">New due date after successful payment: <strong>{fmtDate(newDue)}</strong></div>
+          </div>
+          <div className="cust-extension-total"><span>Extension payment</span><strong>{money(amount)}</strong></div>
+          {extensionMsg && <div className="cust-extension-error">⚠️ {extensionMsg}</div>}
+          <div className="cust-extension-actions">
+            <button className="btn-ghost" disabled={extensionBusy} onClick={() => setExtendRental(null)}>Cancel</button>
+            <button className="btn-primary cust-extension-pay" disabled={extensionBusy || amount <= 0} onClick={payExtension}>{extensionBusy ? 'Opening secure payment…' : `Pay ${money(amount)} & Extend`}</button>
+          </div>
+          <div className="cust-extension-secure">🔒 Secure payment powered by Razorpay · Your due date updates only after successful payment verification.</div>
+        </div>
+      </div>;
+    })()}
   </>;
 }
 
 
 function CustBookings({ call, setPage }) {
   const { data: purchasesRaw, loading } = useFetch(call, '/customer/purchases');
-  const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+  const allPurchases = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+  const purchases = allPurchases.filter(r => !['HANDED_OVER','ACTIVE'].includes(r.status));
   const [pickup, setPickup] = useState(null);
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('paid');
 
   if (loading && !purchasesRaw) return <Loader />;
 
@@ -1456,23 +1635,20 @@ function CustBookings({ call, setPage }) {
   };
 
   const FILTERS = [
-    { id: 'all',    label: `All (${purchases.length})` },
-    { id: 'active', label: 'Active' },
     { id: 'paid',   label: 'Paid' },
     { id: 'done',   label: 'Completed' },
   ];
 
   const filtered = purchases.filter(r => {
-    if (filter === 'active') return ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING'].includes(r.status);
     if (filter === 'paid')   return r.status === 'PAYMENT_DONE';
     if (filter === 'done')   return r.status === 'COMPLETED';
-    return true;
+    return r.status === 'PAYMENT_DONE'; // default to paid
   });
 
   const activePurchases = purchases.filter(r => !['COMPLETED','CANCELLED'].includes(r.status));
 
   return <>
-    <PageHeader title="My Bookings" sub="Rental plans, payment status and fleet operator handover details." />
+    <PageHeader title="Purchases" sub="Pending bookings, payment history and handover status. Handed-over rentals move to My Vehicles." />
     <MetricGrid metrics={[
       { label: 'Total Purchases',   value: purchases.length,                                    Icon: ClipboardList, color: '#2563eb' },
       { label: 'Awaiting Handover', value: activePurchases.filter(r => r.status === 'PAYMENT_DONE').length, Icon: Car,          color: '#7c3aed' },
@@ -1929,24 +2105,74 @@ function CustComplaints({ call }) {
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState({});
   const [feedbackBusy, setFeedbackBusy] = useState(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('IN_PROGRESS');
+  const [expanded, setExpanded] = useState(null);
+  const [messageDraft, setMessageDraft] = useState({});
+  const [activeHelp, setActiveHelp] = useState(null);
+  const [faqOpen, setFaqOpen] = useState(null);
   const { toast, show } = useToast();
 
-  // Review requests from franchisee marking as resolved
+  // localTickets mirrors `data` but allows optimistic in-place message appends
+  const [localTickets, setLocalTickets] = useState(null);
+  useEffect(()=>{ if(data) setLocalTickets(data); },[data]);
+
+  useEffect(()=>{
+    const token=localStorage.getItem('ev_customer_token');
+    const socket=io((API||window.location.origin).replace(/\/api\/?$/,''),{auth:{token},transports:['websocket','polling']});
+
+    // For complaint:message we patch the specific ticket in-place so the new
+    // message appears instantly, then also trigger a background refresh to
+    // make sure we're fully in sync.
+    const onMessage=(payload)=>{
+      // payload may be the full complaint object or a partial {complaintId, message}
+      if(payload?._id){
+        // full complaint object — replace the matching ticket directly
+        setLocalTickets(prev=>{
+          if(!prev)return prev;
+          const idx=prev.findIndex(t=>String(t._id)===String(payload._id));
+          if(idx===-1)return [...prev,payload];
+          const next=[...prev];next[idx]=payload;return next;
+        });
+      } else if(payload?.complaintId && payload?.message){
+        // partial: append the single message
+        setLocalTickets(prev=>{
+          if(!prev)return prev;
+          return prev.map(t=>String(t._id)===String(payload.complaintId)
+            ?{...t,messages:[...(t.messages||[]),payload.message]}
+            :t);
+        });
+      }
+      refresh();
+    };
+
+    const onUpdate=(payload)=>{
+      if(payload?._id){
+        setLocalTickets(prev=>{
+          if(!prev)return prev;
+          const idx=prev.findIndex(t=>String(t._id)===String(payload._id));
+          if(idx===-1)return prev;
+          const next=[...prev];next[idx]={...prev[idx],...payload};return next;
+        });
+      }
+      refresh();
+    };
+
+    socket.on('complaint:message', onMessage);
+    socket.on('complaint:update',  onUpdate);
+    socket.on('support:progress',  onUpdate);
+    socket.on('notification:new',  ()=>refresh());
+    return ()=>socket.disconnect();
+  },[]);
+
   const [reviewRequests, setReviewRequests] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ev_customer_review_requests') || '[]'); } catch { return []; }
   });
-  // Job updates (pause/complete events) from staff
-  const [jobUpdates, setJobUpdates] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]'); } catch { return []; }
-  });
-  // Local feedback for review requests (not tied to complaint API)
   const [localReviewFeedback, setLocalReviewFeedback] = useState({});
 
   const markLocalReviewed = (complaintId, rating, comment) => {
     try {
-      const updated = reviewRequests.map(r =>
-        r.complaintId === complaintId ? { ...r, reviewed: true, rating, comment, reviewedAt: new Date().toISOString() } : r
-      );
+      const updated = reviewRequests.map(r => r.complaintId === complaintId ? { ...r, reviewed: true, rating, comment, reviewedAt: new Date().toISOString() } : r);
       localStorage.setItem('ev_customer_review_requests', JSON.stringify(updated));
       setReviewRequests(updated);
     } catch (_) {}
@@ -1955,21 +2181,15 @@ function CustComplaints({ call }) {
   const sendLocalReview = async (req) => {
     const f = localReviewFeedback[req.complaintId] || {};
     if (!f.rating) { show('Select a star rating first', 'error'); return; }
-    try {
-      await call(`/customer/complaints/${req.complaintId}/feedback`, {
-        method: 'post',
-        data: { rating: Number(f.rating), feedback: f.comment || '' }
-      });
-    } catch (_) { /* silently ignore if API not available, still mark locally */ }
+    try { await call(`/customer/complaints/${req.complaintId}/feedback`, { method:'post', data:{ rating:Number(f.rating), feedback:f.comment || '' } }); } catch (_) {}
     markLocalReviewed(req.complaintId, f.rating, f.comment || '');
-    show('⭐ Thank you! Your review has been submitted.');
+    show('Your review has been submitted.');
     refresh();
   };
 
   const activeVehicles = options?.activeVehicles || [];
-  // Only block on first load with no cache
   if (loading && !data) return <Loader />;
-  if (error && !data)   return <Err msg={error} />;
+  if (error && !data) return <Err msg={error} />;
   const selectedVehicle = activeVehicles.find(v => String(v.vehicleId) === String(form.vehicleId));
 
   const submit = async () => {
@@ -1978,7 +2198,8 @@ function CustComplaints({ call }) {
     try{
       const fr=(options.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId));
       await call('/customer/complaints',{method:'post',data:{...form,subject:form.subject||form.category,vehicleSnapshot:selectedVehicle?.vehicleSnapshot,paymentDetails:selectedVehicle?.paymentDetails,franchiseeId:form.franchiseeId,franchiseeName:fr?.name||''}});
-      show('Complaint sent to the selected franchisee.'); setOpen(false); setForm({vehicleId:'',franchiseeId:'',category:'Service Issue',message:'',subject:''}); refresh();
+      show('Support request created. We will keep you updated here.');
+      setOpen(false); setForm({vehicleId:'',franchiseeId:'',category:'Service Issue',message:'',subject:''}); setStatusFilter('OPEN'); refresh();
     }catch(e){show(e.response?.data?.message||'Could not register complaint','error');} finally{setSaving(false);}
   };
 
@@ -1986,145 +2207,137 @@ function CustComplaints({ call }) {
     const f=feedback[c._id]||{};
     if(!f.rating){show('Select a rating first','error');return;}
     setFeedbackBusy(c._id);
-    try{await call(`/customer/complaints/${c._id}/feedback`,{method:'post',data:{rating:Number(f.rating),feedback:f.comment||''}});show('Thank you. Your franchisee rating was saved.');refresh();}
+    try{await call(`/customer/complaints/${c._id}/feedback`,{method:'post',data:{rating:Number(f.rating),feedback:f.comment||''}});show('Thank you. Your service rating was saved.');refresh();}
     catch(e){show(e.response?.data?.message||'Could not save feedback','error');}finally{setFeedbackBusy(null);}
   };
 
-  // Unreviewed review requests (franchisee marked resolved)
   const pendingReviews = reviewRequests.filter(r => !r.reviewed);
-  // Recent pause events from staff
-  const recentPauses = jobUpdates.filter(u => u.event === 'PAUSED').slice(-5);
-  // Recent completion events
-  const recentCompletions = jobUpdates.filter(u => u.event === 'COMPLETED').slice(-5);
+  const tickets = localTickets || data || [];
+  const counts = {
+    ALL:tickets.length,
+    OPEN:tickets.filter(c => !['SOLVED','CLOSED'].includes(c.status)).length,
+    IN_PROGRESS:tickets.filter(c => c.status === 'IN_PROGRESS').length,
+    RESOLVED:tickets.filter(c => ['SOLVED','CLOSED'].includes(c.status)).length,
+  };
+  const filtered = tickets.filter(c => {
+    const q = query.trim().toLowerCase();
+    const matchesQuery = !q || [c.subject,c.category,c.message,c.franchiseeName,c.status].filter(Boolean).join(' ').toLowerCase().includes(q);
+    const matchesStatus = statusFilter === 'ALL' || (statusFilter === 'OPEN' ? !['SOLVED','CLOSED'].includes(c.status) : statusFilter === 'RESOLVED' ? ['SOLVED','CLOSED'].includes(c.status) : c.status === statusFilter);
+    return matchesQuery && matchesStatus;
+  });
 
   return <>
     <Toast toast={toast}/>
-    <PageHeader title="Support & Complaints" sub="Register a complaint against an active vehicle and track franchisee resolution."
-      actions={<button className="btn-primary" onClick={()=>setOpen(true)} disabled={!activeVehicles.length}><Plus size={15}/> Register Complaint</button>} />
-    {!activeVehicles.length && <InfoBanner Icon={Bell}>You need an active vehicle before you can register a vehicle complaint.</InfoBanner>}
-
-    {/* ── Work Status Updates (pause + completion from staff) ── */}
-    {recentPauses.length > 0 && (
-      <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
-        {recentPauses.map((u,i) => (
-          <div key={i} style={{background:'#fffbeb',border:'1.5px solid #fde68a',borderRadius:12,padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10}}>
-            <span style={{fontSize:20}}>⏸</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:'#92400e'}}>Work Paused on Your Vehicle</div>
-              <div style={{fontSize:12,color:'#78350f',marginTop:2}}>
-                🚗 {u.vehicleMake} {u.vehicleReg} — <b>Reason:</b> {u.reason}
-              </div>
-              <div style={{fontSize:11,color:'#b45309',marginTop:2}}>{new Date(u.timestamp).toLocaleString('en-IN')}</div>
-            </div>
+    <div className="support-center">
+      <section className="support-hero">
+        <div className="support-hero-copy">
+          <div className="support-kicker"><LifeBuoy size={14}/> allEV Care</div>
+          <h1>Support, whenever you need it.</h1>
+          <p>One place to raise an issue, follow every update and review the service you received.</p>
+          <div className="support-hero-actions">
+            <button className="support-primary" onClick={()=>setOpen(true)} disabled={!activeVehicles.length}><Plus size={17}/> New support request</button>
+            <button className="support-secondary" onClick={()=>{setActiveHelp(activeHelp ? null : 'help');setFaqOpen(null)}}><CircleHelp size={17}/> Help centre</button>
           </div>
-        ))}
-      </div>
-    )}
-    {recentCompletions.length > 0 && (
-      <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
-        {recentCompletions.map((u,i) => (
-          <div key={i} style={{background:'#f0fdf4',border:'1.5px solid #bbf7d0',borderRadius:12,padding:'12px 16px',display:'flex',alignItems:'flex-start',gap:10}}>
-            <span style={{fontSize:20}}>✅</span>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:13,color:'#166534'}}>Work Completed on Your Vehicle</div>
-              <div style={{fontSize:12,color:'#14532d',marginTop:2}}>
-                🚗 {u.vehicleMake} {u.vehicleReg}{u.remarks ? ` — ${u.remarks}` : ''}
-              </div>
-              <div style={{fontSize:11,color:'#16a34a',marginTop:2}}>{new Date(u.timestamp).toLocaleString('en-IN')}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    )}
-
-    {/* ── Review Requests (franchisee marked complaint resolved) ── */}
-    {pendingReviews.length > 0 && (
-      <div style={{marginBottom:16,display:'flex',flexDirection:'column',gap:12}}>
-        {pendingReviews.map(req => (
-          <div key={req.complaintId} style={{background:'#faf5ff',border:'2px solid #c4b5fd',borderRadius:14,padding:'16px 18px'}}>
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-              <span style={{fontSize:22}}>⭐</span>
-              <div>
-                <div style={{fontWeight:800,fontSize:14,color:'#5b21b6'}}>Your complaint has been resolved!</div>
-                <div style={{fontSize:12,color:'#6d28d9',marginTop:2}}>
-                  🚗 {req.vehicleMake} {req.vehicleModel} · {req.vehicleReg}
-                </div>
-              </div>
-            </div>
-            {req.resolution && (
-              <div style={{background:'#ede9fe',borderRadius:8,padding:'8px 12px',fontSize:12,color:'#4c1d95',marginBottom:12}}>
-                <b>Resolution:</b> {req.resolution}
-              </div>
-            )}
-            <div style={{fontWeight:700,fontSize:13,color:'#374151',marginBottom:8}}>
-              How was the service? Leave a review for your franchisee:
-            </div>
-            <div style={{display:'flex',gap:6,marginBottom:10}}>
-              {[1,2,3,4,5].map(n => (
-                <button key={n}
-                  onClick={() => setLocalReviewFeedback(f => ({...f,[req.complaintId]:{...f[req.complaintId],rating:n}}))}
-                  style={{
-                    border:'2px solid',borderRadius:8,padding:'7px 12px',cursor:'pointer',fontWeight:700,fontSize:16,
-                    borderColor: localReviewFeedback[req.complaintId]?.rating===n ? '#7c3aed' : '#e2e8f0',
-                    background: localReviewFeedback[req.complaintId]?.rating===n ? '#7c3aed' : '#fff',
-                    color: localReviewFeedback[req.complaintId]?.rating===n ? '#fff' : '#64748b',
-                  }}>{'★'.repeat(n)}</button>
-              ))}
-            </div>
-            <input
-              style={{width:'100%',padding:'9px 12px',border:'1.5px solid #ddd6fe',borderRadius:8,fontSize:13,marginBottom:10,boxSizing:'border-box'}}
-              placeholder="Write a short review (optional)…"
-              value={localReviewFeedback[req.complaintId]?.comment || ''}
-              onChange={e => setLocalReviewFeedback(f => ({...f,[req.complaintId]:{...f[req.complaintId],comment:e.target.value}}))}
-            />
-            <button
-              onClick={() => sendLocalReview(req)}
-              disabled={!localReviewFeedback[req.complaintId]?.rating}
-              style={{
-                background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'10px 24px',
-                cursor:'pointer',fontWeight:700,fontSize:13,
-                opacity: localReviewFeedback[req.complaintId]?.rating ? 1 : 0.5,
-              }}>⭐ Submit Review</button>
-          </div>
-        ))}
-      </div>
-    )}
-
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      {(data||[]).map(c=><div key={c._id} className="card" style={{padding:16}}>
-        <div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-          <div><strong>{c.subject || c.category || 'Vehicle Complaint'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Franchisee: {c.franchiseeName||'—'} · {new Date(c.createdAt).toLocaleString()}</div></div>
-          <span style={{fontSize:11,fontWeight:700,padding:'4px 10px',borderRadius:999,background:c.status==='SOLVED'?'#dcfce7':c.status==='CLOSED'?'#e2e8f0':c.status==='IN_PROGRESS'?'#fef3c7':'#fee2e2',color:c.status==='SOLVED'?'#166534':c.status==='CLOSED'?'#475569':c.status==='IN_PROGRESS'?'#92400e':'#991b1b'}}>{c.status}</span>
         </div>
-        <div style={{fontSize:13,color:'#374151',marginTop:10}}>{c.message}</div>
-        {c.resolution && <div style={{marginTop:10,padding:10,borderRadius:8,background:'#f0fdf4',fontSize:12}}><strong>Resolution:</strong> {c.resolution}</div>}
-        {c.replacementVehicleSnapshot && <div style={{marginTop:8,fontSize:12,color:'#166534'}}>🔁 Replacement vehicle: {c.replacementVehicleSnapshot.make} {c.replacementVehicleSnapshot.model}</div>}
-        {c.status==='SOLVED' && !c.feedbackSubmitted && <div style={{marginTop:14,paddingTop:12,borderTop:'1px solid #eef2f7'}}><strong style={{fontSize:13}}>How was the franchisee service?</strong><div style={{display:'flex',gap:6,marginTop:8}}>{[1,2,3,4,5].map(n=><button key={n} onClick={()=>setFeedback(f=>({...f,[c._id]:{...f[c._id],rating:n}}))} style={{border:'1px solid #dbe3ef',background:(feedback[c._id]?.rating===n)?'#2563eb':'#fff',color:(feedback[c._id]?.rating===n)?'#fff':'#64748b',borderRadius:7,padding:'5px 9px',cursor:'pointer'}}>{n}★</button>)}</div><input style={{marginTop:8,width:'100%',padding:9,border:'1px solid #dbe3ef',borderRadius:7}} placeholder="Feedback (optional)" value={feedback[c._id]?.comment||''} onChange={e=>setFeedback(f=>({...f,[c._id]:{...f[c._id],comment:e.target.value}}))}/><button className="btn-primary" style={{marginTop:8}} onClick={()=>sendFeedback(c)} disabled={feedbackBusy===c._id}>{feedbackBusy===c._id?'Saving…':'Submit Feedback'}</button></div>}
-      </div>)}
-      {!data?.length && <div className="card"><div className="empty-state"><Bell size={40} style={{opacity:.25,marginBottom:12}}/><p>No complaints yet.</p></div></div>}
+        <div className="support-hero-orb"><Headphones size={54}/><span>Human support</span><small>Tracked from start to resolution</small></div>
+      </section>
+
+      <section className="support-stat-grid">
+        <div className="support-stat-card"><span className="support-stat-icon blue"><Inbox size={17}/></span><div><strong>{counts.ALL}</strong><span>Total requests</span></div></div>
+        <div className="support-stat-card"><span className="support-stat-icon amber"><Clock3 size={17}/></span><div><strong>{counts.OPEN}</strong><span>Awaiting action</span></div></div>
+        <div className="support-stat-card"><span className="support-stat-icon violet"><MessageCircle size={17}/></span><div><strong>{counts.IN_PROGRESS}</strong><span>In progress</span></div></div>
+        <div className="support-stat-card"><span className="support-stat-icon green"><CheckCheck size={17}/></span><div><strong>{counts.RESOLVED}</strong><span>Resolved</span></div></div>
+      </section>
+
+      {activeHelp === 'help' && <section className="support-help-panel">
+        <div><span className="support-panel-eyebrow">HELP CENTRE</span><h3>Quick answers before you raise a request</h3><p>Choose a topic to see a concise answer.</p></div>
+        <div className="support-faq-grid">
+          {[
+            ['Service update','Your service status stays inside its own service card. Notifications are reserved for important events and account messages.'],
+            ['Request status','Open requests are waiting for action, In Progress means a team member is handling it, and Resolved means the service team has completed the request.'],
+            ['Need more help?','Create a new support request and include the vehicle plus a clear description. The support team can then track the complete conversation.'],
+          ].map(([q,a])=><button key={q} className="support-faq" onClick={()=>setFaqOpen(faqOpen===q ? null : q)}><div><strong>{q}</strong><span>{faqOpen===q ? a : 'View answer'}</span></div><ChevronRight size={17}/></button>)}
+        </div>
+      </section>}
+
+      {pendingReviews.length > 0 && <section className="support-review-banner">
+        <div className="support-review-icon">★</div><div className="support-review-copy"><strong>Your service deserves your feedback</strong><span>{pendingReviews.length} resolved request{pendingReviews.length>1?'s':''} waiting for your review.</span></div>
+        <button onClick={()=>document.getElementById('support-tickets')?.scrollIntoView({behavior:'smooth'})}>Review now <ChevronRight size={15}/></button>
+      </section>}
+
+      <section id="support-tickets" className="support-tickets-panel">
+        <div className="support-section-head"><div><span className="support-panel-eyebrow">MY SUPPORT</span><h2>Your requests</h2><p>Everything stays organised by request, not scattered across screens.</p></div><button className="support-link-button" onClick={()=>setOpen(true)} disabled={!activeVehicles.length}><Plus size={15}/> New request</button></div>
+        <div className="support-toolbar">
+          <div className="support-search"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search requests, issues or franchisee…"/></div>
+          <div className="support-filters"><Filter size={14}/>{[['OPEN','Awaiting action'],['IN_PROGRESS','In progress'],['RESOLVED','Resolved']].map(([id,label])=><button key={id} className={statusFilter===id?'active':''} onClick={()=>setStatusFilter(id)}>{label}<b>{counts[id]}</b></button>)}</div>
+        </div>
+
+
+        <div className="support-ticket-list">
+          {!filtered.length ? <div className="support-empty"><div className="support-empty-icon"><Search size={22}/></div><strong>No support requests found</strong><span>Try a different search or create a new support request.</span><button onClick={()=>setOpen(true)} disabled={!activeVehicles.length}>Create request</button></div> : filtered.map(c => {
+            const resolved=['SOLVED','CLOSED'].includes(c.status);
+            const openCard=expanded===c._id;
+            return <article key={c._id} className={`support-ticket-card ${openCard?'expanded':''}`}>
+              <button className="support-ticket-main" onClick={()=>setExpanded(openCard?null:c._id)}>
+                <div className={`support-ticket-icon ${resolved?'resolved':c.status==='IN_PROGRESS'?'progress':'open'}`}>{resolved?<CheckCheck size={18}/>:c.status==='IN_PROGRESS'?<MessageCircle size={18}/>:<AlertCircle size={18}/>}</div>
+                <div className="support-ticket-content"><div className="support-ticket-top"><span className="support-ticket-id">#{String(c._id).slice(-7).toUpperCase()}</span><span className={`support-status ${resolved?'resolved':c.status==='IN_PROGRESS'?'progress':'open'}`}>{resolved?'Resolved':c.status==='IN_PROGRESS'?'In progress':'Open'}</span></div><h3>{c.subject || c.category || 'Vehicle support request'}</h3><p>{c.message}</p><div className="support-ticket-meta"><span>{c.franchiseeName || 'Service partner'}</span><span>•</span><span>{new Date(c.createdAt).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</span></div></div><ChevronDown className={`support-ticket-chevron ${openCard?'rotate':''}`} size={18}/></button>
+              {openCard && <div className="support-ticket-details">
+                {!c.chatClosed && <div style={{marginBottom:12,padding:12,border:'1px solid #dbeafe',borderRadius:12,background:'#eff6ff'}}>
+                  <strong style={{display:'block',marginBottom:8}}>Command Center chat</strong>
+                  <div style={{display:'grid',gap:7,maxHeight:220,overflowY:'auto',marginBottom:8}}>{(c.messages||[]).map((m,i)=><div key={i} style={{padding:'7px 9px',borderRadius:9,background:m.senderRole==='CUSTOMER'?'#fff':'#dbeafe',fontSize:12}}><b>{m.senderRole==='CUSTOMER'?'You':'Command Center'}</b><div>{m.message}</div><small style={{color:'#94a3b8'}}>{m.createdAt?new Date(m.createdAt).toLocaleString('en-IN'):''}</small></div>)}</div>
+                  <div style={{display:'flex',gap:8}}><input value={messageDraft[c._id]||''} onChange={e=>setMessageDraft(x=>({...x,[c._id]:e.target.value}))} onKeyDown={async e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();const text=(messageDraft[c._id]||'').trim();if(!text)return;const optimistic={senderId:'me',senderRole:'CUSTOMER',message:text,createdAt:new Date().toISOString()};setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:[...(t.messages||[]),optimistic]}:t):prev);setMessageDraft(x=>({...x,[c._id]:''}));try{const res=await call(`/customer/complaints/${c._id}/messages`,{method:'post',data:{message:text}});setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:res.messages||t.messages}:t):prev);}catch(err){setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:(t.messages||[]).filter(m=>m!==optimistic)}:t):prev);show(err.response?.data?.message||'Could not send message','error');}}}} placeholder="Message Command Center… (Enter to send)" style={{flex:1,padding:'9px 11px',border:'1px solid #bfdbfe',borderRadius:8}}/><button className="btn-primary" onClick={async()=>{const text=(messageDraft[c._id]||'').trim();if(!text)return;const optimistic={senderId:'me',senderRole:'CUSTOMER',message:text,createdAt:new Date().toISOString()};setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:[...(t.messages||[]),optimistic]}:t):prev);setMessageDraft(x=>({...x,[c._id]:''}));try{const res=await call(`/customer/complaints/${c._id}/messages`,{method:'post',data:{message:text}});setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:res.messages||t.messages}:t):prev);}catch(err){setLocalTickets(prev=>prev?prev.map(t=>String(t._id)===String(c._id)?{...t,messages:(t.messages||[]).filter(m=>m!==optimistic)}:t):prev);show(err.response?.data?.message||'Could not send message','error');}}}>Send</button></div>
+                </div>}
+                {c.chatClosed && <div className="support-resolution"><MapPin size={16}/><div><strong>Service center</strong><span>{c.serviceCenterName||'allEV Service Center'} · {c.serviceCenterAddress||'Somajiguda, Hyderabad'}</span><a href={c.serviceCenterMapsUrl||'https://maps.app.goo.gl/zcJfnm24McDJhYHd6'} target="_blank" rel="noreferrer">Open location ↗</a><small>Chat closed after service-center handoff. You can no longer send messages here.</small></div></div>}
+                {c.maintenanceId && (() => {
+                  const isAssigned = !!c.maintenanceId.commandAssignedTo;
+                  const isInProgress = ['IN_PROGRESS','PAUSED','STAFF_COMPLETED','SOLVED','CLOSED'].includes(c.maintenanceId.staffStatus || c.status);
+                  const isStaffDone = ['STAFF_COMPLETED','SOLVED','CLOSED'].includes(c.maintenanceId.staffStatus || c.status);
+                  const isResolved = ['SOLVED','CLOSED'].includes(c.status) || c.maintenanceId.status === 'COMPLETED';
+                  const steps = [
+                    ['Raised request', true],
+                    ['Staff assigned', isAssigned],
+                    ['Working on it', isInProgress || isStaffDone || isResolved],
+                    ['Staff completed', isStaffDone || isResolved],
+                    ['Resolved', isResolved],
+                  ];
+                  return (
+                    <div className="complaint-progress-mini">
+                      {steps.map(([label,done],i)=><div key={label} className={done?'done':''}><span>{done?'✓':i+1}</span><small>{label}</small></div>)}
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const staffStatus = c.maintenanceId?.staffStatus || c.status;
+                  const isPaused = staffStatus === 'PAUSED';
+                  const pauseHistory = c.maintenanceId?.pauseHistory || c.pauseHistory || [];
+                  const latestPause = pauseHistory.length ? pauseHistory[pauseHistory.length - 1] : null;
+                  const pauseReason = c.maintenanceId?.pauseReason || latestPause?.reason || '';
+                  return isPaused && pauseReason ? (
+                    <div className="support-resolution" style={{background:'#fffbeb',border:'1px solid #fde68a',color:'#92400e'}}>
+                      <Clock3 size={16}/>
+                      <div><strong>Service paused</strong><span>{pauseReason}</span></div>
+                    </div>
+                  ) : null;
+                })()}
+                {c.resolution && <div className="support-resolution"><CheckCircle size={16}/><div><strong>Resolution</strong><span>{c.resolution}</span></div></div>}
+                {c.replacementVehicleSnapshot && <div className="support-detail-row"><span>Replacement vehicle</span><strong>{c.replacementVehicleSnapshot.make} {c.replacementVehicleSnapshot.model}</strong></div>}
+                {c.status==='SOLVED' && !c.feedbackSubmitted && <div className="support-feedback"><div><strong>How was the service?</strong><span>Rate your support experience.</span></div><div className="support-stars">{[1,2,3,4,5].map(n=><button key={n} className={feedback[c._id]?.rating===n?'active':''} onClick={()=>setFeedback(f=>({...f,[c._id]:{...f[c._id],rating:n}}))}>★</button>)}</div><textarea placeholder="Share a short comment (optional)" value={feedback[c._id]?.comment||''} onChange={e=>setFeedback(f=>({...f,[c._id]:{...f[c._id],comment:e.target.value}}))}/><button className="support-primary small" onClick={()=>sendFeedback(c)} disabled={feedbackBusy===c._id}>{feedbackBusy===c._id?'Saving…':'Submit review'}</button></div>}
+              </div>}
+            </article>;
+          })}
+        </div>
+      </section>
+
+      <section className="support-trust-row"><div><ShieldCheck size={18}/><div><strong>Secure support history</strong><span>Your requests remain attached to your account for future reference.</span></div></div><div><Clock3 size={18}/><div><strong>Clear status tracking</strong><span>Follow each request without leaving the customer portal.</span></div></div><div><MessageCircle size={18}/><div><strong>One place to communicate</strong><span>Keep the issue, resolution and feedback together.</span></div></div></section>
     </div>
 
-    {open && <div className="modal-overlay" onClick={()=>setOpen(false)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(620px,100%)'}}><div className="modal-head"><div><div className="modal-title">Register a Complaint</div><div className="modal-subtitle">Active bike → auto-filled vehicle & payment details → franchisee</div></div><button className="icon-btn" onClick={()=>setOpen(false)}>✕</button></div><div className="modal-body">
-      <div className="login-form">
-        <label>Active Bike *<select value={form.vehicleId} onChange={e=>{const v=e.target.value;const av=activeVehicles.find(x=>String(x.vehicleId)===v);setForm(f=>({...f,vehicleId:v,franchiseeId:av?.franchiseeId||f.franchiseeId}))}}><option value="">Select active bike…</option>{activeVehicles.map(v=><option key={String(v.vehicleId)} value={String(v.vehicleId)}>{v.vehicleSnapshot?.make||''} {v.vehicleSnapshot?.model||v.vehicleSnapshot?.modelName||'Vehicle'} · {v.vehicleSnapshot?.registrationNo||v.vehicleSnapshot?.vin||String(v.vehicleId).slice(-6)}</option>)}</select></label>
-        {selectedVehicle && <div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:10,padding:12}}><strong style={{fontSize:13}}>Vehicle details (non-editable)</strong>{[['Vehicle',`${selectedVehicle.vehicleSnapshot?.make||''} ${selectedVehicle.vehicleSnapshot?.model||selectedVehicle.vehicleSnapshot?.modelName||'Vehicle'}`],['Registration',selectedVehicle.vehicleSnapshot?.registrationNo||'—'],['Payment Status',selectedVehicle.paymentDetails?.paymentStatus||'—'],['Payment ID',selectedVehicle.paymentDetails?.razorpayPaymentId||'—'],['Amount',selectedVehicle.paymentDetails?.totalAmount?`₹${selectedVehicle.paymentDetails.totalAmount}`:'—']].map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:10,fontSize:12,padding:'4px 0'}}><span style={{color:'#64748b'}}>{k}</span><strong>{v}</strong></div>)}</div>}
-        {form.franchiseeId && (() => {
-          const fr=(options?.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId)) || selectedVehicle;
-          const name=fr?.name||selectedVehicle?.franchiseeName||'—';
-          const pin=fr?.address?.pincode||'—';
-          return (
-            <div style={{background:'#f0fdf4',border:'1.5px solid #bbf7d0',borderRadius:10,padding:'10px 14px',fontSize:13}}>
-              <span style={{fontSize:11,fontWeight:700,color:'#166534',display:'block',marginBottom:4}}>FRANCHISEE (auto-filled from purchase)</span>
-              <strong style={{color:'#14532d'}}>{name}</strong>
-              {pin!=='—' && <span style={{color:'#16a34a',marginLeft:8,fontSize:12}}>PIN {pin}</span>}
-            </div>
-          );
-        })()}
-        {!form.franchiseeId && <div style={{background:'#fef9c3',border:'1px solid #fde68a',borderRadius:10,padding:'10px 14px',fontSize:13,color:'#92400e'}}>⚠ Select an active bike above to auto-fill franchisee</div>}
-        <label>Issue Category<select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{['Service Issue','Vehicle Fault','Battery Issue','Charging Issue','Accident/Damage','Other'].map(x=><option key={x}>{x}</option>)}</select></label>
-        <label>Complaint *<textarea rows={4} value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} placeholder="Describe the issue clearly…"/></label>
-      </div>
-    </div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving?'Sending…':'Send Complaint'}</button></div></div></div>}
+    {open && <div className="modal-overlay" onClick={()=>setOpen(false)}><div className="modal-drawer support-request-modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="modal-title">Create support request</div><div className="modal-subtitle">Tell us what happened and we’ll route it to your service partner.</div></div><button className="icon-btn" onClick={()=>setOpen(false)}>✕</button></div><div className="modal-body"><div className="support-request-intro"><LifeBuoy size={19}/><div><strong>We’ll keep you updated</strong><span>Your request and its resolution will remain visible in Support.</span></div></div><div className="login-form">
+      <label>Active Bike *<select value={form.vehicleId} onChange={e=>{const v=e.target.value;const av=activeVehicles.find(x=>String(x.vehicleId)===v);setForm(f=>({...f,vehicleId:v,franchiseeId:av?.franchiseeId||f.franchiseeId}))}}><option value="">Select active bike…</option>{activeVehicles.map(v=><option key={String(v.vehicleId)} value={String(v.vehicleId)}>{v.vehicleSnapshot?.make||''} {v.vehicleSnapshot?.model||v.vehicleSnapshot?.modelName||'Vehicle'} · {v.vehicleSnapshot?.registrationNo||v.vehicleSnapshot?.vin||String(v.vehicleId).slice(-6)}</option>)}</select></label>
+      {selectedVehicle && <div className="support-vehicle-preview"><Car size={17}/><div><strong>{selectedVehicle.vehicleSnapshot?.make||''} {selectedVehicle.vehicleSnapshot?.model||selectedVehicle.vehicleSnapshot?.modelName||'Vehicle'}</strong><span>{selectedVehicle.vehicleSnapshot?.registrationNo||'Registration unavailable'}</span></div><CheckCircle size={17}/></div>}
+      {form.franchiseeId && (() => { const fr=(options?.franchisees||[]).find(x=>String(x._id)===String(form.franchiseeId)) || selectedVehicle; const name=fr?.name||selectedVehicle?.franchiseeName||'—'; return <div className="support-partner-preview"><span>SERVICE PARTNER</span><strong>{name}</strong><small>Your request will be routed to this partner.</small></div>; })()}
+      <label>Issue category<select value={form.category} onChange={e=>setForm(f=>({...f,category:e.target.value}))}>{['Service Issue','Vehicle Fault','Battery Issue','Charging Issue','Accident/Damage','Other'].map(x=><option key={x}>{x}</option>)}</select></label>
+      <label>What do you need help with? *<textarea rows={5} value={form.message} onChange={e=>setForm(f=>({...f,message:e.target.value}))} placeholder="Describe the issue, what you noticed and when it happened…"/></label>
+    </div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setOpen(false)}>Cancel</button><button className="btn-primary" onClick={submit} disabled={saving}>{saving?'Creating…':'Create support request'}</button></div></div></div>}
   </>;
 }
 
@@ -2140,6 +2353,7 @@ function CustAvailableVehicles({ call, setPage }) {
   const [location, setLocation] = useState(null);
   const [nearbyFranchisees, setNearbyFranchisees] = useState([]);
   const [selectedFranchiseeId, setSelectedFranchiseeId] = useState('');
+  const [hasActiveRental, setHasActiveRental] = useState(false);
 
   // Fetch profile first (cached instantly if prefetched), then fire
   // vehicles + franchisees in parallel using the resolved pincode.
@@ -2155,14 +2369,23 @@ function CustAvailableVehicles({ call, setPage }) {
         const pin = profile?.address?.pincode || '';
         if (alive) setLocation(profile?.address || null);
 
-        // Step 2: vehicles + franchisees in parallel
+        // Step 2: vehicles + franchisees + purchases in parallel
         const vehiclePath = `/customer/available-vehicles${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`;
         const optPath     = `/customer/complaint-options${pin ? `?pincode=${encodeURIComponent(pin)}` : ''}`;
 
-        const [list, opt] = await Promise.all([
+        const [list, opt, purchasesRaw] = await Promise.all([
           cachedCall(call, vehiclePath),
           cachedCall(call, optPath),
+          call('/customer/purchases').catch(() => []),
         ]);
+
+        // A customer can only hold 1 vehicle at a time.
+        // Block new bookings while they have a HANDED_OVER or ACTIVE rental.
+        if (alive) {
+          const allPurchases = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+          const activeVehicle = allPurchases.some(p => ['HANDED_OVER','ACTIVE'].includes(p.status));
+          setHasActiveRental(activeVehicle);
+        }
 
         if (alive) {
           setVehicles(Array.isArray(list) ? list : []);
@@ -2187,11 +2410,9 @@ function CustAvailableVehicles({ call, setPage }) {
   }, []);
 
   const categories = ['all', '2-wheeler', '3-wheeler', '4-wheeler'];
-  // Only show franchisees that actually have available vehicles, already ordered
-  // by the backend from nearest to farthest for the customer's pincode.
-  const availableFranchisees = nearbyFranchisees.filter(fr =>
-    vehicles.some(v => String(v.franchiseeId || '') === String(fr._id))
-  );
+  // Available fleet is grouped by the selected fleet operator.
+  const availableFranchisees = Array.from(new Map(vehicles.filter(v => v.franchiseeId).map(v => [String(v.franchiseeId), { _id: v.franchiseeId, name: v.franchiseeName || 'Fleet Operator', address: v.franchiseeAddress || null }])).values());
+
 
   useEffect(() => {
     if (!availableFranchisees.length) {
@@ -2204,10 +2425,21 @@ function CustAvailableVehicles({ call, setPage }) {
   }, [vehicles, nearbyFranchisees, selectedFranchiseeId]);
 
   const filtered = vehicles
-    .filter(v => filterCat === 'all' || v.category === filterCat)
-    .filter(v => !selectedFranchiseeId || String(v.franchiseeId || '') === String(selectedFranchiseeId));
+    .filter(v => !selectedFranchiseeId || String(v.franchiseeId) === String(selectedFranchiseeId))
+    .filter(v => filterCat === 'all' || v.category === filterCat);
 
-  const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId));
+  // Customer books a vehicle model/stock group, not a physical Bike ID.
+  // The fleet operator chooses the exact available physical bike at handover.
+  const groupedVehicles = Array.from(filtered.reduce((map, v) => {
+    const key = `${String(v.franchiseeId||'')}|${String(v.make||'').trim().toLowerCase()}|${String(v.model||'').trim().toLowerCase()}`;
+    if (!map.has(key)) map.set(key, { ...v, quantity: 0, physicalVehicles: [] });
+    const g = map.get(key);
+    g.quantity += Math.max(0, Number(v.quantity || 1));
+    g.physicalVehicles.push(v);
+    return map;
+  }, new Map()).values());
+
+  const selectedFranchisee = availableFranchisees.find(fr => String(fr._id) === String(selectedFranchiseeId)) || null;
 
   const catEmoji = { '2-wheeler': '🛵', '3-wheeler': '🛺', '4-wheeler': '🚗' };
   const [imgLoaded, setImgLoaded] = useState({});
@@ -2226,10 +2458,10 @@ function CustAvailableVehicles({ call, setPage }) {
     {!loading && location?.pincode && (
       <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginBottom:14,animation:'slide-up .4s ease'}}>
         <span style={{background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8',padding:'6px 11px',borderRadius:999,fontSize:12,fontWeight:700}}>📍 Pincode {location.pincode}</span>
-        <span style={{fontSize:12,color:'#64748b'}}>Showing inventory from franchisees closest to your pincode.</span>
+        <span style={{fontSize:12,color:'#64748b'}}>Choose a fleet operator to see its available vehicle stock.</span>
         {availableFranchisees.length > 0 && (
           <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',width:'100%'}}>
-            <span style={{fontSize:12,color:'#64748b',fontWeight:700}}>Nearest available franchise:</span>
+            <span style={{fontSize:12,color:'#64748b',fontWeight:700}}>Select fleet operator:</span>
             {availableFranchisees.map((fr, i) => {
               const active = String(fr._id) === String(selectedFranchiseeId);
               return (
@@ -2244,8 +2476,8 @@ function CustAvailableVehicles({ call, setPage }) {
         )}
         {selectedFranchisee && (
           <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569',animation:'slide-up .3s ease .1s both'}}>
-            <strong>Purchase from:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
-            <span style={{marginLeft:6,color:'#64748b'}}>The vehicle will be handed over only by this franchisee.</span>
+            <strong>Selected fleet operator:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
+            <span style={{marginLeft:6,color:'#64748b'}}>The exact Bike ID will be selected by this fleet operator during handover.</span>
           </div>
         )}
       </div>
@@ -2253,6 +2485,16 @@ function CustAvailableVehicles({ call, setPage }) {
 
     {!loading && (
       <>
+        {/* Active rental banner — customer must return vehicle before booking */}
+        {hasActiveRental && (
+          <div style={{marginBottom:16,padding:'14px 18px',borderRadius:12,background:'#fef3c7',border:'1px solid #fbbf24',display:'flex',alignItems:'center',gap:12,animation:'slide-up .35s ease both'}}>
+            <span style={{fontSize:22}}>🔒</span>
+            <div>
+              <div style={{fontWeight:800,fontSize:14,color:'#92400e'}}>You already have an active vehicle</div>
+              <div style={{fontSize:12,color:'#78350f',marginTop:2}}>Return your current vehicle to the fleet operator before booking a new one. <button className="link-btn" onClick={()=>setPage('purchases')} style={{color:'#b45309',fontWeight:700}}>View My Vehicles →</button></div>
+            </div>
+          </div>
+        )}
         {/* Category filter tabs */}
         <div className="filter-tabs" style={{animation:'slide-up .35s ease .05s both'}}>
           {categories.map(c => (
@@ -2263,7 +2505,7 @@ function CustAvailableVehicles({ call, setPage }) {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {groupedVehicles.length === 0 ? (
           <div className="card" style={{animation:'float-up .4s ease'}}>
             <div className="empty-state">
               <Car size={40} style={{ opacity: .25, marginBottom: 12 }} />
@@ -2272,8 +2514,8 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
         ) : (
           <div className="vehicle-browse-grid">
-            {filtered.map((v, idx) => (
-              <div key={v._id || v.id} className="vehicle-browse-card"
+            {groupedVehicles.map((v, idx) => (
+              <div key={`${v._id || v.id}-${v._unitIndex||1}`} className="vehicle-browse-card"
                 style={{ animationDelay: `${Math.min(idx * 55, 550)}ms` }}
                 onClick={() => setSelected(v)}>
                 <div className="vbc-img">
@@ -2300,15 +2542,9 @@ function CustAvailableVehicles({ call, setPage }) {
                     {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
                     {v.chargingType && <span>🔌 {v.chargingType}</span>}
                   </div>
-                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:6}}>
-                    ✓ {v.quantity || 0} available · {v.franchiseeName || 'EV CORE Fleet'}
-                  </div>
+                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:6}}>✓ {Number(v.quantity || 0)} {Number(v.quantity || 0) === 1 ? 'bike' : 'bikes'} available</div>
                   {v.rentalPlans ? (
-                    <div className="vbc-rental-prices">
-                      {v.rentalPlans.daily?.enabled && <div><span>Daily</span><strong>₹{Number(v.rentalPlans.daily.amount).toLocaleString('en-IN')}</strong><small>/day</small></div>}
-                      {v.rentalPlans.weekly?.enabled && <div><span>Weekly</span><strong>₹{Number(v.rentalPlans.weekly.amount).toLocaleString('en-IN')}</strong><small>/week</small></div>}
-                      {v.rentalPlans.monthly?.enabled && <div><span>Monthly</span><strong>₹{Number(v.rentalPlans.monthly.amount).toLocaleString('en-IN')}</strong><small>/month</small></div>}
-                    </div>
+                    <div className="vbc-rental-hidden-note">✓ Rental plans available · Select vehicle to continue</div>
                   ) : (
                     <div className="vbc-price">
                       <span className="price-amt">₹{Number(v.salePrice || v.pricePerDay || 0).toLocaleString('en-IN')}</span>
@@ -2345,6 +2581,7 @@ function CustAvailableVehicles({ call, setPage }) {
             )}
             <div className="kv-list" style={{ marginTop: 12 }}>
               {[
+                ['Bike ID', selected.displayId || selected.bikeId || '—'],
                 ['Registration', selected.registrationNo],
                 ['Chassis / VIN', selected.chassisNo],
                 ['Motor Number', selected.motorNo],
@@ -2355,13 +2592,9 @@ function CustAvailableVehicles({ call, setPage }) {
                 ['Battery', selected.batteryCapacityKwh ? `${selected.batteryCapacityKwh} kWh` : '—'],
                 ['Range', selected.rangeKm ? `${selected.rangeKm} km` : '—'],
                 ['Charging', selected.chargingType || '—'],
-                ['Daily Plan', selected.rentalPlans?.daily?.enabled ? `₹${Number(selected.rentalPlans.daily.amount).toLocaleString('en-IN')} / day` : null],
-                ['Weekly Plan', selected.rentalPlans?.weekly?.enabled ? `₹${Number(selected.rentalPlans.weekly.amount).toLocaleString('en-IN')} / week` : null],
-                ['Monthly Plan', selected.rentalPlans?.monthly?.enabled ? `₹${Number(selected.rentalPlans.monthly.amount).toLocaleString('en-IN')} / month` : null],
-                ['Security Deposit', selected.rentalPlans ? `₹${Number(selected.securityDeposit||0).toLocaleString('en-IN')}` : null],
-                ['Discount', selected.rentalPlans && Number(selected.discountPercent||0) ? `${Number(selected.discountPercent)}% off` : null],
+                ['Rental Availability', selected.rentalPlans ? 'Plans available after booking selection' : null],
                 ['Sale Price', !selected.rentalPlans ? `₹${(selected.pricePerDay||0).toLocaleString('en-IN')} / unit` : null],
-                ['Available Stock', `${selected.quantity ?? 0} vehicle(s)`],
+                ['Availability', 'Available now'],
                 ['Fleet Operator', selected.franchiseeName || 'EV CORE Fleet'],
               ].map(([k, v]) => v && (
                 <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
@@ -2371,7 +2604,13 @@ function CustAvailableVehicles({ call, setPage }) {
           </div>
           <div className="modal-footer">
             <button className="btn-ghost" onClick={() => setSelected(null)}>Close</button>
-            <button className="btn-primary" onClick={() => setPurchaseVehicle(selected)}>{selected.rentalPlans ? '🛵 Book Rental' : '🛒 Buy Now'}</button>
+            {hasActiveRental ? (
+              <button className="btn-primary" disabled title="Return your current vehicle before booking a new one" style={{opacity:.5,cursor:'not-allowed'}}>
+                🔒 Return vehicle first
+              </button>
+            ) : (
+              <button className="btn-primary" onClick={() => setPurchaseVehicle(selected)}>{selected.rentalPlans ? '🛵 Book Rental' : '🛒 Buy Now'}</button>
+            )}
           </div>
         </div>
       </div>
@@ -2394,7 +2633,7 @@ function CustAvailableVehicles({ call, setPage }) {
 // ══════════════════════════════════════════════════════════════════
 
 function BookingFlow({ vehicle, call, onClose, onSuccess }) {
-  const [step, setStep] = useState('address');
+  const [step, setStep] = useState('documents');
   const [pincode, setPincode] = useState('');
   const [addrData, setAddrData] = useState(null);
   const [area, setArea] = useState('');
@@ -2406,6 +2645,11 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({type:'',text:''});
   const [successData, setSuccessData] = useState(null);
+  const [customerProfile, setCustomerProfile] = useState(null);
+  const [kycFiles, setKycFiles] = useState({ aadhaarPhoto:null, panPhoto:null, currentBill:null });
+  const [kycNumbers, setKycNumbers] = useState({ aadharNumber:'', panNumber:'' });
+  const [kycBusy, setKycBusy] = useState(false);
+  const [kycMsg, setKycMsg] = useState('');
 
   // Wallet state
   const [walletBalance, setWalletBalance] = useState(0);
@@ -2422,6 +2666,26 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
   const [showRecharge, setShowRecharge] = useState(false);
   const [rechargeAmount, setRechargeAmount] = useState(500);
   const [rechargeBusy, setRechargeBusy] = useState(false);
+
+  // Load the saved customer profile. The customer's existing pincode/state/district
+  // are reused during booking; the first booking step is now KYC documents.
+  React.useEffect(() => {
+    call('/customer/profile').then(profile => {
+      setCustomerProfile(profile);
+      const a = profile?.aadharNumber || '';
+      const p = profile?.panNumber || '';
+      setKycNumbers({ aadharNumber:a, panNumber:p });
+      const addr = profile?.address || {};
+      if (addr?.pincode) setPincode(String(addr.pincode));
+      if (addr?.state || addr?.district) setAddrData({ state:addr.state||'', district:addr.district||'', area:addr.area||'' });
+      if (addr?.area) setArea(addr.area);
+      // If Aadhaar, PAN and current bill are already saved, skip the document
+      // upload step — the customer has already submitted their KYC documents.
+      const docs = profile?.identityDocuments;
+      const hasSavedDocs = !!(docs?.aadhar?.url && docs?.pan?.url && docs?.currentBill?.url);
+      if (hasSavedDocs) setStep('quantity');
+    }).catch(() => {});
+  }, []);
 
   // Fetch wallet on mount
   React.useEffect(() => {
@@ -2466,7 +2730,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
     if (!coupon.trim()) return;
     setCouponBusy(true); setCouponMsg('');
     try {
-      const res = await call('/customer/coupons/validate', { method: 'POST', data: { code: coupon.toUpperCase(), vehicleId: vehicle._id, amount: subtotal } });
+      const res = await call('/customer/coupons/validate', { method: 'POST', data: { code: coupon.toUpperCase(), vehicleId: vehicle._parentVehicleId || vehicle._id, amount: subtotal } });
       setCouponApplied({ code: coupon.toUpperCase(), discount: res.discount, type: res.type || 'FLAT', description: res.description });
       setCouponMsg('✓ Coupon applied successfully!');
     } catch (_) {
@@ -2507,6 +2771,48 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
     setRechargeBusy(false);
   };
 
+  const saveKycAndContinue = async () => {
+    const savedDocs = customerProfile?.identityDocuments;
+    const hasSavedDocs = !!(savedDocs?.aadhar?.url && savedDocs?.pan?.url && savedDocs?.currentBill?.url);
+    if (!hasSavedDocs && (!kycFiles.aadhaarPhoto || !kycFiles.panPhoto || !kycFiles.currentBill)) {
+      setMsg({type:'error',text:'Please upload Aadhaar photo, PAN card and current bill.'}); return;
+    }
+    if (pincode && (!/^\d{6}$/.test(String(pincode)))) {
+      setMsg({type:'error',text:'Your saved customer pincode is invalid. Please update it in Profile.'}); return;
+    }
+    if (kycNumbers.aadharNumber && !/^\d{12}$/.test(String(kycNumbers.aadharNumber).replace(/\s/g,''))) {
+      setMsg({type:'error',text:'Aadhaar number must contain 12 digits.'}); return;
+    }
+    if (kycNumbers.panNumber && !/^[A-Za-z]{5}\d{4}[A-Za-z]$/.test(String(kycNumbers.panNumber))) {
+      setMsg({type:'error',text:'Enter a valid 10-character PAN number.'}); return;
+    }
+    setKycBusy(true); setMsg({type:'',text:''}); setKycMsg('');
+    try {
+      if (kycFiles.aadhaarPhoto && kycFiles.panPhoto && kycFiles.currentBill) {
+        const fd = new FormData();
+        fd.append('aadhaarPhoto', kycFiles.aadhaarPhoto);
+        fd.append('panPhoto', kycFiles.panPhoto);
+        fd.append('currentBill', kycFiles.currentBill);
+        if (kycNumbers.aadharNumber) fd.append('aadharNumber', String(kycNumbers.aadharNumber).replace(/\s/g,''));
+        if (kycNumbers.panNumber) fd.append('panNumber', String(kycNumbers.panNumber).toUpperCase());
+        const result = await call('/customer/kyc/documents', { method:'POST', data:fd });
+        setCustomerProfile(result?.user || customerProfile);
+        setKycNumbers({ aadharNumber:result?.aadharNumber || kycNumbers.aadharNumber || '', panNumber:result?.panNumber || kycNumbers.panNumber || '' });
+        if (!result?.ocr?.aadharDetected || !result?.ocr?.panDetected) {
+          setKycMsg('Document saved. If a number was not detected automatically, enter it above and continue.');
+        } else setKycMsg('✓ Aadhaar and PAN were read from the uploaded documents.');
+      } else if (hasSavedDocs) {
+        // Existing verified/saved KYC can be reused for another booking.
+        if (!kycNumbers.aadharNumber || !kycNumbers.panNumber) {
+          setMsg({type:'error',text:'Please enter the missing Aadhaar/PAN number in your saved KYC details.'}); return;
+        }
+      }
+      setStep('quantity');
+    } catch (e) {
+      setMsg({type:'error',text:e.response?.data?.message || e.message || 'Could not save KYC documents.'});
+    } finally { setKycBusy(false); }
+  };
+
   const startPayment = async () => {
     if (!pincode || pincode.length !== 6 || !addrData) { setMsg({type:'error',text:'Please enter a valid pincode.'}); return; }
     if (quantity !== 1) { setMsg({type:'error',text:'Each customer can book only 1 vehicle per booking.'}); return; }
@@ -2517,11 +2823,13 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
       const order = await call('/customer/purchases/create-order', {
         method: 'POST',
         data: {
-          vehicleId: vehicle._id, vehicleSource: vehicle._source, franchiseeId: vehicle.franchiseeId, pincode,
+          vehicleId: vehicle._parentVehicleId || vehicle._id, vehicleSource: vehicle._source, franchiseeId: vehicle.franchiseeId, pincode,
           state: addrData.state, district: addrData.district, area: area || addrData.area,
           fullAddress: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`,
           purchaseDate: new Date().toISOString(), saleQuantity: quantity, durationDays: isRental ? rentalDuration : quantity, rentalPlan: isRental ? rentalPlan : 'SALE', planUnits: isRental ? rentalDuration : 1,
           walletAmount: walletDeduction, couponCode: couponApplied?.code, couponDiscount,
+          aadharNumber: kycNumbers.aadharNumber, panNumber: kycNumbers.panNumber,
+          kycDocuments: customerProfile?.identityDocuments || undefined,
         }
       });
       if (finalAmount === 0) {
@@ -2535,26 +2843,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         order_id: order.orderId, redirect: false,
         handler: async response => {
           try {
-            const verification = await call('/customer/purchases/verify-payment', {
-              method: 'POST',
-              data: {
-                rentalId: order.purchaseId,
-                purchaseId: order.purchaseId,
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature
-              }
-            });
-            if (!verification?.success) throw new Error(verification?.message || 'Payment verification failed.');
-            setSuccessData({
-              vehicleName: `${vehicle.make} ${vehicle.model}`,
-              amount: (order.amount / 100).toLocaleString('en-IN'),
-              quantity,
-              purchaseDate: new Date().toLocaleDateString('en-IN'),
-              address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`,
-              pickup: vehicle.franchiseeName || 'Selected Franchisee',
-              paymentId: verification.paymentId || response.razorpay_payment_id
-            });
+            await call('/customer/purchases/verify-payment', { method: 'POST', data: { rentalId: order.purchaseId, purchaseId: order.purchaseId, razorpay_order_id: response.razorpay_order_id, razorpay_payment_id: response.razorpay_payment_id, razorpay_signature: response.razorpay_signature } });
+            setSuccessData({ vehicleName: `${vehicle.make} ${vehicle.model}`, amount: (order.amount / 100).toLocaleString('en-IN'), quantity, purchaseDate: new Date().toLocaleDateString('en-IN'), address: `${area || addrData.area}, ${addrData.district}, ${addrData.state} - ${pincode}`, pickup: vehicle.franchiseeName || 'Selected Franchisee', paymentId: response.razorpay_payment_id });
             setStep('success');
           } catch (e) { setMsg({type:'error',text:e.response?.data?.message||'Payment verification failed.'}); }
           finally { setBusy(false); }
@@ -2567,8 +2857,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
     } catch (e) { setMsg({type:'error',text:e.response?.data?.message||'Could not create purchase order.'}); setBusy(false); }
   };
 
-  const STEPS = ['address', 'quantity', 'payment'];
-  const STEP_LABELS = isRental ? ['Location', 'Plan & Quantity', 'Payment'] : ['Location', 'Quantity', 'Payment'];
+  const STEPS = ['documents', 'quantity', 'payment'];
+  const STEP_LABELS = isRental ? ['Documents', 'Plan & Quantity', 'Payment'] : ['Documents', 'Quantity', 'Payment'];
   const stepIdx = STEPS.indexOf(step);
 
   if (step === 'success' && successData) return <PaymentSuccessScreen successData={successData} vehicle={vehicle} onDone={onSuccess} />;
@@ -2580,8 +2870,8 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         {/* ── Header ── */}
         <div className="modal-head">
           <div>
-            <div className="modal-title">Buy {vehicle.make} {vehicle.model}</div>
-            <div className="modal-subtitle">Purchase outright · ₹{Number(vehicle.pricePerDay || 0).toLocaleString('en-IN')} per vehicle</div>
+            <div className="modal-title">{isRental ? 'Book' : 'Buy'} {vehicle.make} {vehicle.model}</div>
+            <div className="modal-subtitle">{isRental ? 'Complete your documents, plan selection and payment' : `Purchase outright · ₹${Number(vehicle.pricePerDay || 0).toLocaleString('en-IN')} per vehicle`}</div>
           </div>
           <button className="icon-btn" onClick={onClose}>✕</button>
         </div>
@@ -2604,52 +2894,42 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         <div className="modal-body">
           <Msg type={msg.type} text={msg.text} />
 
-          {/* ── STEP 1: Location ── */}
-          {step === 'address' && (
+          {/* ── STEP 1: KYC documents ── */}
+          {step === 'documents' && (
             <div className="bk-step-content">
               <div className="bk-step-hero">
-                <div className="bk-step-hero-icon"><MapPin size={22} /></div>
+                <div className="bk-step-hero-icon"><FileText size={22} /></div>
                 <div>
-                  <div className="bk-step-hero-title">Confirm your location</div>
-                  <div className="bk-step-hero-sub">Your pincode helps us find the nearest franchise pickup point.</div>
+                  <div className="bk-step-hero-title">Upload your documents</div>
+                  <div className="bk-step-hero-sub">Upload Aadhaar, PAN card and a current bill. Aadhaar/PAN numbers are read automatically when OCR is available and can be corrected before continuing.</div>
                 </div>
               </div>
 
-              <div className="bk-field-group">
-                <label className="bk-label">Pincode *</label>
-                <div className="bk-pincode-row">
-                  <input
-                    className="bk-input bk-pincode-input"
-                    value={pincode} maxLength={6} inputMode="numeric"
-                    placeholder="Enter 6-digit pincode"
-                    onChange={e => { const v = e.target.value.replace(/\D/g,'').slice(0,6); setPincode(v); setAddrData(null); setPincodeError(''); if (v.length === 6) lookupPincode(v); }}
-                  />
-                  {pincodeLoading && <div className="pincode-spinner" />}
-                </div>
-                {pincodeError && <div className="bk-field-err">{pincodeError}</div>}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:12,marginTop:16}}>
+                {[['aadhaarPhoto','Aadhaar photo','Aadhaar card image'],['panPhoto','PAN card','PAN card image'],['currentBill','Current bill','Electricity / address bill']].map(([key,title,sub]) => (
+                  <label key={key} style={{border:'1px dashed #cbd5e1',borderRadius:14,padding:14,background:'#f8fafc',cursor:'pointer',display:'flex',flexDirection:'column',gap:8,minHeight:130}}>
+                    <strong style={{fontSize:13,color:'#0f172a'}}>{title}</strong>
+                    <span style={{fontSize:11,color:'#64748b'}}>{sub}</span>
+                    <input type="file" accept="image/*,.pdf" style={{fontSize:11}} onChange={e=>setKycFiles(f=>({...f,[key]:e.target.files?.[0]||null}))}/>
+                    <span style={{fontSize:11,fontWeight:700,color:kycFiles[key]?'#16a34a':'#94a3b8'}}>{kycFiles[key] ? `✓ ${kycFiles[key].name}` : 'Choose file'}</span>
+                  </label>
+                ))}
               </div>
 
-              {addrData && (
-                <div className="bk-addr-reveal">
-                  <div className="bk-addr-chips">
-                    <div className="bk-addr-chip">
-                      <span className="bk-addr-chip-label">State</span>
-                      <span className="bk-addr-chip-value">{addrData.state}</span>
-                    </div>
-                    <div className="bk-addr-chip">
-                      <span className="bk-addr-chip-label">District</span>
-                      <span className="bk-addr-chip-value">{addrData.district}</span>
-                    </div>
-                  </div>
-                  <div className="bk-field-group" style={{marginTop:14}}>
-                    <label className="bk-label">Area / Locality (optional)</label>
-                    <input className="bk-input" value={area} onChange={e => setArea(e.target.value)} placeholder={addrData.area || 'Your area or locality'} />
-                  </div>
-                  <div className="bk-pickup-banner">
-                    🏪 Pickup from: <strong>{vehicle.franchiseeName || 'Selected Franchisee'}</strong>
-                  </div>
+              <div style={{marginTop:16,padding:14,borderRadius:14,border:'1px solid #dbeafe',background:'#eff6ff'}}>
+                <div style={{fontSize:12,fontWeight:800,color:'#1e40af',marginBottom:10}}>Identity numbers</div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                  <label className="bk-field-group"><span className="bk-label">Aadhaar number *</span><input className="bk-input" value={kycNumbers.aadharNumber} maxLength={12} inputMode="numeric" placeholder="12-digit Aadhaar" onChange={e=>setKycNumbers(v=>({...v,aadharNumber:e.target.value.replace(/\D/g,'').slice(0,12)}))}/></label>
+                  <label className="bk-field-group"><span className="bk-label">PAN number *</span><input className="bk-input" value={kycNumbers.panNumber} maxLength={10} placeholder="ABCDE1234F" onChange={e=>setKycNumbers(v=>({...v,panNumber:e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,10)}))}/></label>
                 </div>
-              )}
+                {kycMsg && <div style={{marginTop:10,fontSize:12,fontWeight:700,color:kycMsg.startsWith('✓')?'#15803d':'#92400e'}}>{kycMsg}</div>}
+              </div>
+
+              <div style={{marginTop:14,padding:13,borderRadius:12,background:'#f8fafc',border:'1px solid #e2e8f0'}}>
+                <div style={{fontSize:11,fontWeight:800,color:'#64748b',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:7}}>Saved customer location</div>
+                <div style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{[customerProfile?.address?.area, customerProfile?.address?.district, customerProfile?.address?.state].filter(Boolean).join(', ') || 'Location saved in your profile'}</div>
+                <div style={{fontSize:12,color:'#64748b',marginTop:4}}>PIN {customerProfile?.address?.pincode || pincode || '—'} · This is taken from your Customer Profile; no separate location step is required.</div>
+              </div>
             </div>
           )}
 
@@ -2664,7 +2944,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 <div className="bk-vehicle-info">
                   <div className="bk-vehicle-name">{vehicle.make} {vehicle.model}</div>
                   <div className="bk-vehicle-meta">{vehicle.category || 'Vehicle'} · {vehicle.registrationNo || 'Fleet vehicle'}</div>
-                  <div className="bk-vehicle-price">{isRental ? 'Flexible rental' : `₹${unitPrice.toLocaleString('en-IN')}`} <span>{isRental ? 'choose a plan below' : '/ vehicle'}</span></div>
+                  <div className="bk-vehicle-price">{isRental ? `₹${unitPrice.toLocaleString('en-IN')} / ${rentalPlan==='DAILY'?'day':rentalPlan==='WEEKLY'?'week':'month'}` : `₹${unitPrice.toLocaleString('en-IN')}`} <span>{isRental ? 'current selected plan' : '/ vehicle'}</span></div>
                 </div>
               </div>
 
@@ -2680,8 +2960,10 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                       <button type="button" key={key} className={`bk-rental-plan-card${rentalPlan===key?' active':''}`} onClick={()=>{setRentalPlan(key);setRentalDuration(1);}}>
                         <span className="bk-plan-check">{rentalPlan===key?'✓':''}</span>
                         <strong>{label}</strong>
-                        <b>₹{Number(vehicle.rentalPlans[field].amount).toLocaleString('en-IN')}</b>
-                        <small>per {unit}</small>
+                        <small>Billing: {unit}</small>
+                        {isRental && vehicle.rentalPlans?.[field]?.amount != null && (
+                          <span className="bk-plan-price">₹{Number(vehicle.rentalPlans[field].amount).toLocaleString('en-IN')} / {unit}</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -2705,12 +2987,12 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 <div className="bk-qty-avail">{vehicle.quantity || 0} unit(s) currently available</div>
               </div>}
 
-              <div className="bk-price-preview">
-                <div className="bk-price-row"><span>{quantity} vehicle{quantity!==1?'s':''} × ₹{unitPrice.toLocaleString('en-IN')} × {billingUnits}{isRental?' '+(rentalPlan==='DAILY'?'day(s)':rentalPlan==='WEEKLY'?'week(s)':'month(s)'):''}</span><strong>₹{subtotal.toLocaleString('en-IN')}</strong></div>
-                {isRental && Number(vehicle.discountPercent||0)>0 && <div className="bk-price-row"><span>Fleet discount ({Number(vehicle.discountPercent)}%)</span><strong className="bk-discount">−₹{listingDiscount.toLocaleString('en-IN')}</strong></div>}
-                {isRental && <div className="bk-price-row"><span>Security deposit</span><strong>₹{securityDeposit.toLocaleString('en-IN')}</strong></div>}
-                <div className="bk-price-row bk-total-row"><span>Estimated total</span><strong>₹{afterCoupon.toLocaleString('en-IN')}</strong></div>
-              </div>
+              {!isRental && (
+                <div className="bk-price-preview">
+                  <div className="bk-price-row"><span>{quantity} vehicle{quantity!==1?'s':''} × ₹{unitPrice.toLocaleString('en-IN')} × {billingUnits}</span><strong>₹{subtotal.toLocaleString('en-IN')}</strong></div>
+                  <div className="bk-price-row bk-total-row"><span>Estimated total</span><strong>₹{afterCoupon.toLocaleString('en-IN')}</strong></div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2723,9 +3005,12 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 {[
                   ['Vehicle', `${vehicle.make} ${vehicle.model}`],
                   ['Plan', isRental ? `${rentalPlan} · ${rentalDuration} ${rentalPlan==='DAILY'?'day(s)':rentalPlan==='WEEKLY'?'week(s)':'month(s)'}` : 'Vehicle Purchase'],
-                  ['Rate', `₹${unitPrice.toLocaleString('en-IN')} / ${isRental ? rentalPlan==='DAILY'?'day':rentalPlan==='WEEKLY'?'week':'month' : 'vehicle'}`],
-                  ['Rental Amount', `₹${subtotal.toLocaleString('en-IN')}`],
-                  ...(isRental ? [['Fleet Discount', `−₹${listingDiscount.toLocaleString('en-IN')}`],['Security Deposit', `₹${securityDeposit.toLocaleString('en-IN')}`]] : []),
+                  ...(isRental ? [
+                    ['Rental price', `₹${unitPrice.toLocaleString('en-IN')} / ${rentalPlan==='DAILY'?'day':rentalPlan==='WEEKLY'?'week':'month'}`],
+                    ['Rental subtotal', `₹${subtotal.toLocaleString('en-IN')}`],
+                    ...(listingDiscount > 0 ? [['Discount', `−₹${listingDiscount.toLocaleString('en-IN')}`]] : []),
+                    ...(securityDeposit > 0 ? [['Security deposit', `₹${securityDeposit.toLocaleString('en-IN')}`]] : []),
+                  ] : [['Rate', `₹${unitPrice.toLocaleString('en-IN')} / vehicle`]]),
                   ['Pickup at', vehicle.franchiseeName || '—'],
                 ].map(([k, v]) => (
                   <div className="bk-order-row" key={k}>
@@ -2735,7 +3020,6 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 ))}
               </div>
 
-              {!isRental && <>
               {/* Coupon */}
               <div className="bk-section">
                 <div className="bk-section-label">🏷️ Coupon Code</div>
@@ -2831,10 +3115,20 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
                 )}
               </div>
 
-              </>}
-
               {/* Total */}
               <div className="bk-total-box">
+                {isRental && listingDiscount > 0 && (
+                  <div className="bk-total-row discount">
+                    <span>Rental Discount</span>
+                    <strong>−₹{listingDiscount.toLocaleString('en-IN')}</strong>
+                  </div>
+                )}
+                {isRental && securityDeposit > 0 && (
+                  <div className="bk-total-row">
+                    <span>Security Deposit</span>
+                    <strong>₹{securityDeposit.toLocaleString('en-IN')}</strong>
+                  </div>
+                )}
                 {couponDiscount > 0 && (
                   <div className="bk-total-row discount">
                     <span>Coupon Discount</span>
@@ -2858,15 +3152,14 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
 
         {/* ── Footer buttons ── */}
         <div className="modal-footer">
-          {step === 'address' && (
-            <button className="btn-primary" onClick={() => {
-              if (pincode.length === 6 && addrData) { setMsg({type:'',text:''}); setStep('quantity'); }
-              else setMsg({type:'error',text:'Enter a valid 6-digit pincode first.'});
-            }}>Continue →</button>
+          {step === 'documents' && (
+            <button className="btn-primary" onClick={saveKycAndContinue} disabled={kycBusy}>
+              {kycBusy ? 'Saving documents…' : 'Save Documents & Continue →'}
+            </button>
           )}
           {step === 'quantity' && (
             <>
-              <button className="btn-ghost" onClick={() => setStep('address')}>← Back</button>
+              <button className="btn-ghost" onClick={() => setStep('documents')}>← Back</button>
               <button className="btn-primary" onClick={() => setStep('payment')}>Review & Pay →</button>
             </>
           )}
@@ -3121,14 +3414,12 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
   const mapRef          = React.useRef(null);
   const leafRef         = React.useRef(null);
   const markersRef      = React.useRef([]);
+  const linesRef        = React.useRef([]);
   const userMarkerRef   = React.useRef(null);
-  const tooltipTimerRef = React.useRef(null);
-  const [tooltip, setTooltip] = React.useState(null);
 
-  // ── init map once — L already on window from index.html ─────
   React.useEffect(() => {
     if (leafRef.current || !mapRef.current || !window.L) return;
-    const L   = window.L;
+    const L = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
     L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
@@ -3136,42 +3427,73 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
       maxZoom: 19,
     }).addTo(map);
     leafRef.current = map;
-    drawHubMarkers(map, hubs);   // instant — no waiting
+    drawHubMarkers(map, hubs, userCoords);
+    setTimeout(() => map.invalidateSize(), 100);
   }, []);
 
-  // ── redraw markers when hubs change ─────────────────────────
   React.useEffect(() => {
     if (!leafRef.current) return;
-    drawHubMarkers(leafRef.current, hubs);
-  }, [hubs]);
+    drawHubMarkers(leafRef.current, hubs, userCoords);
+  }, [hubs, userCoords]);
 
-  function drawHubMarkers(map, hubList) {
-    markersRef.current.forEach(m => map.removeLayer(m));
+  function clearMapLayers() {
+    markersRef.current.forEach(m => leafRef.current?.removeLayer(m));
     markersRef.current = [];
+    linesRef.current.forEach(l => leafRef.current?.removeLayer(l));
+    linesRef.current = [];
+  }
+
+  function drawHubMarkers(map, hubList, currentUserCoords) {
+    clearMapLayers();
     const allCoords = [];
+    const nearestFour = currentUserCoords
+      ? hubList.filter(h => h._dist != null).sort((a, b) => a._dist - b._dist).slice(0, 4)
+      : [];
+    const nearestIds = new Set(nearestFour.map(h => String(h._id || h.sourceId || h.code || h.name)));
+
+    // Draw the four nearest customer-to-hub connections first.
+    if (currentUserCoords && nearestFour.length) {
+      nearestFour.forEach(hub => {
+        const coords = custGetCoords(hub);
+        if (!coords) return;
+        const line = window.L.polyline([currentUserCoords, coords], {
+          color: '#2563eb', weight: 3, opacity: 0.75, dashArray: '8 7',
+        }).addTo(map);
+        linesRef.current.push(line);
+      });
+    }
+
     hubList.forEach(hub => {
       const coords = custGetCoords(hub);
       if (!coords) return;
       const color = HUB_SC[hub.status] || '#2563eb';
-      const rank  = hub._rank != null ? hub._rank + 1 : null;
+      const id = String(hub._id || hub.sourceId || hub.code || hub.name);
+      const isNearest = nearestIds.has(id);
+      const rank = hub._rank != null ? hub._rank + 1 : null;
+      const pulse = isNearest && currentUserCoords
+        ? `<div style="position:absolute;inset:-7px;border:2px solid ${color};border-radius:50%;animation:custHubPulse 1.35s ease-out infinite;opacity:.85;"></div>`
+        : '';
       const icon = window.L.divIcon({
         className: '',
-        html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;">${rank ?? ''}</div>`,
-        iconSize: [22, 22], iconAnchor: [11, 11],
+        html: `<div style="position:relative;width:24px;height:24px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;">${pulse}<span style="position:relative;z-index:2;">${rank ?? ''}</span></div>`,
+        iconSize: [24, 24], iconAnchor: [12, 12],
       });
       const marker = window.L.marker(coords, { icon }).addTo(map);
-      marker.on('mouseover', e => {
-        clearTimeout(tooltipTimerRef.current);
-        const pt = map.latLngToContainerPoint(e.latlng);
-        setTooltip({ hub, x: pt.x, y: pt.y });
-      });
-      marker.on('mouseout',  () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
-      marker.on('click',     () => onSelectHub(hub));
+      // Deliberately no hover handler: details open only after clicking a station.
+      marker.on('click', () => onSelectHub(hub));
       markersRef.current.push(marker);
       allCoords.push(coords);
     });
-    // Auto-fit map to all hub locations
-    if (allCoords.length === 1) {
+
+    if (currentUserCoords) {
+      allCoords.push(currentUserCoords);
+      if (nearestFour.length) {
+        const focus = [currentUserCoords, ...nearestFour.map(h => custGetCoords(h)).filter(Boolean)];
+        map.fitBounds(window.L.latLngBounds(focus), { padding: [70, 70], maxZoom: 15, animate: true });
+      } else {
+        map.setView(currentUserCoords, 13, { animate: true });
+      }
+    } else if (allCoords.length === 1) {
       map.setView(allCoords[0], 14, { animate: false });
     } else if (allCoords.length > 1) {
       map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 14, animate: false });
@@ -3179,97 +3501,78 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     map.invalidateSize();
   }
 
-  // Draw / update user location marker
   React.useEffect(() => {
-    if (!userCoords || !window.L) return;
-    const L   = window.L;
+    if (!userCoords || !window.L || !leafRef.current) return;
+    const L = window.L;
     const map = leafRef.current;
-    if (!map) return;
     if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
     const icon = L.divIcon({
       className: '',
-      html: `<div style="
-        width:24px;height:24px;border-radius:50%;
-        background:#2563eb;border:4px solid #fff;
-        box-shadow:0 0 0 3px #2563eb66;
-        cursor:default;
-      "></div>`,
-      iconSize: [24, 24], iconAnchor: [12, 12],
+      html: `<div style="position:relative;width:28px;height:28px;border-radius:50%;background:#2563eb;border:4px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.18),0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;">📍</div>`,
+      iconSize: [28, 28], iconAnchor: [14, 14],
     });
-    userMarkerRef.current = L.marker(userCoords, { icon })
+    userMarkerRef.current = L.marker(userCoords, { icon, zIndexOffset: 1000 })
       .bindPopup('<b>📍 Your Location</b>')
       .addTo(map);
-    map.setView(userCoords, 8, { animate: true });
   }, [userCoords]);
 
-  // Pan to selected
   React.useEffect(() => {
     if (!selectedHub || !leafRef.current) return;
     const c = custGetCoords(selectedHub);
-    if (c) leafRef.current.setView(c, 10, { animate: true });
+    if (c) leafRef.current.setView(c, Math.max(leafRef.current.getZoom(), 15), { animate: true });
   }, [selectedHub]);
 
-  const sc = tooltip ? (HUB_SC[tooltip.hub.status] || '#2563eb') : '#16a34a';
   return (
     <div style={{ position: 'relative', height: 500, borderRadius: 14, overflow: 'hidden',
                   border: '1px solid #e4e7ef', boxShadow: '0 2px 12px rgba(0,0,0,.07)' }}>
+      <style>{`@keyframes custHubPulse { 0% { transform:scale(.55); opacity:.85; } 70% { transform:scale(1.65); opacity:0; } 100% { transform:scale(1.65); opacity:0; } }`}</style>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
-      {tooltip && (() => {
-        const coords  = custGetCoords(tooltip.hub);
+      {selectedHub && (() => {
+        const sc = HUB_SC[selectedHub.status] || '#2563eb';
+        const coords = custGetCoords(selectedHub);
         const mapsUrl = coords
           ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
-          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((tooltip.hub.address ? tooltip.hub.address + ', ' : '') + (tooltip.hub.city || ''))}`;
+          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedHub.address ? selectedHub.address + ', ' : '') + (selectedHub.city || ''))}`;
         return (
-          <div
-            className="map-tooltip"
-            style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'auto' }}
-            onMouseEnter={() => clearTimeout(tooltipTimerRef.current)}
-            onMouseLeave={() => setTooltip(null)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-              <div className="map-tooltip-name">{tooltip.hub.name}</div>
-              <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Open in Google Maps"
-                 style={{ color: '#2563eb', flexShrink: 0, display: 'flex', alignItems: 'center', textDecoration: 'none', padding: '2px 0' }}>
-                <MapPin size={16} />
-              </a>
-            </div>
-            {tooltip.hub._dist != null && (
-              <div className="map-tooltip-row" style={{ color: '#2563eb', fontWeight: 700 }}>
-                📏 {tooltip.hub._dist.toFixed(1)} km away
+          <div style={{ position: 'absolute', top: 14, right: 14, width: 'min(340px, calc(100% - 28px))', zIndex: 1000,
+            background: '#fff', border: '1px solid #dbe3ef', borderRadius: 14, padding: 15,
+            boxShadow: '0 10px 30px rgba(15,23,42,.18)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 15, color: '#111827' }}>{selectedHub.name}</div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>📍 {selectedHub.city}{selectedHub.area ? ` · ${selectedHub.area}` : ''}</div>
               </div>
-            )}
-            <div className="map-tooltip-row"><span>📍</span><strong>{tooltip.hub.city}</strong></div>
-            {tooltip.hub.address && <div className="map-tooltip-row" style={{ fontSize: 11 }}>{tooltip.hub.address}</div>}
-            <div className="map-tooltip-row"><span>⚡</span><strong>{tooltip.hub.chargerCount ?? 0} chargers</strong></div>
-            <div style={{ marginTop: 6 }}>
-              <span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>
-                ● {tooltip.hub.status}
-              </span>
+              <button onClick={() => onSelectHub(null)} style={{ background: '#f3f4f6', border: 0, borderRadius: 8, width: 28, height: 28, cursor: 'pointer', color: '#6b7280' }}>✕</button>
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
+              <div style={{ padding: 9, borderRadius: 8, background: '#f8fafc' }}><small style={{ color: '#6b7280' }}>Status</small><div style={{ color: sc, fontWeight: 800, fontSize: 12 }}>● {selectedHub.status || '—'}</div></div>
+              <div style={{ padding: 9, borderRadius: 8, background: '#eff6ff' }}><small style={{ color: '#6b7280' }}>Distance</small><div style={{ color: '#2563eb', fontWeight: 800, fontSize: 12 }}>{selectedHub._dist == null ? '—' : selectedHub._dist < 1 ? `${(selectedHub._dist * 1000).toFixed(0)} m` : `${selectedHub._dist.toFixed(1)} km`}</div></div>
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: '#4b5563', lineHeight: 1.55 }}>
+              {selectedHub.address && <div><b>Address:</b> {selectedHub.address}</div>}
+              {selectedHub.siteType && <div><b>Site type:</b> {selectedHub.siteType}</div>}
+              {selectedHub.swaps != null && <div><b>Swaps:</b> {selectedHub.swaps}</div>}
+              {selectedHub.code && <div><b>Hub code:</b> {selectedHub.code}</div>}
+            </div>
+            <a href={mapsUrl} target="_blank" rel="noopener noreferrer" style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 4, color: '#2563eb', fontWeight: 700, fontSize: 11, textDecoration: 'none' }}>
+              <MapPin size={13} /> Open in Google Maps
+            </a>
           </div>
         );
       })()}
       <div className="map-legend">
-        <div style={{ fontWeight: 700, fontSize: 11, color: '#374151', marginBottom: 3 }}>Status</div>
-        {Object.entries(HUB_SC).map(([s, c]) => (
-          <div key={s} className="legend-item">
-            <div className="legend-dot" style={{ background: c }} />
-            <span style={{ fontSize: 11 }}>{s}</span>
-          </div>
-        ))}
-        {userCoords && (
-          <div className="legend-item" style={{ marginTop: 4 }}>
-            <div className="legend-dot" style={{ background: '#2563eb', outline: '2px solid #2563eb66', outlineOffset: 2 }} />
-            <span style={{ fontSize: 11 }}>You</span>
-          </div>
-        )}
+        <div style={{ fontWeight: 700, fontSize: 11, color: '#374151', marginBottom: 3 }}>Nearest charging hubs</div>
+        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb' }} /><span style={{ fontSize: 11 }}>4 nearest · blinking</span></div>
+        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb', width: 8, height: 8 }} /><span style={{ fontSize: 11 }}>Blue lines = distance</span></div>
+        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb', outline: '2px solid #2563eb66', outlineOffset: 2 }} /><span style={{ fontSize: 11 }}>Your location</span></div>
       </div>
     </div>
   );
 }
 
 function CustChargingStations({ call }) {
-  const { data: rawHubs, loading, error } = useFetch(call, '/hubs');
+  const { data: rawHubs, loading, error, refresh } = useFetch(call, '/hubs');
+  useEffect(() => { const timer = setInterval(() => refresh(), 10 * 60 * 1000); return () => clearInterval(timer); }, []);
   const [userCoords,   setUserCoords]   = useState(null);
   const [locStatus,    setLocStatus]    = useState('idle');
   const [selectedHub,  setSelectedHub]  = useState(null);
@@ -3294,6 +3597,8 @@ function CustChargingStations({ call }) {
     }
     return list.map((h, i) => ({ ...h, _rank: i }));
   }, [rawHubs, userCoords, statusFilter]);
+
+  React.useEffect(() => { getLocation(); }, []);
 
   const getLocation = () => {
     if (!navigator.geolocation) { setLocStatus('denied'); return; }
@@ -3387,13 +3692,9 @@ function CustChargingStations({ call }) {
 
         {/* View toggle */}
         <div className="cs-view-toggle">
-          <button className={`cs-view-btn${viewMode==='grid'?' active':''}`} onClick={()=>setViewMode('grid')}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="0" y="0" width="6" height="6" rx="1"/><rect x="8" y="0" width="6" height="6" rx="1"/><rect x="0" y="8" width="6" height="6" rx="1"/><rect x="8" y="8" width="6" height="6" rx="1"/></svg>
-            Grid
-          </button>
-          <button className={`cs-view-btn${viewMode==='map'?' active':''}`} onClick={()=>setViewMode('map')}>
-            <MapPin size={13}/> Map
-          </button>
+          <button className={`cs-view-btn${viewMode==='map'?' active':''}`} onClick={()=>setViewMode('map')}><MapPin size={13}/> Map</button>
+          <button className={`cs-view-btn${viewMode==='table'?' active':''}`} onClick={()=>setViewMode('table')}>📋 Table</button>
+          <button className={`cs-view-btn${viewMode==='grid'?' active':''}`} onClick={()=>setViewMode('grid')}>▦ Cards</button>
         </div>
       </div>
 
@@ -3401,46 +3702,38 @@ function CustChargingStations({ call }) {
       {viewMode === 'map' && (
         <div style={{ marginBottom: 24 }}>
           <CustStationsMap hubs={hubs} userCoords={userCoords} selectedHub={selectedHub}
-            onSelectHub={h => setSelectedHub(s => s?._id === h._id ? null : h)} />
-          {selectedHub && (() => {
-            const sc = STATUS_CFG[selectedHub.status] || STATUS_CFG.OFFLINE;
-            const coords = custGetCoords(selectedHub);
-            const mapsUrl = coords
-              ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
-              : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((selectedHub.address ? selectedHub.address + ', ' : '') + (selectedHub.city || ''))}`;
-            return (
-              <div style={{
-                marginTop: 16, background: '#f9fafb', border: '1px solid #e5e7eb',
-                borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 16,
-                flexWrap: 'wrap', alignItems: 'center',
-              }}>
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: '#1a1f2e' }}>{selectedHub.name}</div>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-                    📍 {selectedHub.city}{selectedHub.address ? ` · ${selectedHub.address}` : ''}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span style={{ background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700 }}>
-                    ● {sc.label}
-                  </span>
-                  <span style={{ fontSize: 13, color: '#374151' }}>⚡ {selectedHub.chargerCount ?? 0} chargers</span>
-                  {selectedHub._dist != null && (
-                    <span style={{ fontSize: 13, color: '#2563eb', fontWeight: 600 }}>
-                      📏 {selectedHub._dist < 1 ? `${(selectedHub._dist * 1000).toFixed(0)} m` : `${selectedHub._dist.toFixed(1)} km`} away
-                    </span>
-                  )}
-                  {selectedHub.code && <span style={{ fontSize: 12, color: '#6b7280' }}>🔖 {selectedHub.code}</span>}
-                  <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-                     style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <MapPin size={13} /> Open Maps
-                  </a>
-                  <button onClick={() => setSelectedHub(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: 16 }}>✕</button>
-                </div>
-              </div>
-            );
-          })()}
+            onSelectHub={h => setSelectedHub(s => h == null ? null : (s?._id === h._id ? null : h))} />
+
         </div>
+      )}
+
+      {/* ── Table View ── */}
+      {viewMode === 'table' && (
+        <Card title="Charging Hubs" badge={`${hubs.length} locations${userCoords ? ' · nearest first' : ''}`}>
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',minWidth:1000}}>
+              <thead><tr>
+                <th style={{textAlign:'left',padding:10}}>Rank</th><th style={{textAlign:'left',padding:10}}>Charging Hub</th>
+                <th style={{textAlign:'left',padding:10}}>City / Area</th><th style={{textAlign:'left',padding:10}}>Distance</th>
+                <th style={{textAlign:'left',padding:10}}>Site Type</th><th style={{textAlign:'left',padding:10}}>Status</th><th style={{textAlign:'left',padding:10}}>Action</th>
+              </tr></thead>
+              <tbody>{hubs.map((hub,i)=>{
+                const sc=STATUS_CFG[hub.status]||STATUS_CFG.OFFLINE;
+                const coords=custGetCoords(hub);
+                const mapsUrl=coords?`https://www.google.com/maps?q=${coords[0]},${coords[1]}`:`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((hub.address||'')+' '+(hub.city||''))}`;
+                return <tr key={hub._id} style={{background:userCoords&&i===0?'#eff6ff':undefined,borderTop:'1px solid #eef0f4'}}>
+                  <td style={{padding:10,fontWeight:700}}>{userCoords?`#${i+1}`:'—'}</td>
+                  <td style={{padding:10}}><strong>{hub.name}</strong><div style={{fontSize:11,color:'#9ca3af'}}>{hub.code||hub.sourceId||''}</div></td>
+                  <td style={{padding:10}}>{hub.city}{hub.area?` · ${hub.area}`:''}<div style={{fontSize:11,color:'#6b7280'}}>{hub.address||''}</div></td>
+                  <td style={{padding:10,fontWeight:700,color:'#2563eb'}}>{hub._dist==null?'—':hub._dist<1?`${(hub._dist*1000).toFixed(0)} m`:`${hub._dist.toFixed(1)} km`}{userCoords&&i===0?' 📍':''}</td>
+                  <td style={{padding:10}}>{hub.siteType||'—'}</td>
+                  <td style={{padding:10}}><span style={{color:sc.color,fontWeight:700}}>● {sc.label}</span></td>
+                  <td style={{padding:10}}><button className="cs-hub-btn-view" onClick={()=>{setSelectedHub(hub);setViewMode('map')}}>View Map</button> <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="cs-hub-btn-maps">Maps</a></td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* ── Grid View ── */}
@@ -3705,6 +3998,39 @@ function AdminExpansion({ call }) {
   </>;
 }
 
+function CustNotifications({ call, setPage }) {
+  const [notes,setNotes]=useState([]), [loading,setLoading]=useState(true);
+  const [feedback,setFeedback]=useState(null), [saving,setSaving]=useState(false);
+  const [form,setForm]=useState({rating:5,comment:''});
+  const [filter,setFilter]=useState('ALL');
+  const [query,setQuery]=useState('');
+  const load=async()=>{setLoading(true);try{const n=await call('/customer/notifications');setNotes(n||[]);}catch(e){}finally{setLoading(false)}};
+  useEffect(()=>{load()},[]);
+  const read=async n=>{if(!n.read)try{await call(`/customer/notifications/${n._id}/read`,{method:'put'});load()}catch(e){}};
+  const submitFeedback=async()=>{if(!feedback)return;setSaving(true);try{await call(`/customer/maintenance-services/${feedback._id}/feedback`,{method:'post',data:form});setFeedback(null);setForm({rating:5,comment:''});await load();}catch(e){alert(e.response?.data?.message||'Could not submit feedback')}finally{setSaving(false)}};
+  const maintenanceTypes=['MAINTENANCE','MAINTENANCE_REGISTERED','MAINTENANCE_ASSIGNED','MAINTENANCE_STARTED','MAINTENANCE_PAUSED','MAINTENANCE_RESUMED','MAINTENANCE_STAFF_COMPLETED','MAINTENANCE_COMPLETED'];
+  const generalNotes=notes.filter(n=>!maintenanceTypes.includes(n.type));
+  const unread=generalNotes.filter(n=>!n.read).length;
+  const categories={ALL:generalNotes.length,UNREAD:unread,READ:generalNotes.length-unread};
+  const visible=generalNotes.filter(n=>{const q=query.trim().toLowerCase(); const qok=!q||[n.title,n.message,n.type].filter(Boolean).join(' ').toLowerCase().includes(q); const fok=filter==='ALL'||(filter==='UNREAD'?!n.read:n.read); return qok&&fok;});
+  return <div className="premium-notification-center">
+    <section className="notification-premium-hero">
+      <div><span className="notification-kicker"><BellRing size={14}/> NOTIFICATION CENTER</span><h1>Everything important, in one calm place.</h1><p>Account alerts, payments and support messages live here. Service progress stays inside its own service card so nothing gets mixed together.</p></div>
+      <div className="notification-hero-metrics"><div><strong>{unread}</strong><span>Unread</span></div><div><strong>{generalNotes.length}</strong><span>Notifications</span></div></div>
+    </section>
+
+    <section className="notification-feed-card">
+      <div className="notification-feed-head"><div><span className="notification-kicker">ACCOUNT ACTIVITY</span><h2>Notifications</h2><p>Important messages only — service lifecycle details remain above.</p></div><button className="btn-ghost" onClick={load}>↻ Refresh</button></div>
+      <div className="notification-toolbar"><div className="notification-search"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search notifications…"/></div><div className="notification-tabs">{[['ALL','All'],['UNREAD','Unread'],['READ','Read']].map(([id,label])=><button key={id} className={filter===id?'active':''} onClick={()=>setFilter(id)}>{label}<b>{categories[id]}</b></button>)}</div></div>
+      {loading?<div className="notification-empty">Loading notifications…</div>:!visible.length?<div className="notification-empty"><div className="empty-art">✓</div><strong>You're all caught up</strong><span>New account notifications will appear here.</span></div>:<div className="premium-notification-list">{visible.map(n=><button className={`premium-notification-row ${n.read?'read':'unread'}`} key={n._id} onClick={()=>read(n)}><div className={`premium-notification-icon ${n.read?'read':'new'}`}>{n.type?.includes('PAY')?<Wallet size={17}/>:n.type?.includes('COMPLAINT')?<LifeBuoy size={17}/>:n.type?.includes('BOOK')?<ClipboardList size={17}/>:<Bell size={17}/>}</div><div className="premium-notification-copy"><div><strong>{n.title}</strong>{!n.read&&<span>NEW</span>}</div><p>{n.message}</p><small>{new Date(n.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div><ChevronRight size={17}/></button>)}</div>}
+    </section>
+
+    <section className="notification-trust"><div><ShieldCheck size={18}/><span><strong>Private & secure</strong>Notifications are tied to your account.</span></div><div><Inbox size={18}/><span><strong>Focused updates</strong>No duplicate service status messages.</span></div><div><Clock3 size={18}/><span><strong>Always available</strong>Review recent activity whenever you need it.</span></div></section>
+
+
+  </div>;
+}
+
 function CustProfile({ call, setPage }) {
   const { data: user, loading, refresh } = useFetch(call, '/customer/profile');
   const [editing, setEditing] = useState(false);
@@ -3818,6 +4144,15 @@ function CustProfile({ call, setPage }) {
           <div className="profile-kyc-card"><div className="profile-kyc-icon violet"><CreditCard size={19}/></div><div><span>PAN card</span><strong>{masked(user?.panNumber || user?.pan, showPan)}</strong></div><button onClick={()=>setShowPan(v=>!v)} aria-label="Show PAN"><>{showPan?<EyeOff size={17}/>:<Eye size={17}/>}</></button></div>
         </div>
         {editing && <div className="profile-kyc-edit-grid"><label className="profile-input-field"><span>Aadhaar number</span><input value={form.aadharNumber} onChange={e=>setField('aadharNumber',e.target.value)} placeholder="12-digit Aadhaar" maxLength={12}/></label><label className="profile-input-field"><span>PAN card</span><input value={form.panNumber} onChange={e=>setField('panNumber',e.target.value.toUpperCase())} placeholder="PAN number" maxLength={10}/></label></div>}
+        <div style={{marginTop:14,paddingTop:14,borderTop:'1px solid #eef2f7'}}>
+          <div style={{fontSize:11,fontWeight:800,color:'#64748b',letterSpacing:'.06em',textTransform:'uppercase',marginBottom:10}}>Uploaded KYC documents</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:10}}>
+            {[['aadhar','Aadhaar'],['pan','PAN card'],['currentBill','Current bill']].map(([key,label])=>{
+              const d=user?.identityDocuments?.[key];
+              return <div key={key} style={{border:'1px solid #e2e8f0',borderRadius:10,padding:10,background:'#f8fafc'}}><div style={{fontSize:12,fontWeight:700}}>{label}</div><div style={{fontSize:10,color:'#94a3b8',marginTop:3}}>{d?.fileName||'Not uploaded'}</div>{d?.url&&<a href={`${API}${d.url}`} target="_blank" rel="noreferrer" style={{display:'inline-block',marginTop:7,fontSize:11,fontWeight:700,color:'#2563eb'}}>View document ↗</a>}</div>;
+            })}
+          </div>
+        </div>
       </section>
 
       <section className="profile-section-card">

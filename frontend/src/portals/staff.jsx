@@ -19,6 +19,9 @@ const API = import.meta.env.VITE_API_URL || '/api';
 const kind = 'staff';
 const ALLOWED_ROLES = ['TECHNICIAN','STAFF','HUB_MANAGER','CENTRAL_ADMIN','SUPER_ADMIN'];
 
+// Holiday overrides are optional. Keep the fallback calendar active when no custom overrides are configured.
+const HOLIDAY_OVERRIDES = {};
+
 // ── Language Context ──
 const LangContext = createContext({ lang: 'en', t: k => k });
 
@@ -421,6 +424,16 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
   const { t } = useTranslation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { data: sidebarNotifications } = useStaffLive(call, '/staff/notifications', 15000);
+  const [badgeSeenAt, setBadgeSeenAt] = useState(0);
+  const unreadSidebar = (sidebarNotifications||[]).filter(n=>!n.read && new Date(n.createdAt||0).getTime() > badgeSeenAt).length;
+  const navigate = (id) => {
+    if (id === 'notifications') {
+      setBadgeSeenAt(Date.now());
+      call('/staff/notifications/read-all',{method:'put'}).catch(()=>{});
+    }
+    setPage(id);
+  };
 
   const NAV_ITEMS = [
     { id: 'dashboard', labelKey: 'dashboard', Icon: LayoutDashboard },
@@ -461,11 +474,13 @@ function Shell({ user, setUser, page, setPage, call, logout }) {
             <button
               key={id}
               className={'sidebar-nav-item' + (page === id ? ' active' : '')}
-              onClick={() => setPage(id)}
+              onClick={() => navigate(id)}
               title={sidebarCollapsed ? t(labelKey) : ''}
             >
               <Icon size={18} />
               {!sidebarCollapsed && <span>{t(labelKey)}</span>}
+              {id==='notifications' && unreadSidebar>0 && <b className="nav-count-badge">{unreadSidebar>99?'99+':unreadSidebar}</b>}
+              
             </button>
           ))}
         </nav>
@@ -544,7 +559,6 @@ function PageHeader({ title, sub, back }) {
     <div className="page-header">
       {back && <button className="mobile-back-btn" onClick={back}><ChevronLeft size={20}/></button>}
       <h1 className="page-title">{title}</h1>
-      {sub && <p className="page-sub">{sub}</p>}
     </div>
   );
 }
@@ -818,29 +832,6 @@ function StaffDashboard({ call, user, setPage }) {
       </div>
     </div>
 
-    {/* Duty Toggle Card */}
-    <div className="duty-toggle-card">
-      <div className="duty-toggle-left">
-        <div className={'duty-status-dot' + (dutyOn ? ' on' : ' off')} />
-        <div>
-          <div className="duty-toggle-label">Duty Status</div>
-          <div className="duty-toggle-sub">
-            {dutyOn
-              ? `On Duty · Started at ${new Date(dutyStartTime).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' })} · ${dutyElapsed() || '0h 0m'} elapsed`
-              : 'Off Duty · Toggle to start your shift'}
-          </div>
-        </div>
-      </div>
-      <button
-        className={'duty-toggle-btn' + (dutyOn ? ' on' : ' off')}
-        onClick={requestDutyToggle}
-        title={dutyOn ? 'Click to end duty' : 'Click to start duty'}
-      >
-        <div className="duty-toggle-knob" />
-        <span className="duty-toggle-text">{dutyOn ? 'ON' : 'OFF'}</span>
-      </button>
-    </div>
-
     <div className="staff-mobile-launcher">
       {[
         ['dashboard','Dashboard',LayoutDashboard,'blue'],['my-works','My Works',Briefcase,'indigo',pendingWorks],['holidays','Holidays',Calendar,'green'],
@@ -975,7 +966,7 @@ function StaffDashboard({ call, user, setPage }) {
 // ══════════════════════════════════════════════════════════════════
 // MY WORKS — PENDING + COMPLETED + COMPLAINT JOB CARDS
 // ══════════════════════════════════════════════════════════════════
-function MyWorks({ user, call }) {
+function MyWorks({ user, call, setPage }) {
   const { t } = useTranslation();
   const [works, setWorks] = useState(() => store.get('ev_staff_works') || []);
   const [tab, setTab] = useState('jobcards'); // 'jobcards' | 'all' | 'all-tasks' | 'pending-tasks' | 'completed-tasks'
@@ -988,10 +979,21 @@ function MyWorks({ user, call }) {
   const [tick, setTick] = useState(0);
   const [pauseModal, setPauseModal] = useState(null);   // jobCard being paused
   const [pauseReasonText, setPauseReasonText] = useState('');
+  const [pauseReasonSelected, setPauseReasonSelected] = useState('');
+  const [pauseCustomInput, setPauseCustomInput] = useState('');
+  const [pauseDetails, setPauseDetails] = useState({category:'',details:'',expectedResumeAt:'',workCompletedBeforePause:'',partsRequired:''});
+  const [customPauseReasons, setCustomPauseReasons] = useState(
+    () => { try { return JSON.parse(localStorage.getItem('ev_custom_pause_reasons') || '[]'); } catch { return []; } }
+  );
+  // Completion Proof Modal
   const [proofModal, setProofModal] = useState(null);
-  const [proofTimeline, setProofTimeline] = useState([]);
-  const [proofForm, setProofForm] = useState({notes:'',issue:'',completionSummary:'',photos:[],signatureData:''});
-  const [proofRequired, setProofRequired] = useState(false);
+  const [proofForm, setProofForm] = useState({ remarks:'', odometerReading:'', batteryPercent:'', diagnosis:'', rootCause:'', workPerformed:'', solution:'', partsReplaced:'', testResult:'', finalCondition:'', recommendations:'', nextServiceAt:'', labourHours:'', completionNotes:'' });
+  const [historyModal, setHistoryModal] = useState(null);
+  const [ownJobOpen, setOwnJobOpen] = useState(false);
+  const [ownCreateBusy, setOwnCreateBusy] = useState(false);
+  const [ownHistoryLoading, setOwnHistoryLoading] = useState(false);
+  const [ownVehicleHistory, setOwnVehicleHistory] = useState(null);
+  const [ownJobForm, setOwnJobForm] = useState({customer:{name:'',phone:'',email:''},bike:{bikeId:'',registrationNo:'',chassisNo:'',motorNo:'',make:'',model:'',odometerKm:'',batterySoc:''},problem:'',priority:'NORMAL',serviceType:'STAFF_CREATED_SERVICE',notes:''});
 
   // Live tick for elapsed timer
   useEffect(() => {
@@ -1034,6 +1036,17 @@ function MyWorks({ user, call }) {
     const s = seconds % 60;
     return `${h > 0 ? h+'h ' : ''}${m}m ${s}s`;
   };
+  const checkOwnVehicleHistory = async (valueOverride) => {
+    const b={...ownJobForm.bike,...(valueOverride||{})}; const params=new URLSearchParams();
+    if(b.bikeId)params.set('bikeId',b.bikeId); if(b.registrationNo)params.set('registrationNo',b.registrationNo); if(b.chassisNo)params.set('chassisNo',b.chassisNo); if(b.motorNo)params.set('motorNo',b.motorNo);
+    if(!params.toString()){setOwnVehicleHistory(null);return;}
+    try{setOwnHistoryLoading(true);const data=await call(`/staff/vehicle-history?${params.toString()}`);setOwnVehicleHistory(data||null);if(data?.vehicle){setOwnJobForm(f=>({...f,bike:{...f.bike,make:f.bike.make||data.vehicle.make||'',model:f.bike.model||data.vehicle.model||'',registrationNo:f.bike.registrationNo||data.vehicle.registrationNo||'',chassisNo:f.bike.chassisNo||data.vehicle.chassisNo||'',motorNo:f.bike.motorNo||data.vehicle.motorNo||'',bikeId:f.bike.bikeId||data.vehicle.bikeId||'',odometerKm:f.bike.odometerKm||data.vehicle.odometerKm||'',batterySoc:f.bike.batterySoc||data.vehicle.batterySoc||''}}));}}catch(e){setOwnVehicleHistory(null)}finally{setOwnHistoryLoading(false)}
+  };
+  const createOwnJobCard = async () => {
+    const f=ownJobForm;if(!f.customer.name.trim()||!f.customer.phone.trim()||!f.bike.bikeId.trim()||!f.problem.trim())return alert('Customer name, phone, Bike ID and problem are required.');
+    setOwnCreateBusy(true);try{const res=await call('/staff/own-job-cards',{method:'post',data:f});setJobCards(prev=>[res.job,...prev]);setOwnJobOpen(false);setOwnVehicleHistory(null);setOwnJobForm({customer:{name:'',phone:'',email:''},bike:{bikeId:'',registrationNo:'',chassisNo:'',motorNo:'',make:'',model:'',odometerKm:'',batterySoc:''},problem:'',priority:'NORMAL',serviceType:'STAFF_CREATED_SERVICE',notes:''});setJcTab('pending');setTab('jobcards');alert('Job card created and work started.')}catch(e){alert(e.response?.data?.message||e.message||'Could not create job card')}finally{setOwnCreateBusy(false)}
+  };
+
   const getLiveElapsed = (jc) => {
     if (jc.status === 'IN_PROGRESS' && jc.startedAt && !jc.pausedAt) {
       const base = jc.elapsedSeconds || 0;
@@ -1041,6 +1054,13 @@ function MyWorks({ user, call }) {
       return base + elapsed;
     }
     return jc.elapsedSeconds || 0;
+  };
+
+  const openHistory = async (jc) => {
+    try {
+      const data = await call(`/staff/jobs/${jc._id || jc.id}/history`);
+      setHistoryModal(data || {previousJobs:[]});
+    } catch(e) { alert(e.response?.data?.message || e.message || 'Could not load vehicle history'); }
   };
 
   const updateJobCard = async (id, updates) => {
@@ -1056,73 +1076,170 @@ function MyWorks({ user, call }) {
     }
   };
 
-  const startWork = (jc) => {
+  const startWork = async (jc) => {
     const id = jc._id || jc.id;
     const resuming = jc.status === 'PAUSED';
-    updateJobCard(id, {
-      status: 'IN_PROGRESS',
-      // On first start use now; on resume keep original startedAt but reset it
-      // to now so getLiveElapsed accumulates correctly from saved elapsedSeconds
-      startedAt: new Date().toISOString(),
-      elapsedSeconds: jc.elapsedSeconds || 0,
-      pausedAt: null,
-      pauseReason: resuming ? (jc.pauseReason || null) : null,
-    });
+    const startedAt = new Date().toISOString();
+    const optimistic = { status:'IN_PROGRESS', startedAt, elapsedSeconds:jc.elapsedSeconds||0, pausedAt:null, pauseReason:resuming?(jc.pauseReason||null):null };
+    setJobCards(prev => prev.map(x => (x._id || x.id) === id ? { ...x, ...optimistic } : x));
+    try {
+      await call(`/staff/jobs/${id}/start`, { method:'post', data:{ startedAt } });
+      await fetchMyJobCards();
+    } catch(e) {
+      console.error('Failed to start job:',e);
+      await fetchMyJobCards();
+    }
   };
 
   // Pause step 1: open reason modal
   const openPauseModal = (jc) => {
     setPauseModal(jc);
     setPauseReasonText('');
+    setPauseReasonSelected('');
+    setPauseCustomInput('');
+    setPauseDetails({category:'',details:'',expectedResumeAt:'',workCompletedBeforePause:'',partsRequired:''});
   };
 
   // Pause step 2: confirm with reason → save & notify franchisee + customer
-  const confirmPause = () => {
+  const confirmPause = async () => {
     if (!pauseModal) return;
     const id = pauseModal._id || pauseModal.id;
     const elapsed = getLiveElapsed(pauseModal);
-    const reason = pauseReasonText.trim() || 'No reason provided';
-    updateJobCard(id, {
-      status: 'PAUSED',
-      pausedAt: new Date().toISOString(),
-      elapsedSeconds: elapsed,
-      pauseReason: reason,
-    });
-    // Notify franchisee via localStorage (franchisee portal reads ev_franchise_job_cards)
+    // Determine final reason from selected preset or custom input
+    let reason = '';
+    if (pauseReasonSelected === '__other__') {
+      reason = pauseCustomInput.trim();
+      // Save new custom reason for future use
+      if (reason && !customPauseReasons.includes(reason)) {
+        const updated = [...customPauseReasons, reason];
+        setCustomPauseReasons(updated);
+        try { localStorage.setItem('ev_custom_pause_reasons', JSON.stringify(updated)); } catch(_) {}
+      }
+    } else {
+      reason = pauseReasonSelected;
+    }
+    if (!reason) { alert('Please select or enter a pause reason.'); return; }
+    reason = reason || 'No reason provided';
+    const pausedAt = new Date().toISOString();
     try {
-      const stored = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
-      const updated = stored.map(j =>
-        (j.id === id || j.jobId === id)
-          ? { ...j, status: 'PAUSED', pauseReason: reason, pausedAt: new Date().toISOString(), elapsedSeconds: elapsed }
-          : j
-      );
-      localStorage.setItem('ev_franchise_job_cards', JSON.stringify(updated));
-    } catch (_) {}
-    // Notify customer via localStorage (customer portal reads ev_customer_job_updates)
-    try {
-      const custUpdates = JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]');
-      custUpdates.push({
-        jobId: id,
-        event: 'PAUSED',
-        reason,
-        timestamp: new Date().toISOString(),
-        vehicleMake: pauseModal.vehicleMake || pauseModal.vehicleId?.make || '',
-        vehicleReg: pauseModal.vehicleReg || pauseModal.vehicleId?.registrationNo || '—',
-        customerName: pauseModal.customerName || '',
+      await call(`/staff/jobs/${id}/pause`, {
+        method:'post',
+        data:{ pausedAt, elapsedSeconds: elapsed, pauseReason: reason, pauseCategory:pauseDetails.category, pauseDetails:pauseDetails.details, expectedResumeAt:pauseDetails.expectedResumeAt || undefined, workCompletedBeforePause:pauseDetails.workCompletedBeforePause, partsRequired:pauseDetails.partsRequired }
       });
-      localStorage.setItem('ev_customer_job_updates', JSON.stringify(custUpdates));
-    } catch (_) {}
+      setJobCards(prev => prev.map(x => (x._id || x.id) === id
+        ? { ...x, status:'PAUSED', pausedAt, elapsedSeconds:elapsed, pauseReason:reason }
+        : x
+      ));
+      try {
+        const stored = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+        localStorage.setItem('ev_franchise_job_cards', JSON.stringify(stored.map(j =>
+          (j.id === id || j.jobId === id)
+            ? { ...j, status:'PAUSED', pauseReason:reason, pausedAt, elapsedSeconds:elapsed }
+            : j
+        )));
+      } catch (_) {}
+      try {
+        const custUpdates = JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]');
+        custUpdates.push({
+          jobId:id, event:'PAUSED', reason, timestamp:pausedAt,
+          vehicleMake:pauseModal.vehicleMake || pauseModal.vehicleId?.make || '',
+          vehicleReg:pauseModal.vehicleReg || pauseModal.vehicleId?.registrationNo || '—',
+          customerName:pauseModal.customerName || '',
+        });
+        localStorage.setItem('ev_customer_job_updates', JSON.stringify(custUpdates));
+      } catch (_) {}
+    } catch (e) {
+      alert(e.response?.data?.message || e.message || 'Could not pause this job');
+      await fetchMyJobCards();
+    }
     setPauseModal(null);
     setPauseReasonText('');
+    setPauseReasonSelected('');
+    setPauseCustomInput('');
+    setPauseDetails({category:'',details:'',expectedResumeAt:'',workCompletedBeforePause:'',partsRequired:''});
   };
 
+  // Open proof modal instead of completing immediately
   const markComplete = (jc) => {
+    setProofModal(jc);
+    setProofForm({ remarks:'', odometerReading:'', batteryPercent:'', diagnosis:'', rootCause:'', workPerformed:'', solution:'', partsReplaced:'', testResult:'', finalCondition:'', recommendations:'', nextServiceAt:'', labourHours:'', completionNotes:'' });
+  };
+
+  // Actually submit proof + complete the job
+  const submitProofAndComplete = async () => {
+    if (!proofModal) return;
+    const jc = proofModal;
+    const id = jc._id || jc.id;
     const elapsed = getLiveElapsed(jc);
-    // Completion uses the proof/report flow so evidence is captured before closing the job.
-    setProofRequired(true);
-    setProofModal({ ...jc, elapsedSeconds: elapsed });
-    setProofForm({notes:jc.remarks||'',issue:'',completionSummary:jc.remarks||'',photos:[],signatureData:''});
-    setProofTimeline([]);
+    const completedAt = new Date().toISOString();
+    const { remarks, odometerReading, batteryPercent } = proofForm;
+
+    if (!remarks.trim()) { alert('Please enter work remarks before completing.'); return; }
+    if (!odometerReading.trim()) { alert('Please enter the current odometer reading.'); return; }
+    if (!batteryPercent.trim()) { alert('Please enter the current battery percentage.'); return; }
+
+    try {
+      // 1. Complete the job
+      await call(`/staff/jobs/${id}/complete`, {
+        method:'post',
+        data:{
+          completedAt,
+          elapsedSeconds: elapsed,
+          remarks,
+          odometerReading: Number(odometerReading),
+          batteryPercent: Number(batteryPercent),
+          diagnosis: proofForm.diagnosis, rootCause: proofForm.rootCause, workPerformed: proofForm.workPerformed || remarks,
+          solution: proofForm.solution, partsReplaced: proofForm.partsReplaced, testResult: proofForm.testResult,
+          finalCondition: proofForm.finalCondition, recommendations: proofForm.recommendations, nextServiceAt: proofForm.nextServiceAt,
+          labourHours: proofForm.labourHours, completionNotes: proofForm.completionNotes || remarks,
+        }
+      });
+
+      // 2. Proof is created by the same completion transaction on the backend.
+      const bikeId = jc.bikeId || jc.commandVehicleId?.bikeId || jc.vehicleSnapshot?.bikeId || '';
+
+      // 3. Persist bikeId-specific readings locally
+      if (bikeId) {
+        try {
+          const bikeData = JSON.parse(localStorage.getItem('ev_bike_readings') || '{}');
+          bikeData[bikeId] = { odometerReading: Number(odometerReading), batteryPercent: Number(batteryPercent), updatedAt: completedAt };
+          localStorage.setItem('ev_bike_readings', JSON.stringify(bikeData));
+        } catch (_) {}
+      }
+
+      setJobCards(prev => prev.map(x => (x._id || x.id) === id
+        ? { ...x, status:'COMPLETED', completedAt, elapsedSeconds:elapsed, remarks }
+        : x
+      ));
+      try {
+        const stored = JSON.parse(localStorage.getItem('ev_franchise_job_cards') || '[]');
+        localStorage.setItem('ev_franchise_job_cards', JSON.stringify(stored.map(j =>
+          (j.id === id || j.jobId === id)
+            ? { ...j, status:'COMPLETED', completedAt, elapsedSeconds:elapsed, remarks }
+            : j
+        )));
+      } catch (_) {}
+      try {
+        const cust = JSON.parse(localStorage.getItem('ev_customer_job_updates') || '[]');
+        cust.push({
+          jobId:id, event:'COMPLETED', remarks, timestamp:completedAt,
+          vehicleMake:jc.vehicleMake || jc.vehicleId?.make || '',
+          vehicleReg:jc.vehicleReg || jc.vehicleId?.registrationNo || '—',
+          customerName:jc.customerName || '',
+          odometerReading: Number(odometerReading),
+          batteryPercent: Number(batteryPercent),
+        });
+        localStorage.setItem('ev_customer_job_updates', JSON.stringify(cust));
+      } catch (_) {}
+
+      setProofModal(null);
+      setProofForm({ remarks:'', odometerReading:'', batteryPercent:'', diagnosis:'', rootCause:'', workPerformed:'', solution:'', partsReplaced:'', testResult:'', finalCondition:'', recommendations:'', nextServiceAt:'', labourHours:'', completionNotes:'' });
+      setJcTab('completed');
+      await fetchMyJobCards();
+    } catch (e) {
+      alert(e.response?.data?.message || e.message || 'Could not complete this job');
+      await fetchMyJobCards();
+    }
   };
 
   const submitRemarks = () => {
@@ -1165,30 +1282,6 @@ function MyWorks({ user, call }) {
     setJcTab('completed');
   };
 
-  const openProof = async (jc) => {
-    try { const proof=await call(`/staff/jobs/${jc._id||jc.id}/timeline`); setProofTimeline(proof?.timeline||[]); setProofRequired(false); setProofModal(jc); setProofForm({notes:proof?.proof?.report?.notes||'',issue:proof?.proof?.report?.issue||'',completionSummary:proof?.proof?.report?.completionSummary||'',photos:proof?.proof?.photos||[],signatureData:proof?.proof?.signatureData||''}); } catch (_) { setProofTimeline([]); setProofRequired(false); setProofModal(jc); }
-  };
-  const addProofFiles = files => Array.from(files||[]).slice(0,5).forEach(file=>{
-    if(file.size>1500000){alert(`${file.name} is larger than 1.5 MB`);return;}
-    const r=new FileReader();r.onload=e=>setProofForm(f=>({...f,photos:[...f.photos,{name:file.name,url:e.target.result}].slice(0,5)}));r.readAsDataURL(file)
-  });
-  const submitProof = async () => {
-    if(!proofModal)return;
-    if(proofRequired && !proofForm.completionSummary.trim()) return alert('Add a completion summary before completing this job.');
-    if(proofRequired && !proofForm.photos.length && !proofForm.signatureData) return alert('Add at least one job photo or customer signature before completing this job.');
-    try {
-      const id=proofModal._id||proofModal.id;
-      await call(`/staff/jobs/${id}/proof`,{method:'post',data:{photos:proofForm.photos,signatureData:proofForm.signatureData,report:{notes:proofForm.notes,issue:proofForm.issue,completionSummary:proofForm.completionSummary}}});
-      if(proofRequired){
-        const elapsed=proofModal.elapsedSeconds||0, completedAt=new Date().toISOString();
-        await updateJobCard(id,{status:'COMPLETED',completedAt,elapsedSeconds:elapsed,remarks:proofForm.completionSummary});
-        try { const stored=JSON.parse(localStorage.getItem('ev_franchise_job_cards')||'[]'); localStorage.setItem('ev_franchise_job_cards',JSON.stringify(stored.map(j=>(j.id===id||j.jobId===id)?{...j,status:'COMPLETED',completedAt,elapsedSeconds:elapsed,remarks:proofForm.completionSummary}:j))); } catch(_) {}
-        try { const cust=JSON.parse(localStorage.getItem('ev_customer_job_updates')||'[]'); cust.push({jobId:id,event:'COMPLETED',remarks:proofForm.completionSummary,timestamp:completedAt,vehicleMake:proofModal.vehicleMake||proofModal.vehicleId?.make||'',vehicleReg:proofModal.vehicleReg||proofModal.vehicleId?.registrationNo||'—',customerName:proofModal.customerName||''}); localStorage.setItem('ev_customer_job_updates',JSON.stringify(cust)); } catch(_) {}
-        setJcTab('completed');
-      }
-      setProofRequired(false); setProofModal(null); alert(proofRequired?'Job completed with proof':'Job proof saved');
-    } catch(e){alert(e.response?.data?.message||e.message)}
-  };
 
   // ── General Works ──
   const save = () => {
@@ -1227,6 +1320,7 @@ function MyWorks({ user, call }) {
   return <>
     <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8, marginBottom:4}}>
       <PageHeader title="My Works" sub="Complaint job cards assigned to you and your personal task list." back={() => setPage && setPage('dashboard')} />
+      <button onClick={()=>setOwnJobOpen(true)} style={{display:'flex',alignItems:'center',gap:7,padding:'9px 15px',border:0,borderRadius:10,background:'linear-gradient(135deg,#2563eb,#4f46e5)',color:'#fff',fontWeight:800,fontSize:12,cursor:'pointer',boxShadow:'0 8px 20px rgba(37,99,235,.18)'}}>＋ Create Job Card</button>
       <button onClick={fetchMyJobCards} disabled={jcLoading} style={{
         display:'flex', alignItems:'center', gap:6, padding:'8px 16px', borderRadius:8,
         background:'#f8fafc', border:'1.5px solid #e2e8f0', cursor:'pointer', fontWeight:600, fontSize:13,
@@ -1289,8 +1383,8 @@ function MyWorks({ user, call }) {
                 <div style={{padding:'14px 16px', borderBottom:'1px solid #f1f5f9'}}>
                   <div style={{display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:8, marginBottom:8}}>
                     <div style={{flex:1}}>
-                      <div style={{fontWeight:800, fontSize:15}}>🚗 {jc.vehicleMake || jc.vehicleId?.make || ''} {jc.vehicleModel || jc.vehicleId?.model || ''}</div>
-                      <div style={{fontSize:12, color:'#64748b', marginTop:2}}>Reg: {jc.vehicleReg || jc.vehicleId?.registrationNo || '—'} · Customer: {jc.customerName || jc.customerId?.name || 'Customer'} · {jc.customerPhone || jc.customerId?.phone || '—'}</div>
+                      <div style={{fontWeight:800, fontSize:15}}>🚗 {jc.bikeId || jc.commandVehicleId?.bikeId || 'Bike'} · {jc.vehicleMake || jc.commandVehicleId?.make || jc.vehicleId?.make || ''} {jc.vehicleModel || jc.commandVehicleId?.model || jc.vehicleId?.model || ''}</div>
+                      <div style={{fontSize:12, color:'#64748b', marginTop:2}}>Reg: {jc.vehicleReg || jc.commandVehicleId?.registrationNo || jc.vehicleId?.registrationNo || '—'} · Customer: {jc.customerName || jc.customerId?.name || 'Customer'} · {jc.customerPhone || jc.customerId?.phone || '—'}{jc.rentalId ? ` · ${jc.rentalId.rentalPlan==='SALE'?'Purchase':jc.rentalId.rentalPlan+' rental'} · Due ${jc.rentalId.dueDate ? new Date(jc.rentalId.dueDate).toLocaleDateString('en-IN') : '—'}` : ''}</div>
                     </div>
                     <div style={{display:'flex', flexDirection:'column', alignItems:'flex-end', gap:4}}>
                       <span style={{fontSize:11, fontWeight:700, padding:'3px 10px', borderRadius:99,
@@ -1354,14 +1448,12 @@ function MyWorks({ user, call }) {
                           padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
                         }}>⏸ Pause</button>
                       )}
-                      <button onClick={() => openProof(jc)} style={{
-                        background:'#eef2ff', color:'#4338ca', border:'1px solid #c7d2fe', borderRadius:8,
-                        padding:'7px 12px', cursor:'pointer', fontWeight:700, fontSize:12,
-                      }}>📸 Proof</button>
+                      
                       <button onClick={() => markComplete(jc)} style={{
                         background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
                         padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12,
                       }}>✅ Mark Complete</button>
+                      <button onClick={() => openHistory(jc)} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:8,padding:'7px 13px',cursor:'pointer',fontWeight:700,fontSize:12}}>📚 Previous Work</button>
                     </div>
                   )}
                 </div>
@@ -1468,42 +1560,105 @@ function MyWorks({ user, call }) {
       </>
     )}
 
-    {/* ── Pause Reason Modal ── */}
-    {pauseModal && (
-      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-        <div style={{background:'#fff',borderRadius:16,padding:24,width:'min(460px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-          <div style={{fontWeight:800,fontSize:17,marginBottom:4,color:'#92400e'}}>⏸ Pause Work</div>
-          <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>
-            🚗 {pauseModal.vehicleMake||''} {pauseModal.vehicleModel||''} · {pauseModal.vehicleReg||'—'}
-          </div>
-          <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:10,padding:'10px 12px',marginBottom:14,fontSize:12,color:'#78350f'}}>
-            ⚠️ Your pause reason will be sent to the franchisee and the customer.
-          </div>
-          <div style={{marginBottom:14}}>
-            <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:6}}>Why are you pausing? *</label>
-            <textarea
-              rows={3}
-              value={pauseReasonText}
-              onChange={e => setPauseReasonText(e.target.value)}
-              placeholder="e.g. Waiting for spare part, taking a break, customer approval needed…"
-              style={{width:'100%',padding:'10px 12px',border:'1.5px solid #fde68a',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
-              autoFocus
-            />
-          </div>
-          <div style={{display:'flex',gap:10}}>
-            <button
-              onClick={confirmPause}
-              disabled={!pauseReasonText.trim()}
-              style={{flex:1,background:'#d97706',color:'#fff',border:'none',borderRadius:8,padding:'11px',cursor:'pointer',fontWeight:700,fontSize:14,opacity:pauseReasonText.trim()?1:0.5}}
-            >⏸ Confirm Pause</button>
-            <button
-              onClick={() => { setPauseModal(null); setPauseReasonText(''); }}
-              style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'11px 18px',cursor:'pointer',fontWeight:600,fontSize:13}}
-            >Cancel</button>
+    {/* ── Previous vehicle work history ── */}
+    {ownJobOpen && <div className="feature-modal-backdrop" onClick={()=>!ownCreateBusy&&setOwnJobOpen(false)}><div className="feature-modal-panel" onClick={e=>e.stopPropagation()} style={{maxWidth:760,width:'96%',maxHeight:'90vh',overflow:'auto'}}>
+      <div className="feature-card-head"><div><b style={{fontSize:18}}>Create Job Card</b><small style={{display:'block',color:'#64748b',marginTop:3}}>Create a staff-owned service job, review previous bike work, then start work immediately.</small></div><button className="icon-btn" onClick={()=>!ownCreateBusy&&setOwnJobOpen(false)}>✕</button></div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,padding:'16px'}}>
+        <div style={{gridColumn:'1/-1',fontSize:11,fontWeight:800,letterSpacing:'.08em',color:'#64748b'}}>CUSTOMER DETAILS</div>
+        {['name','phone','email'].map(k=><label key={k} className="form-field"><span>{k==='name'?'Customer name':k==='phone'?'Phone':'Email'}</span><input value={ownJobForm.customer[k]} onChange={e=>setOwnJobForm(f=>({...f,customer:{...f.customer,[k]:e.target.value}}))} placeholder={k==='phone'?'10-digit number':''}/></label>)}
+        <div style={{gridColumn:'1/-1',fontSize:11,fontWeight:800,letterSpacing:'.08em',color:'#64748b',marginTop:4}}>BIKE DETAILS</div>
+        {['bikeId','registrationNo','chassisNo','motorNo','make','model','odometerKm','batterySoc'].map(k=><label key={k} className="form-field"><span>{k==='bikeId'?'Bike ID':k==='registrationNo'?'Registration No':k==='chassisNo'?'Chassis No':k==='motorNo'?'Motor No':k==='odometerKm'?'Odometer km':k==='batterySoc'?'Battery SOC %':k.charAt(0).toUpperCase()+k.slice(1)}</span><input type={['odometerKm','batterySoc'].includes(k)?'number':'text'} value={ownJobForm.bike[k]} onChange={e=>setOwnJobForm(f=>({...f,bike:{...f.bike,[k]:e.target.value}}))} onBlur={()=>['bikeId','registrationNo','chassisNo','motorNo'].includes(k)&&checkOwnVehicleHistory()}/></label>)}
+        <div style={{gridColumn:'1/-1',display:'flex',justifyContent:'flex-end'}}><button className="btn-ghost" onClick={()=>checkOwnVehicleHistory()} disabled={ownHistoryLoading}>{ownHistoryLoading?'Checking previous work…':'↻ Check previous bike work'}</button></div>
+      </div>
+      {ownVehicleHistory?.vehicle && <div style={{margin:'0 16px 14px',padding:14,borderRadius:14,background:'#f8fafc',border:'1px solid #e2e8f0'}}><div style={{fontSize:11,fontWeight:800,color:'#475569',letterSpacing:'.08em'}}>MATCHED VEHICLE</div><div style={{fontWeight:800,marginTop:4}}>{ownVehicleHistory.vehicle.bikeId||'Bike'} · {ownVehicleHistory.vehicle.make} {ownVehicleHistory.vehicle.model}</div><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Reg {ownVehicleHistory.vehicle.registrationNo||'—'} · Odometer {ownVehicleHistory.vehicle.odometerKm??'—'} km · SOC {ownVehicleHistory.vehicle.batterySoc??'—'}%</div></div>}
+      <div style={{margin:'0 16px 16px',padding:14,borderRadius:16,border:'1px solid #fde68a',background:'#fffbeb'}}><div style={{fontWeight:800,color:'#92400e',marginBottom:8}}>Previous work & problems</div>{ownHistoryLoading?<div style={{fontSize:12,color:'#92400e'}}>Loading history…</div>:ownVehicleHistory?.history?.length?<div style={{display:'grid',gap:8,maxHeight:180,overflow:'auto'}}>{ownVehicleHistory.history.slice(0,8).map((h,i)=><div key={h._id||i} style={{background:'#fff',border:'1px solid #fef3c7',borderRadius:10,padding:'9px 10px',fontSize:12}}><b>{h.problem||'Service record'}</b><div style={{color:'#64748b',marginTop:3}}>{h.workPerformed||h.solution||h.diagnosis||h.rootCause||h.remarks||'No work summary recorded'} · {h.status||'—'}</div></div>)}</div>:<div style={{fontSize:12,color:'#92400e'}}>No previous job-card work found for this bike.</div>}</div>
+      <div style={{padding:'0 16px 16px',display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}><label className="form-field"><span>Priority</span><select value={ownJobForm.priority} onChange={e=>setOwnJobForm(f=>({...f,priority:e.target.value}))}><option>NORMAL</option><option>LOW</option><option>HIGH</option><option>URGENT</option></select></label><label className="form-field"><span>Service type</span><select value={ownJobForm.serviceType} onChange={e=>setOwnJobForm(f=>({...f,serviceType:e.target.value}))}><option>STAFF_CREATED_SERVICE</option><option>REPAIR</option><option>GENERAL_SERVICE</option><option>INSPECTION</option></select></label><label className="form-field" style={{gridColumn:'1/-1'}}><span>Problem / work requested</span><textarea rows="3" value={ownJobForm.problem} onChange={e=>setOwnJobForm(f=>({...f,problem:e.target.value}))} placeholder="Describe the customer problem or requested work…"/></label><label className="form-field" style={{gridColumn:'1/-1'}}><span>Staff notes</span><textarea rows="2" value={ownJobForm.notes} onChange={e=>setOwnJobForm(f=>({...f,notes:e.target.value}))}/></label></div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,padding:'0 16px 16px'}}><button className="btn-ghost" onClick={()=>setOwnJobOpen(false)} disabled={ownCreateBusy}>Cancel</button><button className="btn-primary" onClick={createOwnJobCard} disabled={ownCreateBusy}>{ownCreateBusy?'Creating & starting…':'✓ Create & Start Work'}</button></div>
+    </div></div>}
+
+    {historyModal && (
+      <div style={{position:'fixed',inset:0,background:'rgba(15,23,42,.62)',zIndex:1100,display:'flex',alignItems:'center',justifyContent:'center',padding:16,overflowY:'auto'}}>
+        <div style={{background:'#fff',borderRadius:18,width:'min(820px,100%)',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 25px 80px rgba(0,0,0,.35)'}}>
+          <div style={{padding:'18px 20px',borderBottom:'1px solid #e2e8f0',display:'flex',justifyContent:'space-between',alignItems:'center'}}><div><div style={{fontSize:11,fontWeight:800,color:'#64748b',letterSpacing:'.08em'}}>VEHICLE SERVICE HISTORY</div><h3 style={{margin:'3px 0 0'}}>📚 {historyModal.bikeId || 'Bike'} — Previous Work</h3></div><button onClick={()=>setHistoryModal(null)} style={{border:0,background:'#f1f5f9',borderRadius:9,padding:'8px 12px',cursor:'pointer'}}>✕</button></div>
+          <div style={{padding:20}}>
+            {!historyModal.previousJobs?.length ? <div style={{padding:28,textAlign:'center',color:'#64748b'}}>No previous repair/service history was found for this bike.</div> : historyModal.previousJobs.map((j,i)=>{const r=j.proof?.report||{},m=j.maintenance||{};return <div key={j._id} style={{border:'1px solid #e2e8f0',borderRadius:14,padding:15,marginBottom:12,background:i===0?'#f8fafc':'#fff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10,flexWrap:'wrap'}}><div><b>{j.serviceType||m.type||'SERVICE'}</b><div style={{fontSize:11,color:'#64748b',marginTop:3}}>{j.completedAt?new Date(j.completedAt).toLocaleString('en-IN'):'Completed date —'} · Staff: {j.technicianId?.name||m.staffCompletedByName||'—'}</div></div><span style={{fontSize:11,fontWeight:800,color:'#166534',background:'#dcfce7',padding:'4px 9px',borderRadius:99}}>{j.status}</span></div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginTop:12,fontSize:12}}><div><b>Problem</b><br/>{j.problem||r.issue||'—'}</div><div><b>Diagnosis</b><br/>{j.diagnosis||r.diagnosis||'—'}</div><div><b>Work performed</b><br/>{j.workPerformed||r.workPerformed||r.completionSummary||'—'}</div><div><b>Solution</b><br/>{j.solution||r.solution||m.staffCompletionSummary||'—'}</div><div><b>Parts</b><br/>{(j.partsReplaced||r.partsReplaced||[]).join?.(', ')||'—'}</div><div><b>Test result</b><br/>{j.testResult||r.testResult||'—'}</div><div><b>Final condition</b><br/>{j.finalCondition||r.finalCondition||'—'}</div><div><b>Recommendations</b><br/>{j.recommendations||r.recommendations||'—'}</div></div>{j.pauseHistory?.length>0&&<div style={{marginTop:10,padding:10,background:'#fffbeb',borderRadius:9,fontSize:11}}><b>Pause history:</b> {j.pauseHistory.map((p,k)=><span key={k}> {p.reason} ({p.durationSeconds||0}s){k<j.pauseHistory.length-1?',':''}</span>)}</div>}</div>})}
           </div>
         </div>
       </div>
     )}
+
+    {/* ── Pause Reason Modal ── */}
+    {pauseModal && (() => {
+      const DEFAULT_PAUSE_REASONS = [
+        'Waiting for spare part',
+        'Taking a break',
+        'Customer approval needed',
+        'Tool/equipment unavailable',
+        'Waiting for colleague',
+        'Power/electricity issue',
+        'Weather conditions',
+      ];
+      const allReasons = [...DEFAULT_PAUSE_REASONS, ...customPauseReasons];
+      const isOther = pauseReasonSelected === '__other__';
+      const canConfirm = isOther ? pauseCustomInput.trim().length > 0 : pauseReasonSelected.length > 0;
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'#fff',borderRadius:16,padding:24,width:'min(460px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
+            <div style={{fontWeight:800,fontSize:17,marginBottom:4,color:'#92400e'}}>⏸ Pause Work</div>
+            <div style={{fontSize:13,color:'#64748b',marginBottom:16}}>
+              🚗 {pauseModal.bikeId||pauseModal.commandVehicleId?.bikeId||'Bike'} · {pauseModal.vehicleMake||pauseModal.commandVehicleId?.make||''} {pauseModal.vehicleModel||pauseModal.commandVehicleId?.model||''} · {pauseModal.vehicleReg||pauseModal.commandVehicleId?.registrationNo||'—'}
+            </div>
+            <div style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:10,padding:'10px 12px',marginBottom:14,fontSize:12,color:'#78350f'}}>
+              ⚠️ Your pause reason will be sent to the franchisee and the customer.
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:14}}>
+              <label style={{fontSize:12,fontWeight:700}}>Pause category<select value={pauseDetails.category} onChange={e=>setPauseDetails(x=>({...x,category:e.target.value}))} style={{display:'block',width:'100%',marginTop:5,padding:'9px',border:'1px solid #fde68a',borderRadius:8}}><option value="">Select category</option><option>Parts</option><option>Approval</option><option>Equipment</option><option>Customer</option><option>Safety</option><option>Other</option></select></label>
+              <label style={{fontSize:12,fontWeight:700}}>Expected resume<input type="datetime-local" value={pauseDetails.expectedResumeAt} onChange={e=>setPauseDetails(x=>({...x,expectedResumeAt:e.target.value}))} style={{display:'block',width:'100%',marginTop:5,padding:'8px',border:'1px solid #fde68a',borderRadius:8}}/></label>
+            </div>
+            <label style={{display:'block',fontSize:12,fontWeight:700,marginBottom:10}}>Work completed before pause<textarea rows={2} value={pauseDetails.workCompletedBeforePause} onChange={e=>setPauseDetails(x=>({...x,workCompletedBeforePause:e.target.value}))} placeholder="What did you finish before pausing?" style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px',border:'1px solid #fde68a',borderRadius:8,resize:'vertical'}}/></label>
+            <label style={{display:'block',fontSize:12,fontWeight:700,marginBottom:10}}>Parts / materials required after resume<input value={pauseDetails.partsRequired} onChange={e=>setPauseDetails(x=>({...x,partsRequired:e.target.value}))} placeholder="e.g. brake pad, cable" style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px',border:'1px solid #fde68a',borderRadius:8}}/></label>
+            <label style={{display:'block',fontSize:12,fontWeight:700,marginBottom:14}}>Pause details<textarea rows={2} value={pauseDetails.details} onChange={e=>setPauseDetails(x=>({...x,details:e.target.value}))} placeholder="Additional explanation for Command Center and future staff" style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px',border:'1px solid #fde68a',borderRadius:8,resize:'vertical'}}/></label>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:6}}>Why are you pausing? *</label>
+              <select
+                value={pauseReasonSelected}
+                onChange={e => { setPauseReasonSelected(e.target.value); setPauseCustomInput(''); }}
+                style={{width:'100%',padding:'10px 12px',border:'1.5px solid #fde68a',borderRadius:8,fontSize:13,boxSizing:'border-box',background:'#fffbeb',color: pauseReasonSelected?'#1e293b':'#94a3b8',marginBottom:8}}
+                autoFocus
+              >
+                <option value="">— Select a reason —</option>
+                {allReasons.map((r,i) => <option key={i} value={r}>{r}</option>)}
+                <option value="__other__">Other (type your own reason)</option>
+              </select>
+              {isOther && (
+                <input
+                  type="text"
+                  value={pauseCustomInput}
+                  onChange={e => setPauseCustomInput(e.target.value)}
+                  placeholder="Type your pause reason…"
+                  style={{width:'100%',padding:'10px 12px',border:'1.5px solid #fde68a',borderRadius:8,fontSize:13,boxSizing:'border-box',marginTop:4}}
+                  autoFocus
+                />
+              )}
+              {isOther && pauseCustomInput.trim() && (
+                <div style={{fontSize:11,color:'#78350f',marginTop:4}}>💡 This reason will be saved for quick selection next time.</div>
+              )}
+            </div>
+            <div style={{display:'flex',gap:10}}>
+              <button
+                onClick={confirmPause}
+                disabled={!canConfirm}
+                style={{flex:1,background:'#d97706',color:'#fff',border:'none',borderRadius:8,padding:'11px',cursor:canConfirm?'pointer':'not-allowed',fontWeight:700,fontSize:14,opacity:canConfirm?1:0.5}}
+              >⏸ Confirm Pause</button>
+              <button
+                onClick={() => { setPauseModal(null); setPauseReasonText(''); setPauseReasonSelected(''); setPauseCustomInput(''); setPauseDetails({category:'',details:'',expectedResumeAt:'',workCompletedBeforePause:'',partsRequired:''}); }}
+                style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'11px 18px',cursor:'pointer',fontWeight:600,fontSize:13}}
+              >Cancel</button>
+            </div>
+          </div>
+        </div>
+      );
+    })()}
 
     {/* Remarks Modal */}
     {remarksModal && (
@@ -1549,94 +1704,110 @@ function MyWorks({ user, call }) {
       </div>
     )}
 
-    {proofModal && (
-      <div className="modal-overlay" onClick={()=>setProofModal(null)}>
-        <div className="modal-drawer staff-proof-modal" onClick={e=>e.stopPropagation()}>
-          <div className="modal-head"><div><div className="modal-title">{proofRequired ? 'Complete Job' : 'Job Proof & Report'}</div><div className="modal-subtitle">{proofRequired ? 'Add evidence before closing this job' : 'Attach evidence and notes'}</div></div><button className="icon-btn" onClick={()=>setProofModal(null)}><X size={18}/></button></div>
-          <div className="modal-body">
-            <div className="proof-job-summary"><strong>{proofModal.vehicleMake||proofModal.vehicleId?.make||'Vehicle'} {proofModal.vehicleModel||proofModal.vehicleId?.model||''}</strong><span>{proofModal.vehicleReg||proofModal.vehicleId?.registrationNo||'—'}</span></div>
-            <div className="job-timeline">{proofTimeline.map((x,i)=><div key={i} className={'timeline-item'+(x.at?' done':'')}><span></span><div><b>{x.status}</b><small>{x.at?new Date(x.at).toLocaleString('en-IN'):'Pending'}</small></div></div>)}</div>
-            <div className="form-field"><label>Completion summary</label><textarea rows="3" value={proofForm.completionSummary} onChange={e=>setProofForm({...proofForm,completionSummary:e.target.value})} placeholder="What was completed?"/></div>
-            <div className="form-field"><label>Issue / exception</label><textarea rows="2" value={proofForm.issue} onChange={e=>setProofForm({...proofForm,issue:e.target.value})} placeholder="Any unresolved issue or exception"/></div>
-            <div className="form-field"><label>Technician notes</label><textarea rows="3" value={proofForm.notes} onChange={e=>setProofForm({...proofForm,notes:e.target.value})} placeholder="Parts, checks, readings…"/></div>
-            <label className="upload-drop"><Upload size={20}/><span><b>Upload job proof</b><small>Photos or documents · up to 5 files</small></span><input type="file" multiple accept="image/*,.pdf" onChange={e=>addProofFiles(e.target.files)}/></label>
-            <div className="proof-thumb-row">{proofForm.photos.map((p,i)=><div className="proof-thumb" key={i}>{p.url?.startsWith('data:image')?<img src={p.url} alt=""/>:<FileText size={22}/>}<button onClick={()=>setProofForm(f=>({...f,photos:f.photos.filter((_,k)=>k!==i)}))}>×</button></div>)}</div>
-            <SignaturePad value={proofForm.signatureData} onChange={v=>setProofForm({...proofForm,signatureData:v})}/>
+    {/* ── Completion Proof Modal ── */}
+    {proofModal && (() => {
+      const jc = proofModal;
+      const bikeId = jc.bikeId || jc.commandVehicleId?.bikeId || jc.vehicleSnapshot?.bikeId || '';
+      const canSubmit = proofForm.remarks.trim() && proofForm.odometerReading.trim() && proofForm.batteryPercent.trim();
+      const battVal = Number(proofForm.batteryPercent);
+      const battInvalid = proofForm.batteryPercent && (battVal < 0 || battVal > 100);
+      return (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16,overflowY:'auto'}}>
+          <div style={{background:'#fff',borderRadius:16,padding:24,width:'min(500px,100%)',boxShadow:'0 20px 60px rgba(0,0,0,.3)',maxHeight:'90vh',overflowY:'auto'}}>
+            {/* Header */}
+            <div style={{fontWeight:800,fontSize:17,marginBottom:2,color:'#15803d'}}>✅ Complete Job — Proof Required</div>
+            <div style={{fontSize:12,color:'#64748b',marginBottom:16}}>
+              🔋 Bike ID: <b>{bikeId||'—'}</b> · {jc.vehicleMake||jc.commandVehicleId?.make||''} {jc.vehicleModel||jc.commandVehicleId?.model||''} · {jc.vehicleReg||jc.commandVehicleId?.registrationNo||'—'}
+            </div>
+
+            {/* Job Summary */}
+            <div style={{background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:10,padding:12,marginBottom:16,fontSize:13}}>
+              <div style={{fontWeight:700,marginBottom:5,color:'#15803d'}}>📋 Job Summary</div>
+              <div><b>Problem:</b> {jc.problem||'—'}</div>
+              <div><b>Work Assigned:</b> {jc.description||jc.workDescription||'—'}</div>
+              <div><b>Time Spent:</b> {(()=>{const s=getLiveElapsed(jc);const h=Math.floor(s/3600);const m=Math.floor((s%3600)/60);const sec=s%60;return h?`${h}h ${m}m`:`${m}m ${sec}s`;})()}</div>
+            </div>
+
+            {/* Odometer Reading */}
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:5}}>
+                📍 Current Odometer Reading (km) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={proofForm.odometerReading}
+                onChange={e => setProofForm(f => ({...f, odometerReading: e.target.value}))}
+                placeholder="e.g. 12450"
+                style={{width:'100%',padding:'10px 12px',border:'1.5px solid #bbf7d0',borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+              />
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:3}}>Actual reading from the bike's odometer at time of completion — stored against Bike ID <b>{bikeId||'—'}</b>.</div>
+            </div>
+
+            {/* Battery Percentage */}
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:5}}>
+                🔋 Current Battery Percentage (%) *
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={proofForm.batteryPercent}
+                onChange={e => setProofForm(f => ({...f, batteryPercent: e.target.value}))}
+                placeholder="e.g. 78"
+                style={{width:'100%',padding:'10px 12px',border:`1.5px solid ${battInvalid?'#f87171':'#bbf7d0'}`,borderRadius:8,fontSize:13,boxSizing:'border-box'}}
+              />
+              {battInvalid && <div style={{fontSize:11,color:'#ef4444',marginTop:3}}>⚠️ Must be between 0 and 100.</div>}
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:3}}>Battery charge level observed at job completion — stored against Bike ID <b>{bikeId||'—'}</b>.</div>
+            </div>
+
+            {/* Work Remarks */}
+            <div style={{marginBottom:16}}>
+              <label style={{fontSize:13,fontWeight:600,display:'block',marginBottom:5}}>
+                📝 Work Remarks / What was done *
+              </label>
+              <textarea
+                rows={4}
+                value={proofForm.remarks}
+                onChange={e => setProofForm(f => ({...f, remarks: e.target.value}))}
+                placeholder="Describe what you did, parts replaced, tests performed, observations…"
+                style={{width:'100%',padding:'10px 12px',border:'1.5px solid #bbf7d0',borderRadius:8,fontSize:13,resize:'vertical',boxSizing:'border-box'}}
+              />
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:3}}>Sent to franchisee as completion proof. Be specific.</div>
+            </div>
+
+            {/* Detailed service report */}
+            <div style={{marginBottom:16,padding:14,border:'1px solid #e2e8f0',borderRadius:12,background:'#f8fafc'}}>
+              <div style={{fontWeight:800,fontSize:13,marginBottom:10}}>🔧 Detailed Service Report</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                {[['diagnosis','Diagnosis / issue found','e.g. rear brake pad worn'],['rootCause','Root cause','e.g. pad wear from prolonged use'],['workPerformed','Work performed','e.g. removed, cleaned and replaced brake pad'],['solution','Final solution','What fixed the issue?'],['testResult','Test / verification result','e.g. road test passed, brakes normal'],['finalCondition','Final vehicle condition','e.g. safe and ready for handover'],['recommendations','Recommendations','Anything customer/fleet should monitor'],['labourHours','Labour hours','e.g. 1.5']].map(([key,label,ph])=><label key={key} style={{fontSize:12,fontWeight:700,color:'#334155'}}>{label}<input type={key==='labourHours'?'number':'text'} step={key==='labourHours'?'0.1':undefined} value={proofForm[key]} onChange={e=>setProofForm(f=>({...f,[key]:e.target.value}))} placeholder={ph} style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px 10px',border:'1px solid #cbd5e1',borderRadius:8,fontSize:12}}/></label>)}
+              </div>
+              <label style={{display:'block',fontSize:12,fontWeight:700,color:'#334155',marginTop:10}}>Parts replaced / materials used<textarea rows={2} value={proofForm.partsReplaced} onChange={e=>setProofForm(f=>({...f,partsReplaced:e.target.value}))} placeholder="Brake pad, cable, bolt… one per line or comma separated" style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px 10px',border:'1px solid #cbd5e1',borderRadius:8,fontSize:12,resize:'vertical'}}/></label>
+              <label style={{display:'block',fontSize:12,fontWeight:700,color:'#334155',marginTop:10}}>Next service date<input type="date" value={proofForm.nextServiceAt} onChange={e=>setProofForm(f=>({...f,nextServiceAt:e.target.value}))} style={{display:'block',marginTop:5,padding:'9px 10px',border:'1px solid #cbd5e1',borderRadius:8,fontSize:12}}/></label>
+              <label style={{display:'block',fontSize:12,fontWeight:700,color:'#334155',marginTop:10}}>Completion notes<textarea rows={3} value={proofForm.completionNotes} onChange={e=>setProofForm(f=>({...f,completionNotes:e.target.value}))} placeholder="Final notes for Command Center, franchisee and future staff" style={{display:'block',width:'100%',boxSizing:'border-box',marginTop:5,padding:'9px 10px',border:'1px solid #cbd5e1',borderRadius:8,fontSize:12,resize:'vertical'}}/></label>
+            </div>
+
+            {/* Actions */}
+            <div style={{display:'flex',gap:10}}>
+              <button
+                onClick={submitProofAndComplete}
+                disabled={!canSubmit || battInvalid}
+                style={{flex:1,background:'#15803d',color:'#fff',border:'none',borderRadius:8,padding:'12px',cursor:(canSubmit&&!battInvalid)?'pointer':'not-allowed',fontWeight:700,fontSize:14,opacity:(canSubmit&&!battInvalid)?1:0.5}}
+              >✅ Submit Proof &amp; Mark Complete</button>
+              <button
+                onClick={() => { setProofModal(null); setProofForm({ remarks:'', odometerReading:'', batteryPercent:'', diagnosis:'', rootCause:'', workPerformed:'', solution:'', partsReplaced:'', testResult:'', finalCondition:'', recommendations:'', nextServiceAt:'', labourHours:'', completionNotes:'' }); }}
+                style={{background:'#f1f5f9',color:'#374151',border:'none',borderRadius:8,padding:'12px 18px',cursor:'pointer',fontWeight:600,fontSize:13}}
+              >Cancel</button>
+            </div>
           </div>
-          <div className="modal-foot"><button className="btn-ghost" onClick={()=>{setProofRequired(false);setProofModal(null)}}>Cancel</button><button className="btn-primary" onClick={submitProof}>{proofRequired ? <><Check size={14}/> Complete Job</> : <><Save size={14}/> Save proof</>}</button></div>
         </div>
-      </div>
-    )}
+      );
+    })()}
+
   </>;
 }
 
-
-function SignaturePad({value,onChange}) {
-  const ref=useRef(null); const drawing=useRef(false);
-  const point=e=>{const c=ref.current,r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height}};
-  const start=e=>{drawing.current=true;const p=point(e),ctx=ref.current.getContext('2d');ctx.beginPath();ctx.moveTo(p.x,p.y);e.currentTarget.setPointerCapture?.(e.pointerId)};
-  const move=e=>{if(!drawing.current)return;const p=point(e),ctx=ref.current.getContext('2d');ctx.lineWidth=2;ctx.lineCap='round';ctx.strokeStyle='#111827';ctx.lineTo(p.x,p.y);ctx.stroke()};
-  const end=()=>{drawing.current=false;if(ref.current)onChange(ref.current.toDataURL('image/png'))};
-  useEffect(()=>{if(value&&ref.current){const img=new Image();img.onload=()=>ref.current.getContext('2d').drawImage(img,0,0);img.src=value}},[]);
-  return <div className="signature-box"><div className="signature-head"><span>Customer signature</span><button onClick={()=>{const c=ref.current;c.getContext('2d').clearRect(0,0,c.width,c.height);onChange('')}}>Clear</button></div><canvas ref={ref} width="700" height="180" onPointerDown={start} onPointerMove={move} onPointerUp={end} onPointerLeave={end}/></div>;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// HOLIDAYS — REGIONAL & PUBLIC (Dynamic Year)
-// ══════════════════════════════════════════════════════════════════
-// Year-aware holiday calculation with correct 2026 dates
-const HOLIDAY_OVERRIDES = {
-  2026: {
-    public: [
-      { date:'2026-01-26', name:'Republic Day', type:'National', icon:'🇮🇳' },
-      { date:'2026-03-03', name:'Holi', type:'National', icon:'🎨' },
-      { date:'2026-03-04', name:'Holi (Dhuleti)', type:'National', icon:'🎨' },
-      { date:'2026-04-03', name:'Good Friday', type:'National', icon:'✝️' },
-      { date:'2026-04-14', name:'Dr. B.R. Ambedkar Jayanti', type:'National', icon:'📚' },
-      { date:'2026-05-01', name:'Labour Day', type:'National', icon:'⚒️' },
-      { date:'2026-08-15', name:'Independence Day', type:'National', icon:'🇮🇳' },
-      { date:'2026-10-02', name:'Gandhi Jayanti', type:'National', icon:'🕊️' },
-      { date:'2026-10-20', name:'Dussehra', type:'National', icon:'🏹' },
-      { date:'2026-11-08', name:'Diwali (Lakshmi Puja)', type:'National', icon:'🪔' },
-      { date:'2026-12-25', name:'Christmas', type:'National', icon:'🎄' },
-    ],
-    regional: {
-      TS: [
-        { date:'2026-03-19', name:'Ugadi (Telugu New Year)', icon:'🌸' },
-        { date:'2026-04-14', name:'Dr. Ambedkar Jayanti', icon:'📚' },
-        { date:'2026-06-02', name:'Telangana Formation Day', icon:'🏛️' },
-        { date:'2026-09-14', name:'Ganesh Chaturthi', icon:'🐘' },
-        { date:'2026-10-20', name:'Dussehra', icon:'🏹' },
-        { date:'2026-11-08', name:'Diwali', icon:'🪔' },
-      ],
-      TN: [
-        { date:'2026-01-14', name:'Pongal', icon:'🌾' },
-        { date:'2026-01-15', name:'Thiruvalluvar Day', icon:'📖' },
-        { date:'2026-01-16', name:'Uzhavar Thirunal', icon:'🌾' },
-        { date:'2026-04-14', name:'Tamil New Year', icon:'🌟' },
-        { date:'2026-05-28', name:'Vaikasi Visakam', icon:'🙏' },
-      ],
-      MH: [
-        { date:'2026-05-01', name:'Maharashtra Day', icon:'🏛️' },
-        { date:'2026-04-14', name:'Dr. Ambedkar Jayanti', icon:'📚' },
-        { date:'2026-09-14', name:'Ganesh Chaturthi', icon:'🐘' },
-      ],
-      KA: [
-        { date:'2026-11-01', name:'Kannada Rajyotsava', icon:'🟡' },
-        { date:'2026-10-20', name:'Dussehra (Mysuru)', icon:'👑' },
-      ],
-      AP: [
-        { date:'2026-03-19', name:'Telugu New Year (Ugadi)', icon:'🌸' },
-        { date:'2026-09-14', name:'Ganesh Chaturthi', icon:'🐘' },
-        { date:'2026-12-20', name:'Vaikunta Ekadasi', icon:'🙏' },
-      ],
-      KL: [
-        { date:'2026-08-26', name:'Onam (Thiruvonam)', icon:'🌺' },
-        { date:'2026-08-16', name:'Atham (Onam Start)', icon:'🌺' },
-      ],
-    }
-  }
-};
 
 function getHolidaysForYear(yr) {
   if (HOLIDAY_OVERRIDES[yr]) return HOLIDAY_OVERRIDES[yr];
@@ -2166,7 +2337,7 @@ function Profile({ user, setUser, setPage }) {
 function MobileBack({ setPage }) { return <button className="mobile-back-btn" onClick={() => setPage('dashboard')}><ChevronLeft size={20}/><span>Back</span></button>; }
 
 function FeatureHeader({ title, sub, setPage, Icon=Activity, action }) {
-  return <div className="feature-header"><div className="feature-header-left"><MobileBack setPage={setPage}/><div className="feature-title-icon"><Icon size={20}/></div><div><h1>{title}</h1>{sub&&<p>{sub}</p>}</div></div>{action}</div>;
+  return <div className="feature-header"><div className="feature-header-left"><MobileBack setPage={setPage}/><div className="feature-title-icon"><Icon size={20}/></div><div><h1>{title}</h1></div></div>{action}</div>;
 }
 
 function useStaffLive(call, path, interval=20000) {
@@ -2194,17 +2365,299 @@ function NotificationsCenter({call,user,setPage}) {
 }
 
 function AttendanceDuty({call,user,setPage}) {
-  const {data,loading,refresh}=useStaffLive(call,'/staff/attendance',30000); const today=data?.[0]; const [clock,setClock]=useState(new Date()); const [busy,setBusy]=useState(false);
-  useEffect(()=>{const id=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(id)},[]);
-  const locate=()=>new Promise(resolve=>{if(!navigator.geolocation)return resolve(null);navigator.geolocation.getCurrentPosition(p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),()=>resolve(null),{enableHighAccuracy:true,timeout:7000})});
-  const act=async type=>{setBusy(true);try{const location=await locate();await call(`/staff/attendance/${type}`,{method:'post',data:location?{location}:{} });await refresh()}catch(e){alert(e.response?.data?.message||e.message)}finally{setBusy(false)}};
-  const active=today?.clockIn&&!today?.clockOut; const breaks=today?.breaks||[]; const onBreak=breaks.length>0&&!breaks[breaks.length-1].endedAt;
-  const y=clock.getFullYear(), m=clock.getMonth(), monthDays=new Date(y,m+1,0).getDate(), firstDay=new Date(y,m,1).getDay();
-  const attByDay=new Map((data||[]).filter(a=>String(a.dateKey||'').startsWith(`${y}-${String(m+1).padStart(2,'0')}`)).map(a=>[Number(String(a.dateKey).slice(-2)),a]));
-  const cal=[]; for(let i=0;i<firstDay;i++) cal.push(<span key={'blank'+i}/>); for(let d=1;d<=monthDays;d++){const a=attByDay.get(d); const future=d>clock.getDate(); const state=a?.clockIn?(a.lateMinutes>0?'late':'present'):(future?'future':'absent'); cal.push(<span key={d} className={'attendance-day '+state}>{d}</span>)}
-  return <><FeatureHeader title="Attendance & Duty" sub={clock.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long'})} setPage={setPage} Icon={Clock}/><div className="attendance-hero"><div><small>Current time</small><strong>{clock.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</strong><span className={active?'live-dot':''}>{active?'● On duty':'○ Off duty'}</span></div><button className={'duty-big-btn '+(active?'on':'')} onClick={()=>act(active?'clock-out':'clock-in')} disabled={busy}>{busy?'Updating…':active?'Clock out':'Clock in'}</button></div><div className="mini-stat-grid"><div><b>{data.filter(x=>x.clockIn).length}</b><span>Days present</span></div><div><b>{today?.lateMinutes||0}</b><span>Late minutes</span></div><div><b>{onBreak?'On break':'Working'}</b><span>Current state</span></div></div><div className="feature-card attendance-calendar-card"><div className="feature-card-head"><b>{clock.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><span>Monthly attendance</span></div><div className="attendance-week-head">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div><div className="attendance-calendar-grid">{cal}</div><div className="calendar-legend"><span><i className="legend-dot attendance-present"/> Present</span><span><i className="legend-dot attendance-late"/> Late</span><span><i className="legend-dot attendance-absent"/> Absent</span></div></div><div className="feature-card"><div className="feature-card-head"><b>Today</b><span>{today?.clockIn?new Date(today.clockIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—'} → {today?.clockOut?new Date(today.clockOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'Now'}</span></div><button className="premium-btn ghost full" onClick={()=>act('break')}>{onBreak?'End break':'Start break'}</button>{today?.location&&<div className="location-chip"><Navigation size={15}/> Location updated · ±{Math.round(today.location.accuracy||0)}m</div>}</div><div className="feature-card"><div className="feature-card-head"><b>Recent duty logs</b><span>{data.length} records</span></div>{data.slice(0,7).map(a=><div className="log-row" key={a._id}><span>{a.dateKey}</span><span>{a.clockIn?new Date(a.clockIn).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—'} – {a.clockOut?new Date(a.clockOut).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'Active'}</span><em>{a.status}</em></div>)}</div></>;
-}
+  const {data,loading,refresh}=useStaffLive(call,'/staff/attendance',30000);
+  const today=data?.[0];
+  const [clock,setClock]=useState(new Date());
+  const [busy,setBusy]=useState(false);
+  const [showAllLogs,setShowAllLogs]=useState(false);
 
+  useEffect(()=>{
+    const id=setInterval(()=>setClock(new Date()),1000);
+    return()=>clearInterval(id);
+  },[]);
+
+  const locate=()=>new Promise(resolve=>{
+    if(!navigator.geolocation)return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      p=>resolve({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),
+      ()=>resolve(null),
+      {enableHighAccuracy:true,timeout:7000}
+    );
+  });
+
+  const act=async type=>{
+    setBusy(true);
+    try{
+      const location=await locate();
+      await call(`/staff/attendance/${type}`,{method:'post',data:location?{location}:{}});
+      await refresh();
+    }catch(e){
+      alert(e.response?.data?.message||e.message);
+    }finally{
+      setBusy(false);
+    }
+  };
+
+  const active=!!(today?.clockIn&&!today?.clockOut);
+  const breaks=Array.isArray(today?.breaks)?today.breaks:[];
+  const onBreak=breaks.length>0&&!breaks[breaks.length-1].endedAt;
+
+  const breakSeconds=(a,now=new Date())=>(Array.isArray(a)?a:[]).reduce((sum,b)=>{
+    const start=b.startedAt?new Date(b.startedAt).getTime():0;
+    const end=b.endedAt?new Date(b.endedAt).getTime():now.getTime();
+    return sum+(start&&end>start?Math.floor((end-start)/1000):0);
+  },0);
+
+  const workedSeconds=(a,now=new Date())=>{
+    if(!a?.clockIn)return 0;
+    const end=a.clockOut?new Date(a.clockOut):now;
+    const gross=Math.max(0,Math.floor((end-new Date(a.clockIn))/1000));
+    return Math.max(0,gross-breakSeconds(a?.breaks,now));
+  };
+
+  const fmtDuration=seconds=>{
+    const s=Math.max(0,Number(seconds)||0);
+    const h=Math.floor(s/3600);
+    const m=Math.floor((s%3600)/60);
+    return `${h}h ${String(m).padStart(2,'0')}m`;
+  };
+  const fmtTime=value=>value?new Date(value).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—';
+  const SHIFT_SECONDS=(9*60+30)*60;
+
+  const y=clock.getFullYear(), m=clock.getMonth();
+  const monthPrefix=`${y}-${String(m+1).padStart(2,'0')}`;
+  const monthData=(data||[]).filter(a=>String(a.dateKey||'').startsWith(monthPrefix));
+  const presentDays=monthData.filter(a=>a.clockIn).length;
+  const lateMinutes=monthData.reduce((sum,a)=>sum+(Number(a.lateMinutes)||0),0);
+  const workedMonthSeconds=monthData.reduce((sum,a)=>sum+workedSeconds(a,a.clockOut?new Date(a.clockOut):clock),0);
+  const avgWorked=presentDays?Math.round(workedMonthSeconds/presentDays):0;
+
+  const dateKeyFor=(date)=>{
+    const yy=date.getFullYear();
+    const mm=String(date.getMonth()+1).padStart(2,'0');
+    const dd=String(date.getDate()).padStart(2,'0');
+    return `${yy}-${mm}-${dd}`;
+  };
+  const attMap=new Map((data||[]).map(a=>[String(a.dateKey||''),a]));
+  const todayKey=dateKeyFor(clock);
+
+  let streak=0;
+  for(let i=0;i<31;i++){
+    const d=new Date(clock);
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate()-i);
+    const a=attMap.get(dateKeyFor(d));
+    if(a?.clockIn) streak++;
+    else break;
+  }
+
+  const week=[];
+  for(let i=6;i>=0;i--){
+    const d=new Date(clock);
+    d.setHours(0,0,0,0);
+    d.setDate(d.getDate()-i);
+    const a=attMap.get(dateKeyFor(d));
+    week.push({
+      date:d,
+      key:dateKeyFor(d),
+      item:a,
+      worked:a?workedSeconds(a,a.clockOut?new Date(a.clockOut):clock):0
+    });
+  }
+  const weekMax=Math.max(SHIFT_SECONDS,...week.map(x=>x.worked));
+  const currentWorked=workedSeconds(today,clock);
+  const shiftProgress=Math.min(100,Math.round((currentWorked/SHIFT_SECONDS)*100));
+  const remaining=Math.max(0,SHIFT_SECONDS-currentWorked);
+
+  const firstDay=new Date(y,m,1).getDay();
+  const monthDays=new Date(y,m+1,0).getDate();
+  const cal=[];
+  for(let i=0;i<firstDay;i++)cal.push(<span key={'blank'+i} className="attendance-day blank"/>);
+  for(let d=1;d<=monthDays;d++){
+    const key=`${monthPrefix}-${String(d).padStart(2,'0')}`;
+    const a=attMap.get(key);
+    const future=d>clock.getDate();
+    const state=a?.clockIn?(a.lateMinutes>0?'late':'present'):(future?'future':'absent');
+    cal.push(
+      <span key={d} className={'attendance-day '+state+(d===clock.getDate()?' today':'')}>
+        {d}{d===clock.getDate()&&<i/>}
+      </span>
+    );
+  }
+
+  const logs=showAllLogs?(data||[]):(data||[]).slice(0,7);
+  const exportReport=()=>{
+    const rows=[
+      ['Date','Clock In','Clock Out','Break','Worked','Late Minutes'],
+      ...(data||[]).map(a=>[
+        a.dateKey||'',
+        fmtTime(a.clockIn),
+        fmtTime(a.clockOut),
+        fmtDuration(breakSeconds(a,a.clockOut?new Date(a.clockOut):clock)),
+        fmtDuration(workedSeconds(a,a.clockOut?new Date(a.clockOut):clock)),
+        Number(a.lateMinutes)||0
+      ])
+    ];
+    const csv=rows.map(row=>row.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=`attendance-${monthPrefix}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return <>
+    <FeatureHeader
+      title="Attendance & Duty"
+      sub={clock.toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
+      setPage={setPage}
+      Icon={Clock}
+      action={<button className="premium-btn ghost attendance-export-btn" onClick={exportReport}><Download size={14}/> Export</button>}
+    />
+
+    <div className="attendance-command-card">
+      <div className="attendance-command-glow"/>
+      <div className="attendance-command-top">
+        <div>
+          <span className="attendance-eyebrow"><span className={active?'attendance-live-pulse':''}/>{active?'LIVE DUTY':'DUTY STATUS'}</span>
+          <h2>{active?'You are on duty':'You are off duty'}</h2>
+          <p>{active?'Your attendance is being tracked for today.':'Start your duty when you are ready to begin your shift.'}</p>
+        </div>
+        <div className="attendance-clock-orb">
+          <Clock size={18}/>
+          <strong>{clock.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</strong>
+          <span>{clock.toLocaleTimeString('en-IN',{second:'2-digit'})}</span>
+        </div>
+      </div>
+      <div className="attendance-command-bottom">
+        <div className="attendance-start-info">
+          <span>Today's session</span>
+          <strong>{today?.clockIn?fmtTime(today.clockIn):'Not started'}</strong>
+          <small>{today?.clockOut?`Finished at ${fmtTime(today.clockOut)}`:active?'Session in progress':'Clock in to begin'}</small>
+        </div>
+        <button className={'attendance-main-action '+(active?'danger':'')} onClick={()=>act(active?'clock-out':'clock-in')} disabled={busy}>
+          <span className="attendance-action-icon">{active?<LogOut size={18}/>:<Clock size={18}/>}</span>
+          <span>{busy?'Updating…':active?'Clock out':'Clock in'}</span>
+          <ChevronRight size={16}/>
+        </button>
+      </div>
+    </div>
+
+    <div className="attendance-kpi-grid">
+      <div className="attendance-kpi"><span className="attendance-kpi-icon blue"><Calendar size={17}/></span><div><b>{presentDays}</b><small>Days present</small></div><em>This month</em></div>
+      <div className="attendance-kpi"><span className="attendance-kpi-icon green"><Timer size={17}/></span><div><b>{fmtDuration(avgWorked)}</b><small>Avg. work day</small></div><em>Net time</em></div>
+      <div className="attendance-kpi"><span className="attendance-kpi-icon amber"><AlertTriangle size={17}/></span><div><b>{lateMinutes}m</b><small>Late minutes</small></div><em>Month total</em></div>
+      <div className="attendance-kpi"><span className="attendance-kpi-icon violet"><TrendingUp size={17}/></span><div><b>{streak}</b><small>Day streak</small></div><em>Current</em></div>
+    </div>
+
+    <div className="attendance-primary-grid">
+      <div className="feature-card attendance-today-card">
+        <div className="attendance-section-head">
+          <div><b>Today's duty</b><span>{today?.dateKey||todayKey}</span></div>
+          <span className={'attendance-status-pill '+(onBreak?'break':active?'working':'offline')}>
+            <i/>{onBreak?'On break':active?'Working':'Off duty'}
+          </span>
+        </div>
+
+        <div className="attendance-progress-area">
+          <div className="attendance-progress-copy">
+            <span>Shift progress</span>
+            <strong>{fmtDuration(currentWorked)}</strong>
+            <small>{active?`${fmtDuration(remaining)} remaining to reach 9h 30m`:'Target: 9h 30m net work'}</small>
+          </div>
+          <div className="attendance-progress-ring" style={{'--progress':`${shiftProgress*3.6}deg`}}>
+            <div><b>{shiftProgress}%</b><span>complete</span></div>
+          </div>
+        </div>
+
+        <div className="attendance-time-strip">
+          <div><span>Clock in</span><b>{fmtTime(today?.clockIn)}</b></div>
+          <div><span>Breaks</span><b>{breaks.length}</b></div>
+          <div><span>Clock out</span><b>{fmtTime(today?.clockOut)}</b></div>
+        </div>
+
+        <button className="attendance-break-btn" onClick={()=>act('break')} disabled={!active}>
+          {onBreak?<><Check size={15}/> End current break</>:<><Coffee size={15}/> Start a break</>}
+        </button>
+
+        {today?.location&&<div className="attendance-location"><span><Navigation size={14}/></span><div><b>Work location recorded</b><small>Accuracy ±{Math.round(today.location.accuracy||0)}m</small></div><CheckCircle size={15}/></div>}
+      </div>
+
+      <div className="feature-card attendance-week-card">
+        <div className="attendance-section-head">
+          <div><b>Last 7 days</b><span>Net working time</span></div>
+          <span className="attendance-target-label">9h 30m target</span>
+        </div>
+        <div className="attendance-week-chart">
+          {week.map(x=>{
+            const pct=x.worked?Math.max(8,Math.min(100,Math.round((x.worked/weekMax)*100))):4;
+            const isToday=x.key===todayKey;
+            return <div className={'attendance-week-bar '+(isToday?'today':'')} key={x.key}>
+              <span className="attendance-bar-value">{x.worked?fmtDuration(x.worked):'—'}</span>
+              <div className="attendance-bar-track"><i style={{height:`${pct}%`}}/></div>
+              <b>{x.date.toLocaleDateString('en-IN',{weekday:'short'}).slice(0,2)}</b>
+              <small>{x.date.getDate()}</small>
+            </div>;
+          })}
+        </div>
+        <div className="attendance-week-note"><span><i className="attendance-note-dot"/> Worked</span><span><i className="attendance-note-line"/> Daily target</span></div>
+      </div>
+    </div>
+
+    <div className="attendance-secondary-grid">
+      <div className="feature-card attendance-calendar-card">
+        <div className="attendance-section-head">
+          <div><b>{clock.toLocaleDateString('en-IN',{month:'long',year:'numeric'})}</b><span>Attendance calendar</span></div>
+          <div className="attendance-calendar-summary"><b>{presentDays}</b><small>present</small></div>
+        </div>
+        <div className="attendance-week-head">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div>
+        <div className="attendance-calendar-grid">{cal}</div>
+        <div className="calendar-legend">
+          <span><i className="legend-dot attendance-present"/> Present</span>
+          <span><i className="legend-dot attendance-late"/> Late</span>
+          <span><i className="legend-dot attendance-absent"/> Absent</span>
+        </div>
+      </div>
+
+      <div className="feature-card attendance-timeline-card">
+        <div className="attendance-section-head">
+          <div><b>Today's timeline</b><span>Duty activity</span></div>
+          {breaks.length>0&&<span className="attendance-mini-count">{breaks.length} break{breaks.length>1?'s':''}</span>}
+        </div>
+        <div className="attendance-timeline">
+          <div className="attendance-timeline-item done"><span className="attendance-timeline-dot"><Clock size={12}/></span><div><b>Clock in</b><small>{fmtTime(today?.clockIn)}</small></div></div>
+          {breaks.map((br,i)=><div className={'attendance-timeline-item '+(!br.endedAt?'active':'done')} key={i}><span className="attendance-timeline-dot"><Coffee size={12}/></span><div><b>{br.endedAt?'Break completed':'Break in progress'}</b><small>{fmtTime(br.startedAt)}{br.endedAt?` → ${fmtTime(br.endedAt)}`:''}</small></div></div>)}
+          <div className={'attendance-timeline-item '+(today?.clockOut?'done':'pending')}><span className="attendance-timeline-dot"><LogOut size={12}/></span><div><b>Clock out</b><small>{today?.clockOut?fmtTime(today.clockOut):'Pending'}</small></div></div>
+        </div>
+        {!today?.clockIn&&<div className="attendance-timeline-empty"><Clock size={17}/><span>Clock in to start today's timeline.</span></div>}
+      </div>
+    </div>
+
+    <div className="feature-card attendance-logs-card">
+      <div className="attendance-section-head">
+        <div><b>Recent duty logs</b><span>{data?.length||0} attendance records</span></div>
+        <button className="attendance-view-btn" onClick={()=>setShowAllLogs(v=>!v)}>{showAllLogs?'Show recent':'View all'} <ChevronRight size={13}/></button>
+      </div>
+      <div className="attendance-log-list">
+        {loading&&<Loader/>}
+        {!loading&&!logs.length&&<div className="duty-log-empty">No duty logs yet.</div>}
+        {!loading&&logs.map(a=>{
+          const worked=workedSeconds(a,a.clockOut?new Date(a.clockOut):clock);
+          const breaksTotal=breakSeconds(a,a.clockOut?new Date(a.clockOut):clock);
+          const isActive=!a.clockOut&&a.clockIn;
+          const status=a.lateMinutes>0?'Late':isActive?'Active':worked>=SHIFT_SECONDS?'Complete':'Short';
+          return <div className="attendance-log-row" key={a._id||a.dateKey}>
+            <div className="attendance-log-date"><b>{a.dateKey?new Date(`${a.dateKey}T00:00:00`).getDate():'—'}</b><span>{a.dateKey?new Date(`${a.dateKey}T00:00:00`).toLocaleDateString('en-IN',{month:'short'}):'—'}</span></div>
+            <div className="attendance-log-main"><strong>{fmtTime(a.clockIn)} <span>→</span> {a.clockOut?fmtTime(a.clockOut):'Active'}</strong><small>{fmtDuration(worked)} net · {fmtDuration(breaksTotal)} breaks</small></div>
+            <span className={'attendance-log-status '+status.toLowerCase()}>{status}</span>
+          </div>;
+        })}
+      </div>
+    </div>
+  </>;
+}
 function DailyChecklist({call,setPage}) { const {data,loading,refresh}=useStaffLive(call,'/staff/checklists',30000); const [rows,setRows]=useState([]); useEffect(()=>setRows(data||[]),[data]); const toggle=async(row,i)=>{const items=row.items.map((x,k)=>k===i?{...x,done:!x.done}:x);setRows(r=>r.map(x=>x._id===row._id?{...x,items}:x));try{await call(`/staff/checklists/${row._id}`,{method:'put',data:{items,title:row.title}})}catch(_){refresh()}}; return <><FeatureHeader title="Daily Checklist" sub="Complete your required work items" setPage={setPage} Icon={ClipboardCheck}/><div className="feature-stack">{loading&&<Loader/>}{!loading&&!rows.length&&<div className="premium-empty"><ClipboardCheck size={28}/><b>No checklist assigned</b><span>Your daily checklist will appear when Command Center assigns one.</span></div>}{rows.map(r=><div className="feature-card" key={r._id}><div className="feature-card-head"><b>{r.title||'Today’s checklist'}</b><span>{r.items.filter(i=>i.done).length}/{r.items.length}</span></div>{r.items.map((item,i)=><button className={'check-row'+(item.done?' done':'')} key={i} onClick={()=>toggle(r,i)}><span>{item.done?<CheckCircle size={20}/>:<span className="check-box"/>}</span><span>{item.label}</span></button>)}</div>)}</div></> }
 
 function DocumentsVault({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/documents',60000); const docs=data||[]; return <><FeatureHeader title="Documents" sub="Your secure staff document vault" setPage={setPage} Icon={FileText}/><div className="doc-vault-grid">{loading&&<Loader/>}{!loading&&!docs.length&&<div className="premium-empty"><FileText size={28}/><b>No documents yet</b><span>HR and Command Center documents will appear here.</span></div>}{docs.map(d=><a className="vault-doc-card" href={d.url||'#'} target="_blank" rel="noreferrer" key={d._id}><span className="vault-doc-icon"><FileText size={22}/></span><strong>{d.title}</strong><small>{d.type||'Document'}</small><span className="doc-open"><Download size={14}/> Open</span></a>)}</div></> }
@@ -2274,151 +2727,119 @@ async function staffGeocodeHub(hub) {
 }
 
 function StaffHubMap({ hubs, selectedHub, onSelectHub }) {
-  const mapRef          = React.useRef(null);
-  const leafRef         = React.useRef(null);
-  const markersRef      = React.useRef([]);
-  const tooltipTimerRef = React.useRef(null);
-  const hubsRef         = React.useRef(hubs);
-  const drawScheduled   = React.useRef(false);
-  const [tooltip, setTooltip] = React.useState(null);
-
-  hubsRef.current = hubs;
-
-  function scheduleDraw() {
-    if (drawScheduled.current) return;
-    drawScheduled.current = true;
-    setTimeout(() => {
-      drawScheduled.current = false;
-      if (leafRef.current && hubsRef.current && hubsRef.current.length > 0) {
-        leafRef.current.invalidateSize();
-        drawStaffMarkers(leafRef.current, hubsRef.current);
-      }
-    }, 50);
-  }
+  const mapRef = React.useRef(null);
+  const leafRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+  const drawTokenRef = React.useRef(0);
 
   React.useEffect(() => {
     if (leafRef.current || !mapRef.current || !window.L) return;
     const L = window.L;
-    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
+    const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true, preferCanvas: true })
       .setView([20.5937, 78.9629], 5);
     L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
+      maxZoom: 19, updateWhenIdle: true, keepBuffer: 2,
     }).addTo(map);
     map.getPane('markerPane').style.zIndex = 650;
-    map.getPane('tooltipPane').style.zIndex = 700;
     delete window.L.Icon.Default.prototype._getIconUrl;
     window.L.Icon.Default.mergeOptions({ iconUrl: '', shadowUrl: '', iconRetinaUrl: '' });
     leafRef.current = map;
-    setTimeout(() => scheduleDraw(), 400);
+    requestAnimationFrame(() => map.invalidateSize());
   }, []);
 
-  React.useEffect(() => { scheduleDraw(); }, [hubs]);
-
-  function placeStaffMarker(map, hub, coords) {
-    const color = STAFF_HUB_STATUS_COLOR[hub.status] || '#2563eb';
-    const marker = window.L.circleMarker(coords, {
-      radius: 13, fillColor: color, color: '#ffffff',
-      weight: 3, opacity: 1, fillOpacity: 1, pane: 'markerPane',
-    }).addTo(map);
-    marker.bindTooltip(hub.name || '', {
-      permanent: true, direction: 'bottom',
-      offset: [0, 10], className: 'hub-map-label',
-    }).openTooltip();
-    marker.on('mouseover', e => {
-      clearTimeout(tooltipTimerRef.current);
-      const pt = map.latLngToContainerPoint(e.latlng);
-      setTooltip({ hub, x: pt.x, y: pt.y });
-    });
-    marker.on('mouseout', () => { tooltipTimerRef.current = setTimeout(() => setTooltip(null), 150); });
-    marker.on('click', () => onSelectHub(hub));
-    markersRef.current.push(marker);
-    return coords;
-  }
-
-  async function drawStaffMarkers(map, hubList) {
+  React.useEffect(() => {
+    const map = leafRef.current;
+    if (!map) return;
+    const token = ++drawTokenRef.current;
     markersRef.current.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
     markersRef.current = [];
-    const allCoords = [];
-    for (const hub of hubList) {
-      let coords = staffGetCoords(hub);
-      if (!coords) coords = await staffGeocodeHub(hub);
-      if (!coords) continue;
-      placeStaffMarker(map, hub, coords);
-      allCoords.push(coords);
-    }
-    if (allCoords.length === 0) return;
-    if (allCoords.length === 1) {
-      map.setView(allCoords[0], 14, { animate: false });
-    } else {
-      map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 14, animate: false });
-    }
+    const list = Array.isArray(hubs) ? hubs : [];
+    const coordsList = list.map(h => ({ hub: h, coords: staffGetCoords(h) })).filter(x => x.coords);
+    if (!coordsList.length) return;
+    const bounds = coordsList.map(x => x.coords);
+    if (bounds.length === 1) map.setView(bounds[0], 15, { animate: false });
+    else map.fitBounds(window.L.latLngBounds(bounds), { padding: [35, 35], maxZoom: 13, animate: false });
     map.invalidateSize();
+    let i = 0;
+    const drawBatch = () => {
+      if (token !== drawTokenRef.current) return;
+      const end = Math.min(i + 50, coordsList.length);
+      for (; i < end; i++) placeStaffMarker(map, coordsList[i].hub, coordsList[i].coords, i + 1);
+      if (i < coordsList.length) requestAnimationFrame(drawBatch);
+    };
+    requestAnimationFrame(drawBatch);
+  }, [hubs]);
+
+  function placeStaffMarker(map, hub, coords, number) {
+    const color = STAFF_HUB_STATUS_COLOR[hub.status] || '#2563eb';
+    const marker = window.L.circleMarker(coords, {
+      radius: 10, fillColor: color, color: '#fff', weight: 2,
+      opacity: 1, fillOpacity: 1, pane: 'markerPane',
+    }).addTo(map);
+    const lat = Number(coords && coords[0]);
+    const lng = Number(coords && coords[1]);
+    const mapsUrl = Number.isFinite(lat) && Number.isFinite(lng)
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`
+      : '';
+    const detail = [
+      `<strong>${String(hub.name || hub.hubName || `Location ${number}`)}</strong>`,
+      hub.city ? `City: ${String(hub.city)}` : '',
+      hub.area || hub.locality ? `Area: ${String(hub.area || hub.locality)}` : '',
+      hub.address || hub.fullAddress ? `Address: ${String(hub.address || hub.fullAddress)}` : '',
+      hub.status ? `Status: ${String(hub.status)}` : '',
+      (hub.swaps !== undefined && hub.swaps !== null && hub.swaps !== '') ? `Swaps: ${String(hub.swaps)}` : '',
+      mapsUrl ? `<a href="${mapsUrl}" target="_blank" rel="noopener noreferrer" class="hub-google-maps-link" style="display:inline-flex;align-items:center;gap:7px;margin-top:10px;padding:7px 10px;border-radius:8px;background:#2563eb;color:#fff!important;text-decoration:none;font-weight:700;font-size:12px;">📍 Open in Google Maps</a>` : ''
+    ].filter(Boolean).join('<br/>');
+    marker.bindTooltip(String(number), {
+      permanent: true, direction: 'center', className: 'hub-map-number',
+      opacity: 1, offset: [0, 0]
+    }).openTooltip();
+    marker.bindPopup(detail, { closeButton: true, autoPan: false, maxWidth: 320 });
+    marker.on('mouseover', () => marker.openPopup());
+    marker.on('mouseout', () => marker.closePopup());
+    marker.on('click', (e) => {
+      if (e && e.originalEvent) e.originalEvent.stopPropagation();
+      marker.openPopup();
+      onSelectHub(hub);
+    });
+    markersRef.current.push(marker);
   }
 
-  React.useEffect(() => {
-    if (!selectedHub || !leafRef.current) return;
-    (async () => {
-      let c = staffGetCoords(selectedHub);
-      if (!c) c = await staffGeocodeHub(selectedHub);
-      if (c && leafRef.current) leafRef.current.setView(c, 15, { animate: true });
-    })();
-  }, [selectedHub]);
-
-  const sc = tooltip ? (STAFF_HUB_STATUS_COLOR[tooltip.hub.status] || '#2563eb') : '#16a34a';
-
-  return (
-    <div className="hub-map-container" style={{ position: 'relative' }}>
-      <div ref={mapRef} id="staff-hub-map" style={{ height: 480, borderRadius: 12, overflow: 'hidden' }} />
-      {tooltip && (() => {
-        const coords  = staffGetCoords(tooltip.hub);
-        const mapsUrl = coords
-          ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
-          : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((tooltip.hub.address ? tooltip.hub.address + ', ' : '') + (tooltip.hub.city || ''))}`;
-        return (
-          <div className="map-tooltip"
-            style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'auto' }}
-            onMouseEnter={() => clearTimeout(tooltipTimerRef.current)}
-            onMouseLeave={() => setTooltip(null)}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-              <div className="map-tooltip-name">{tooltip.hub.name}</div>
-              <a href={mapsUrl} target="_blank" rel="noopener noreferrer" title="Open in Google Maps"
-                 style={{ color: '#2563eb', flexShrink: 0, display: 'flex', alignItems: 'center', textDecoration: 'none', padding: '2px 0' }}>
-                <MapPin size={16} />
-              </a>
-            </div>
-            <div className="map-tooltip-row"><span>📍</span><strong>{tooltip.hub.city}</strong></div>
-            {tooltip.hub.address && <div className="map-tooltip-row" style={{ fontSize: 11 }}>{tooltip.hub.address}</div>}
-            <div className="map-tooltip-row"><span>⚡ Chargers:</span><strong>{tooltip.hub.chargerCount ?? 0}</strong></div>
-            {tooltip.hub.code && <div className="map-tooltip-row"><span>🔖 Code:</span><strong>{tooltip.hub.code}</strong></div>}
-            <div><span className="map-tooltip-status" style={{ background: sc + '22', color: sc }}>● {tooltip.hub.status}</span></div>
-          </div>
-        );
-      })()}
-      <div className="map-legend">
-        {Object.entries(STAFF_HUB_STATUS_COLOR).map(([s, c]) => (
-          <div key={s} className="legend-item">
-            <div className="legend-dot" style={{ background: c }} />
-            <span style={{ fontSize: 11, color: '#374151' }}>{s}</span>
-          </div>
-        ))}
-      </div>
+  return <div className="hub-map-container" style={{ position: 'relative' }}>
+    <div ref={mapRef} id="staff-hub-map" style={{ height: 480, borderRadius: 12, overflow: 'hidden' }} />
+    <div className="map-legend" style={{pointerEvents:'none'}}>
+      {Object.entries(STAFF_HUB_STATUS_COLOR).map(([s, c]) => <div key={s} className="legend-item"><div className="legend-dot" style={{ background: c }} /><span style={{ fontSize: 11, color: '#374151' }}>{s}</span></div>)}
     </div>
-  );
+  </div>;
 }
+
+
+const __HUB_NUMBER_STYLE = (() => { if (typeof document !== 'undefined' && !document.getElementById('hub-number-style')) { const st=document.createElement('style'); st.id='hub-number-style'; st.textContent='.hub-map-number{background:transparent!important;border:0!important;box-shadow:none!important;color:#fff!important;font-weight:900!important;font-size:10px!important;line-height:1!important;text-align:center!important;text-shadow:0 1px 2px rgba(0,0,0,.45)!important;padding:0!important;}'; document.head.appendChild(st); } return null; })();
 
 function StaffChargeHubs({ call, setPage }) {
   const { data: hubs, loading, error } = useFetch(call, '/hubs');
   const [selectedHub,  setSelectedHub]  = useState(null);
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [cityFilter,   setCityFilter]   = useState('ALL');
+  const [areaFilter,   setAreaFilter]   = useState('ALL');
+  const [hubSearch,    setHubSearch]    = useState('');
   const [viewMode,     setViewMode]     = useState('map');
 
   if (loading && !hubs) return <Loader />;
   if (error   && !hubs) return <div className="empty-state"><p style={{color:'#dc2626'}}>{error}</p></div>;
 
-  const hubList      = hubs || [];
-  const filtered     = statusFilter === 'ALL' ? hubList : hubList.filter(h => h.status === statusFilter);
+  const hubList = hubs || [];
+  const cityOptions = [...new Set(hubList.map(h => String(h.city || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const areaOptions = [...new Set(hubList
+    .filter(h => cityFilter === 'ALL' || String(h.city || '').trim() === cityFilter)
+    .map(h => String(h.area || h.region || '').trim()).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+  const filtered = hubList.filter(h =>
+    (statusFilter === 'ALL' || h.status === statusFilter) &&
+    (cityFilter === 'ALL' || String(h.city || '').trim() === cityFilter) &&
+    (areaFilter === 'ALL' || String(h.area || h.region || '').trim() === areaFilter) &&
+    (!hubSearch || [h.name,h.code,h.city,h.area,h.region,h.address,h.siteType,h.sourceId].join(' ').toLowerCase().includes(hubSearch.trim().toLowerCase()))
+  );
   const onlineCount  = hubList.filter(h => h.status === 'ONLINE').length;
   const offlineCount = hubList.filter(h => h.status === 'OFFLINE').length;
   const maintCount   = hubList.filter(h => h.status === 'MAINTENANCE').length;
@@ -2454,7 +2875,26 @@ function StaffChargeHubs({ call, setPage }) {
         ))}
       </div>
 
-      {/* Controls */}
+      {/* Location controls — filter the same shared /hubs dataset used by Customer and Franchisee. */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', background:'#fff', border:'1px solid #e4e7ef', borderRadius:10, padding:10, marginBottom:12 }}>
+        <div style={{display:'flex',gap:8,alignItems:'center',flex:'1 1 220px'}}>
+          <span style={{fontSize:12,fontWeight:700,color:'#374151'}}>📍 Location</span>
+          <select value={cityFilter} onChange={e => { setCityFilter(e.target.value); setAreaFilter('ALL'); }} style={{flex:1,minWidth:150,padding:'7px 9px',border:'1px solid #dfe3eb',borderRadius:7,fontSize:12}}>
+            <option value="ALL">All Cities</option>
+            {cityOptions.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flex:'1 1 250px'}}>
+          <span style={{fontSize:12,fontWeight:700,color:'#374151'}}>Area</span>
+          <select value={areaFilter} onChange={e => { setAreaFilter(e.target.value); if(e.target.value !== 'ALL') setViewMode('map'); }} style={{flex:1,minWidth:170,padding:'7px 9px',border:'1px solid #dfe3eb',borderRadius:7,fontSize:12}}>
+            <option value="ALL">All Areas / Regions</option>
+            {areaOptions.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <input value={hubSearch} onChange={e=>setHubSearch(e.target.value)} placeholder="Search hub, area, address…" style={{flex:'1 1 220px',minWidth:190,padding:'7px 9px',border:'1px solid #dfe3eb',borderRadius:7,fontSize:12}} />
+      </div>
+
+      {/* Status + view controls */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {[

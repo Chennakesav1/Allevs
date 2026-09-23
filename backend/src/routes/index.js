@@ -51,6 +51,7 @@ cr.use(auth, allow('CUSTOMER'));
 cr.get( '/profile',               P.customer.profile);
 cr.patch('/profile',               P.customer.updateProfile);
 cr.post('/profile/image',          upload.single('profileImage'), P.customer.uploadProfileImage);
+cr.post('/kyc/documents',           upload.fields([{name:'aadhaarPhoto',maxCount:1},{name:'panPhoto',maxCount:1},{name:'currentBill',maxCount:1}]), P.customer.saveKycDocuments);
 cr.get( '/vehicles',              P.customer.vehicles);
 cr.post('/vehicles',              P.customer.addVehicle);
 cr.get( '/services',              P.customer.services);
@@ -70,9 +71,14 @@ cr.post('/review',                P.customer.review);
 cr.get( '/complaints',            P.customer.complaints);
 cr.get( '/complaint-options',     P.customer.complaintOptions);
 cr.post('/complaints',            P.customer.complaint);
+cr.post('/complaints/:id/messages', P.customer.complaintMessage);
 cr.post('/complaints/:id/feedback', P.customer.feedback);
 cr.get( '/telemetry/:vehicleId',  P.customer.telemetry);
 cr.get( '/notifications',         P.customer.notifications);
+cr.put( '/notifications/:id/read', P.customer.readNotification);
+cr.put( '/notifications/read-all', P.customer.readAllNotifications);
+cr.get( '/maintenance-services',   P.customer.maintenanceServices);
+cr.post('/maintenance-services/:id/feedback', P.customer.maintenanceFeedback);
 // FIX: serve approved vehicles from MongoDB (replaces broken localStorage approach)
 cr.get( '/available-vehicles',    Ap.availableVehicles);
 // Public hub list for the customer charging-stations map (avoids 403 on /admin/hubs)
@@ -81,6 +87,8 @@ cr.get( '/hubs',                  Ad.hubs);
 cr.post('/purchases/create-order',           Rn.createOrder);
 cr.post('/purchases/verify-payment',         Rn.verifyPayment);
 cr.get( '/purchases',                        Rn.myRentals);
+cr.post('/purchases/:id/extend-order',         Rn.createExtensionOrder);
+cr.post('/purchases/:id/verify-extension',     Rn.verifyExtensionPayment);
 cr.get( '/purchases/invoices',               Rn.myRentalInvoices);
 cr.get( '/purchases/invoices/:id/download',  Rn.downloadInvoice);
 r.use('/customer', cr);
@@ -92,8 +100,10 @@ sr.get( '/jobs',                   P.staff.jobs);
 sr.post('/jobs',                   P.staff.create);
 sr.put( '/jobs/:id',               P.staff.update);
 sr.post('/jobs/:id/assign',        P.staff.assign);
-sr.post('/jobs/:id/start',         P.staff.start);
-sr.post('/jobs/:id/complete',      P.staff.complete);
+sr.post('/jobs/:id/start',         St.start);
+sr.post('/jobs/:id/pause',         St.pause);
+sr.post('/jobs/:id/complete',      St.complete);
+sr.get( '/jobs/:id/history',       St.history);
 sr.get( '/jobs/:id/job-card',      P.staff.jobCard);
 sr.put( '/jobs/:id/job-card',      P.staff.saveJobCard);
 sr.get( '/inventory',              P.staff.inventory);
@@ -126,6 +136,8 @@ sr.get( '/support',                    SP.support);
 sr.post('/support',                    SP.createSupport);
 sr.post('/support/:id/messages',      SP.supportMessage);
 sr.get( '/jobs/:id/timeline',          SP.jobTimeline);
+sr.get( '/vehicle-history',             St.vehicleHistory);
+sr.post('/own-job-cards',              St.createOwnJobCard);
 sr.post('/jobs/:id/proof',             SP.jobProof);
 
 r.use('/staff', sr);
@@ -135,6 +147,23 @@ const fr = express.Router();
 fr.use(auth, allow('FRANCHISEE', 'CENTRAL_ADMIN', 'SUPER_ADMIN'));
 fr.get( '/dashboard',          Fr.dashboard);
 fr.get( '/financials',         Fr.financials);
+fr.get( '/fleet/overview',      Fr.fleetOverview);
+fr.get( '/fleet/vehicles',      Fr.fleetVehicles);
+fr.get( '/fleet/vehicles/:id',  Fr.fleetVehicleDetail);
+fr.put( '/fleet/vehicles/:id/status', Fr.updateFleetStatus);
+fr.get( '/fleet/maintenance',   Fr.listMaintenance);
+fr.post('/fleet/maintenance',   Fr.createMaintenance);
+fr.put( '/fleet/maintenance/:id', Fr.updateMaintenance);
+fr.post('/fleet/rentals/:id/inspection', Fr.handoverInspection);
+fr.get( '/fleet/vehicles/:vehicleId/inspection-history', Fr.vehicleInspectionHistory);
+fr.get( '/fleet/customers',     Fr.customers);
+fr.get( '/fleet/payments',      Fr.payments);
+fr.get( '/fleet/expenses',      Fr.expenses);
+fr.post('/fleet/expenses',      Fr.createExpense);
+fr.get( '/fleet/notifications', Fr.notifications);
+fr.put( '/fleet/notifications/:id/read', Fr.readNotification);
+fr.put( '/fleet/notifications/read-all', Fr.readAllNotifications);
+fr.get( '/fleet/reports',       Fr.report);
 fr.get( '/roi',                Fr.roi);
 fr.get( '/capex',              Fr.capex);
 fr.get( '/emi',                Fr.emi);
@@ -142,7 +171,6 @@ fr.get( '/inventory',          Fr.inventory);
 fr.get( '/staff',              Fr.staff);
 fr.get( '/jobs',               Fr.jobs);
 fr.get( '/purchases',             Rn.franchisePurchases);
-fr.get( '/customer-payments',     Rn.franchiseCustomerPayments);
 fr.put( '/purchases/:id/handover', Rn.handover);
 fr.get( '/complaints',          P.franchise.complaints);
 fr.get( '/fault-vehicles',       P.franchise.faultVehicles);
@@ -155,11 +183,25 @@ fr.get( '/complaints/:id/vehicle-history', async (req, res) => {
     const c = await M.Complaint.findOne({ _id: req.params.id, franchiseeId: req.user._id }).lean();
     if (!c) return res.status(404).json({ message: 'Complaint not found' });
     const vehicleId = c.vehicleId;
-    const [jobs, rentals] = await Promise.all([
+    const [jobs, rentals, maintenance] = await Promise.all([
       M.Job.find({ vehicleId }).sort('-createdAt').limit(20).lean(),
       M.VehicleRental.find({ vehicleId }).sort('-createdAt').limit(10).lean(),
+      M.FleetMaintenance.find({ vehicleId, franchiseeId: req.user._id, type:'COMPLAINT_SERVICE' }).sort('-createdAt').limit(20).lean(),
     ]);
-    return res.json({ jobs, rentals });
+    for (const j of jobs) {
+      if (j.maintenanceId) {
+        const m = maintenance.find(x => String(x._id) === String(j.maintenanceId));
+        if (m) j.solution = m.staffCompletionSummary || m.completionSummary || m.notes || '';
+      }
+      if (!j.solution) j.solution = j.remarks || '';
+      const m = j.maintenanceId ? maintenance.find(x => String(x._id) === String(j.maintenanceId)) : null;
+      j.pauseHistory = j.pauseHistory || m?.staffPauseHistory || [];
+      j.staffStartedAt = m?.staffStartedAt || j.startedAt;
+      j.staffCompletedAt = m?.staffCompletedAt || j.completedAt;
+      j.staffCompletionSummary = m?.staffCompletionSummary || j.remarks || '';
+      j.totalPauseSeconds = (j.pauseHistory||[]).reduce((sum,p)=>sum+Number(p.durationSeconds||0),0);
+    }
+    return res.json({ jobs, rentals, maintenance });
   } catch (e) { return res.status(500).json({ message: e.message }); }
 });
 fr.get( '/staff-list', async (req, res) => {
@@ -179,6 +221,7 @@ fr.post('/pending-staff',           Ap.submitStaff);
 fr.get( '/pending-staff',           Ap.myStaff);
 fr.put( '/pending-staff/:id/remove', Ap.removeStaffFromFranchisee);
 // ── Command Center assigned vehicles (fleet operator view) ────────
+fr.get( '/fleet/documents',        Ad.vehicleDocuments);
 fr.get( '/assigned-vehicles',       Ad.assignedVehicles);
 fr.put( '/assigned-vehicles/:id/activate', Fr.configureFleetVehicle);
 fr.put( '/fleet-inventory/:id',        Fr.updateFleetVehicle);
@@ -196,62 +239,93 @@ const pr = express.Router();
 pr.use(auth, allow('CENTRAL_ADMIN', 'SUPER_ADMIN'));
 
 // Complaints (all franchisees)
+pr.get('/vehicle-documents', Ad.vehicleDocuments);
+pr.post('/vehicle-documents', Ad.createVehicleDocument);
+pr.put('/vehicle-documents/:id', Ad.updateVehicleDocument);
+pr.put('/vehicle-documents/:id/issue', Ad.issueVehicleDocument);
+
 pr.get('/complaints', async (req, res) => {
   try {
-    const { Complaint } = require('../models');
+    const { Complaint, JobProof } = require('../models');
     const list = await Complaint.find()
-      .populate('customerId', 'name email phone')
+      .populate('customerId','name email phone')
+      .populate({path:'maintenanceId',populate:{path:'commandAssignedTo',select:'name email role phone'}})
       .sort('-createdAt').lean();
+    for (const c of list) if (c.maintenanceId?.commandJobId) c.proof = await JobProof.findOne({jobId:c.maintenanceId.commandJobId}).lean();
     res.json(list);
   } catch (e) { res.status(500).json({ message: e.message }); }
 });
-pr.put('/complaints/:id/assign', async (req, res) => {
+
+pr.get('/complaints/:id/vehicle-history', async (req, res) => {
   try {
-    const { Complaint } = require('../models');
-    const { staffId, staffName } = req.body;
-    const c = await Complaint.findByIdAndUpdate(req.params.id,
-      { assignedStaffId: staffId, assignedStaffName: staffName, status: 'IN_PROGRESS' },
-      { new: true });
+    const M = require('../models');
+    const c = await M.Complaint.findById(req.params.id).lean();
     if (!c) return res.status(404).json({ message: 'Complaint not found' });
-    res.json(c);
-  } catch (e) { res.status(500).json({ message: e.message }); }
+    const [jobs, rentals, maintenance] = await Promise.all([
+      M.Job.find({ vehicleId:c.vehicleId }).sort('-createdAt').limit(30).lean(),
+      M.VehicleRental.find({ vehicleId:c.vehicleId }).sort('-createdAt').limit(15).lean(),
+      M.FleetMaintenance.find({ vehicleId:c.vehicleId }).sort('-createdAt').limit(30).lean(),
+    ]);
+    const mm=new Map(maintenance.map(m=>[String(m._id),m]));
+    for(const j of jobs){ const m=j.maintenanceId?mm.get(String(j.maintenanceId)):null; j.solution=m?.staffCompletionSummary||m?.completionSummary||j.remarks||m?.notes||''; j.pauseHistory=j.pauseHistory||m?.staffPauseHistory||[]; j.staffStartedAt=m?.staffStartedAt||j.startedAt; j.staffCompletedAt=m?.staffCompletedAt||j.completedAt; j.staffCompletionSummary=m?.staffCompletionSummary||j.remarks||''; }
+    res.json({ jobs, rentals, maintenance });
+  } catch(e){ res.status(500).json({message:e.message}); }
 });
-pr.put('/complaints/:id/start-work', async (req, res) => {
+
+pr.post('/complaints/:id/messages', async (req,res)=>{try{const {Complaint}=require('../models');const text=String(req.body.message||'').trim();if(!text)return res.status(400).json({message:'Message is required'});const c=await Complaint.findById(req.params.id);if(!c)return res.status(404).json({message:'Complaint not found'});if(c.chatClosed)return res.status(409).json({message:'Chat is closed after service-center handoff'});c.messages=c.messages||[];c.messages.push({senderId:req.user._id,senderRole:req.user.role,message:text});await c.save();const payload={complaintId:c._id,message:c.messages[c.messages.length-1],status:c.status};if(req.io){req.io.to(`user:${c.customerId}`).emit('support:progress',payload);req.io.emit('command:support:update',payload);}res.json(c);}catch(e){res.status(400).json({message:e.message});}});
+
+pr.put('/complaints/:id/service-center', async (req,res)=>{
   try {
-    const { Complaint } = require('../models');
-    const c = await Complaint.findByIdAndUpdate(req.params.id,
-      { status: 'IN_PROGRESS', workStartedAt: new Date() }, { new: true });
-    if (!c) return res.status(404).json({ message: 'Complaint not found' });
-    res.json(c);
-  } catch (e) { res.status(500).json({ message: e.message }); }
+    const { Complaint, FleetMaintenance, Notification } = require('../models');
+    const c=await Complaint.findById(req.params.id); if(!c)return res.status(404).json({message:'Complaint not found'});
+    if(c.chatClosed)return res.status(409).json({message:'Customer chat is already closed'});
+    const serviceCenterName='allEV Service Center', serviceCenterAddress='Somajiguda, Hyderabad', serviceCenterMapsUrl='https://maps.app.goo.gl/zcJfnm24McDJhYHd6';
+    const m=await FleetMaintenance.create({complaintId:c._id,franchiseeId:c.franchiseeId,vehicleId:c.vehicleId,bikeId:c.vehicleSnapshot?.bikeId||c.vehicleSnapshot?.registrationNo,type:'COMPLAINT_SERVICE',title:c.subject||c.category||'Customer Complaint',description:c.message,priority:c.priority||'NORMAL',customerId:c.customerId,vendor:serviceCenterName,vendorLocation:serviceCenterAddress,vendorMapsUrl:serviceCenterMapsUrl,status:'SCHEDULED',staffStatus:'PENDING'});
+    c.maintenanceId=m._id;c.serviceCenterName=serviceCenterName;c.serviceCenterAddress=serviceCenterAddress;c.serviceCenterMapsUrl=serviceCenterMapsUrl;c.chatClosed=true;c.chatClosedAt=new Date();c.serviceCenter={name:serviceCenterName,address:serviceCenterAddress,mapUrl:serviceCenterMapsUrl};c.serviceCenterSentAt=c.chatClosedAt;c.status='IN_PROGRESS';await c.save();
+    const data={complaintId:c._id,maintenanceId:m._id,serviceCenterName,serviceCenterAddress,serviceCenterMapsUrl,chatClosed:true,status:c.status};
+    if(c.customerId)await Notification.create({userId:c.customerId,type:'COMPLAINT_SERVICE_CENTER',title:'Service center visit required',message:'Please visit the service center. Customer chat is now closed.',data});
+    if(c.franchiseeId)await Notification.create({userId:c.franchiseeId,type:'COMPLAINT_SERVICE_CENTER',title:'Complaint moved to service center',message:'Command Center sent the customer to the service center. Progress is view-only.',data});
+    if(req.io){req.io.to(`user:${c.customerId}`).emit('support:progress',data);req.io.to(`user:${c.franchiseeId}`).emit('support:progress',data);req.io.emit('command:support:update',data);}
+    res.json({complaint:c,maintenance:m});
+  } catch(e){res.status(400).json({message:e.message});}
 });
-pr.put('/complaints/:id/pause-work', async (req, res) => {
+
+pr.put('/complaints/:id/assign', async (req,res)=>{
   try {
-    const { Complaint } = require('../models');
-    const c = await Complaint.findByIdAndUpdate(req.params.id,
-      { pauseReason: req.body.pauseReason }, { new: true });
-    if (!c) return res.status(404).json({ message: 'Complaint not found' });
-    res.json(c);
-  } catch (e) { res.status(500).json({ message: e.message }); }
+    const { Complaint, FleetMaintenance, Job, JobCard, User, Notification } = require('../models');
+    const c=await Complaint.findById(req.params.id); if(!c)return res.status(404).json({message:'Complaint not found'});
+    if(!c.maintenanceId)return res.status(409).json({message:'Send the customer to the service center before assigning staff'});
+    const staff=await User.findOne({_id:req.body.staffId,role:{$in:['STAFF','TECHNICIAN','HUB_MANAGER']},active:true}).select('_id name email role phone').lean();
+    if(!staff)return res.status(404).json({message:'Active staff member not found'});
+    const m=await FleetMaintenance.findById(c.maintenanceId);if(!m)return res.status(404).json({message:'Service record not found'});
+    let job=m.commandJobId?await Job.findById(m.commandJobId):null;
+    if(!job){job=await Job.create({customerId:c.customerId,vehicleId:c.vehicleId,commandVehicleId:m.vehicleId,maintenanceId:m._id,complaintId:c._id,bikeId:m.bikeId,franchiseeId:c.franchiseeId,technicianId:staff._id,serviceType:'COMPLAINT_SERVICE',problem:c.message,priority:c.priority||'NORMAL',status:'ASSIGNED',trackingStatus:'Staff Assigned'});await JobCard.create({jobId:job._id,complaint:c.message});}
+    else {job.technicianId=staff._id;job.status=job.status==='COMPLETED'?'COMPLETED':'ASSIGNED';job.trackingStatus='Staff Assigned';await job.save();}
+    m.commandAssignedTo=staff._id;m.commandJobId=job._id;await m.save();c.assignedStaffId=staff._id;c.assignedStaffName=staff.name;c.status='IN_PROGRESS';await c.save();
+    const data={complaintId:c._id,maintenanceId:m._id,jobId:job._id,staff:{_id:staff._id,name:staff.name,email:staff.email,role:staff.role,phone:staff.phone},status:c.status};
+    if(c.customerId)await Notification.create({userId:c.customerId,type:'COMPLAINT_STAFF_ASSIGNED',title:'Staff assigned to your service request',message:`${staff.name} has been assigned to handle your vehicle service.`,data});
+    if(c.franchiseeId)await Notification.create({userId:c.franchiseeId,type:'COMPLAINT_STAFF_ASSIGNED',title:'Staff assigned',message:`${staff.name} has been assigned to the customer service request.`,data});
+    await Notification.create({userId:staff._id,type:'MAINTENANCE_JOB_ASSIGNED',title:'New service job assigned',message:`${c.subject||'Customer service request'} has been assigned to you.`,data});
+    if(req.io){[c.customerId,c.franchiseeId,staff._id].forEach(id=>id&&req.io.to(`user:${id}`).emit('support:progress',data));req.io.emit('command:support:update',data);}
+    res.json({...c.toObject(),maintenanceId:m._id,commandAssignedTo:staff});
+  }catch(e){res.status(400).json({message:e.message});}
 });
-pr.put('/complaints/:id/resume-work', async (req, res) => {
+
+pr.put('/complaints/:id/resolve', async (req,res)=>{
   try {
-    const { Complaint } = require('../models');
-    const c = await Complaint.findByIdAndUpdate(req.params.id,
-      { status: 'IN_PROGRESS', pauseReason: null }, { new: true });
-    if (!c) return res.status(404).json({ message: 'Complaint not found' });
-    res.json(c);
-  } catch (e) { res.status(500).json({ message: e.message }); }
-});
-pr.put('/complaints/:id/resolve', async (req, res) => {
-  try {
-    const { Complaint } = require('../models');
-    const c = await Complaint.findByIdAndUpdate(req.params.id,
-      { status: 'SOLVED', resolution: req.body.resolution, solvedAt: new Date() },
-      { new: true });
-    if (!c) return res.status(404).json({ message: 'Complaint not found' });
-    res.json(c);
-  } catch (e) { res.status(500).json({ message: e.message }); }
+    const { Complaint, FleetMaintenance, JobProof, Notification } = require('../models');
+    const c=await Complaint.findById(req.params.id);if(!c)return res.status(404).json({message:'Complaint not found'});
+    if(!c.maintenanceId)return res.status(409).json({message:'Service center handoff is required before resolving'});
+    const m=await FleetMaintenance.findById(c.maintenanceId);if(!m)return res.status(404).json({message:'Service record not found'});
+    if(!m.staffCompletedAt||m.staffStatus!=='COMPLETED')return res.status(409).json({message:'Staff must mark the service completed before Command Center can resolve it'});
+    const proof=m.commandJobId?await JobProof.findOne({jobId:m.commandJobId}).lean():null;if(!proof)return res.status(409).json({message:'Staff completion proof is required before resolving the complaint'});
+    c.status='SOLVED';c.resolution=req.body.resolution||m.staffCompletionSummary||'Service completed';c.solvedAt=new Date();c.feedbackRequested=true;await c.save();
+    const data={complaintId:c._id,maintenanceId:m._id,jobId:m.commandJobId,status:'SOLVED',resolution:c.resolution,proof};
+    if(c.customerId)await Notification.create({userId:c.customerId,type:'COMPLAINT_SOLVED',title:'Issue resolved — your review is requested',message:'Command Center has resolved your complaint. Please review the service.',data});
+    if(c.franchiseeId)await Notification.create({userId:c.franchiseeId,type:'COMPLAINT_SOLVED',title:'Customer complaint resolved',message:'Command Center resolved the complaint after staff completion.',data});
+    if(req.io){req.io.to(`user:${c.customerId}`).emit('support:progress',data);req.io.to(`user:${c.franchiseeId}`).emit('support:progress',data);req.io.emit('command:support:update',data);}
+    res.json({...c.toObject(),proof});
+  }catch(e){res.status(400).json({message:e.message});}
 });
 
 // Staff list (for assign dropdowns)
@@ -296,16 +370,8 @@ pr.get('/all-jobs', async (req, res) => {
 });
 
 // Staff attendance (stub — return empty if no Attendance model)
-pr.get('/staff-attendance', async (req, res) => {
-  try {
-    const M = require('../models');
-    if (M.Attendance) {
-      const records = await M.Attendance.find().sort('-date').limit(500).lean();
-      return res.json(records);
-    }
-    res.json([]);
-  } catch (e) { res.status(500).json({ message: e.message }); }
-});
+pr.get('/staff-attendance', SP.commandAttendance);
+pr.get('/staff-own-job-cards', SP.commandOwnJobCards);
 
 // Leave requests (stub — return empty if no LeaveRequest model)
 pr.get('/leave-requests', async (req, res) => {
@@ -323,13 +389,20 @@ pr.put('/leave-requests/:id/:action', SP.commandLeaveAction);
 // ── Staff communications / HR services for Command Center ───────
 pr.get( '/staff-notifications',                    SP.commandNotifications);
 pr.post('/staff-notifications',                    SP.commandSendNotification);
+pr.get('/notifications', async (req,res)=>{try{const {Notification}=require('../models');res.json(await Notification.find({userId:req.user._id}).sort('-createdAt').limit(200).lean());}catch(e){res.status(500).json({message:e.message});}});
+pr.put('/notifications/read-all', async (req,res)=>{try{const {Notification}=require('../models');const q={userId:req.user._id,read:false};if(req.query.prefix)q.type=new RegExp('^'+String(req.query.prefix).replace(/[.*+?^${}()|[\\]\\]/g,'\\$&'));await Notification.updateMany(q,{$set:{read:true}});res.json({ok:true});}catch(e){res.status(400).json({message:e.message});}});
 pr.get( '/support-tickets',                        SP.commandSupport);
 pr.put( '/support-tickets/:id',                    SP.commandSupportUpdate);
 pr.post('/staff-documents',                        SP.commandCreateDocument);
+pr.get( '/staff-payslips',                         SP.commandPayslips);
 pr.post('/staff-payslips',                         SP.commandCreatePayslip);
 pr.post('/staff-shifts',                           SP.commandCreateShift);
 pr.post('/staff-recognition',                      SP.commandCreateRecognition);
 pr.post('/staff-checklists',                       SP.commandCreateChecklist);
+pr.get( '/maintenance-customer-service',           Fr.commandMaintenance);
+pr.put( '/maintenance-customer-service/:id/assign', Fr.commandMaintenanceAssign);
+pr.put( '/maintenance-customer-service/:id/status', Fr.commandMaintenanceUpdate);
+pr.get( '/maintenance-customer-service/:id/feedback', Fr.commandMaintenanceFeedback);
 
 r.use('/platform', pr);
 

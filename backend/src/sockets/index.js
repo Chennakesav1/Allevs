@@ -1,1 +1,1 @@
-module.exports=(io)=>{io.on('connection',socket=>{socket.on('join:job',id=>socket.join(`job:${id}`));socket.on('join:hub',id=>socket.join(`hub:${id}`));});};
+module.exports=(io)=>{io.on('connection',socket=>{socket.on('auth:user',id=>{if(id)socket.join(`user:${id}`)});socket.on('auth:command',()=>socket.join('command:center'));socket.on('join:job',id=>socket.join(`job:${id}`));socket.on('join:hub',id=>socket.join(`hub:${id}`));});};

@@ -241,16 +241,27 @@ exports.availableVehicles = async (req, res) => {
       return 3;
     };
 
-    // Normalise PendingVehicle docs
-    const normPending = pendingDocs.map(v => ({
-      ...v,
-      _source:          'fleet_submission',
-      quantity:         v.quantity == null ? 1 : v.quantity,
-      franchiseeId:     v.franchiseeId,
-      franchiseeName:   fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE Fleet',
-      franchiseeAddress:fm.get(String(v.franchiseeId))?.address || null,
-      _score:           score(v.franchiseeId),
-    }));
+    // Normalise PendingVehicle docs. A quantity represents individual physical units,
+    // so expose every unit separately to the customer portal. If explicit bikeIds
+    // exist, use them; otherwise keep the parent record's bikeId/registration identity.
+    const normPending = pendingDocs.flatMap(v => {
+      const qty = Math.max(1, Number(v.quantity == null ? 1 : v.quantity));
+      const ids = Array.isArray(v.bikeIds) ? v.bikeIds.filter(Boolean) : [];
+      return Array.from({ length: qty }, (_, i) => ({
+        ...v,
+        _id: v._id,
+        displayId: ids[i] || v.bikeId || (qty > 1 ? `${v.registrationNo || 'BIKE'}-${i + 1}` : undefined),
+        bikeId: ids[i] || v.bikeId || (qty > 1 ? `${v.registrationNo || 'BIKE'}-${i + 1}` : undefined),
+        _parentVehicleId: v._id,
+        _unitIndex: i + 1,
+        _source: 'fleet_submission',
+        quantity: 1,
+        franchiseeId: v.franchiseeId,
+        franchiseeName: fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE Fleet',
+        franchiseeAddress: fm.get(String(v.franchiseeId))?.address || null,
+        _score: score(v.franchiseeId),
+      }));
+    });
 
     // Normalise CommandVehicle docs — map fields to same shape
     const normCmd = cmdDocs.map(v => ({
