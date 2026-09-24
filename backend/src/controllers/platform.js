@@ -40,6 +40,20 @@ const creditWalletRecharge=async({customerId,recharge,paymentId,signature})=>{
 };
 
 exports.customer={
+ referral:async(req,res)=>{
+  try{
+   const {User,ReferralReward,Wallet}=M;
+   const u=await User.findById(req.user._id);
+   if(!u.referralCode){
+    const clean=String(u.name||'EV').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'EV';
+    for(let i=0;i<8;i++){const code=`${clean}${Math.random().toString(36).slice(2,8).toUpperCase()}`;if(!await User.exists({referralCode:code})){u.referralCode=code;await u.save();break;}}
+   }
+   const rewards=await ReferralReward.find({$or:[{referrerId:u._id},{referredId:u._id}]}).populate('referredId','name email').populate('referrerId','name email').sort('-createdAt').lean();
+   const wallet=await Wallet.findOne({customerId:u._id}).lean();
+   const totalReferrals=rewards.filter(r=>String(r.referrerId?._id||r.referrerId)===String(u._id)).length;
+   return ok(res,{code:u.referralCode,amount:100,walletBalance:wallet?.balance||0,totalReferrals,rewards});
+  }catch(e){return fail(res,e)}
+ },
  profile:async(req,res)=>ok(res,await M.User.findById(req.user._id).select('-passwordHash -refreshTokenHash')),
  updateProfile:async(req,res)=>{try{const allowed=['name','phone','aadharNumber','panNumber','address','settings'];const data={};for(const k of allowed)if(req.body[k]!==undefined)data[k]=req.body[k];if(data.name!==undefined&&!String(data.name).trim())throw Error('Name is required');if(data.phone!==undefined)data.phone=String(data.phone).trim();if(data.aadharNumber!==undefined)data.aadharNumber=String(data.aadharNumber).replace(/\s/g,'');if(data.panNumber!==undefined)data.panNumber=String(data.panNumber).trim().toUpperCase();const user=await M.User.findByIdAndUpdate(req.user._id,data,{new:true,runValidators:true}).select('-passwordHash -refreshTokenHash');return ok(res,user)}catch(e){fail(res,e)}},
  uploadProfileImage:async(req,res)=>{try{if(!req.file)throw Error('Profile image is required');const url=`/uploads/${req.file.filename}`;const user=await M.User.findByIdAndUpdate(req.user._id,{profileImage:url},{new:true}).select('-passwordHash -refreshTokenHash');return ok(res,user)}catch(e){fail(res,e)}},
@@ -58,8 +72,9 @@ exports.customer={
   const aadharNumber=/^\d{12}$/.test(bodyAadhar)?bodyAadhar:aadharMatch;
   const panNumber=/^[A-Z]{5}\d{4}[A-Z]$/.test(bodyPan)?bodyPan:panMatch;
   const now=new Date();
+  const kycFranchiseeId = req.body.franchiseeId || undefined;
   const identityDocuments={aadhar:{url:localUrl(files.aadhaarPhoto[0]),fileName:files.aadhaarPhoto[0].originalname,uploadedAt:now},pan:{url:localUrl(files.panPhoto[0]),fileName:files.panPhoto[0].originalname,uploadedAt:now},currentBill:{url:localUrl(files.currentBill[0]),fileName:files.currentBill[0].originalname,uploadedAt:now}};
-  const user=await M.User.findByIdAndUpdate(req.user._id,{aadharNumber:aadharNumber||undefined,panNumber:panNumber||undefined,identityDocuments},{new:true,runValidators:true}).select('-passwordHash -refreshTokenHash');
+  const user=await M.User.findByIdAndUpdate(req.user._id,{aadharNumber:aadharNumber||undefined,panNumber:panNumber||undefined,identityDocuments, ...(kycFranchiseeId?{kycFranchiseeId}: {})},{new:true,runValidators:true}).select('-passwordHash -refreshTokenHash');
   return ok(res,{user,aadharNumber:aadharNumber||'',panNumber:panNumber||'',ocr:{aadharDetected:!!aadharMatch,panDetected:!!panMatch}});
  }catch(e){fail(res,e)}},
  vehicles:async(req,res)=>ok(res,await M.Vehicle.find({customerId:req.user._id})),
@@ -137,7 +152,7 @@ exports.customer={
   const activeVehicles=[...rentals.map(r=>({source:'RENTAL',rentalId:r._id,vehicleId:r.vehicleId,vehicleSnapshot:r.vehicleSnapshot,paymentDetails:{paymentStatus:r.paymentStatus,razorpayPaymentId:r.razorpayPaymentId,totalAmount:r.totalAmount,pricePerDay:r.pricePerDay,startDate:r.startDate,endDate:r.endDate},franchiseeId:r.vehicleSnapshot?.franchiseeId,franchiseeName:r.vehicleSnapshot?.franchiseeName})),...owned.map(v=>({source:'OWNED',vehicleId:v._id,vehicleSnapshot:{model:v.model,registrationNo:v.registrationNo,vin:v.vin,batterySoc:v.batterySoc,batterySoh:v.batterySoh},paymentDetails:{},franchiseeId:null,franchiseeName:''}))];
   return ok(res,{customerAddress:addr,franchisees,activeVehicles});
 },
-complaints:async(req,res)=>ok(res,await M.Complaint.find({customerId:req.user._id}).sort('-createdAt').lean()),
+complaints:async(req,res)=>{try{const list=await M.Complaint.find({customerId:req.user._id}).sort('-createdAt').lean();for(const c of list){if(c.jobId){c.job=await M.Job.findById(c.jobId).lean();c.jobCard=await M.JobCard.findOne({jobId:c.jobId}).lean();c.jobProof=await M.JobProof.findOne({jobId:c.jobId}).lean();}}return ok(res,list)}catch(e){return fail(res,e)}},
 complaint:async(req,res)=>{try{const {vehicleId,franchiseeId,category,message,subject,vehicleSnapshot,paymentDetails}=req.body;if(!vehicleId||!franchiseeId||!message)throw Error('Active bike, franchisee and complaint message are required');const fr=await M.User.findOne({_id:franchiseeId,role:'FRANCHISEE',active:true});if(!fr)throw Error('Selected franchisee is not available');const c=await M.Complaint.create({customerId:req.user._id,vehicleId,franchiseeId,franchiseeName:fr.name,category,message,subject:subject||category||'Vehicle Complaint',vehicleSnapshot,paymentDetails,messages:[{senderId:req.user._id,senderRole:'CUSTOMER',message}]});await createNotification(req,fr._id,'COMPLAINT_NEW','New Customer Complaint',`${req.user.name} raised a vehicle complaint`,{complaintId:c._id});const admins=await M.User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean();for(const a of admins)await createNotification(req,a._id,'COMPLAINT_NEW','New Customer Complaint',`${req.user.name} raised a vehicle complaint`,{complaintId:c._id});await emitComplaint(req,c);return ok(res,c,201)}catch(e){return fail(res,e)}},
 complaintMessages:async(req,res)=>{try{const c=await M.Complaint.findOne({_id:req.params.id,customerId:req.user._id}).select('messages serviceCenterSentAt chatClosedAt').lean();if(!c)return ok(res,{message:'Complaint not found'},404);return ok(res,c)}catch(e){return fail(res,e)}},
 complaintMessage:async(req,res)=>{try{const c=await M.Complaint.findOne({_id:req.params.id,customerId:req.user._id});if(!c)return ok(res,{message:'Complaint not found'},404);if(c.chatClosedAt||c.serviceCenterSentAt)return ok(res,{message:'Chat is closed after service-center handoff'},409);const message=String(req.body.message||'').trim();if(!message)return ok(res,{message:'Message is required'},400);c.messages.push({senderId:req.user._id,senderRole:'CUSTOMER',message});if(c.status==='OPEN')c.status='IN_PROGRESS';await c.save();const admins=await M.User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean();for(const a of admins)await createNotification(req,a._id,'COMPLAINT_MESSAGE','New Customer Message',`${req.user.name} sent a message on a complaint`,{complaintId:c._id});await emitComplaint(req,c,'complaint:message');return ok(res,c)}catch(e){return fail(res,e)}},
@@ -356,9 +371,8 @@ exports.franchise.complaints=async(req,res)=>{
       .populate({path:'maintenanceId',populate:{path:'commandAssignedTo',select:'name email role phone'}})
       .sort('-createdAt').lean();
     for(const c of list){
-      if(c.maintenanceId?.commandJobId){
-        c.proof=await M.JobProof.findOne({jobId:c.maintenanceId.commandJobId}).lean();
-      }
+      const jobId=c.jobId || c.maintenanceId?.commandJobId;
+      if(jobId){ c.job=await M.Job.findById(jobId).lean(); c.proof=await M.JobProof.findOne({jobId}).lean(); c.jobCard=await M.JobCard.findOne({jobId}).lean(); }
     }
     return ok(res,list);
   }catch(e){return fail(res,e)}

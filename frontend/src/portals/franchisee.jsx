@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import axios from 'axios';
 import allevLogo from '../allevlogo.png';
 import {
-  Activity, AlertTriangle, Car, CheckCircle, ClipboardList, DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin, Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText, Plus, X, Save, Upload, Clock, Image, Eye, Search, ChevronRight, UserX, UserCheck, UserMinus, Hash, Tag, Layers, Wrench, Building2, Edit2, Pencil, RefreshCw, ChevronLeft, Menu, MoreHorizontal, XCircle, Settings, User, Home, ShieldCheck, Check, Moon, Globe2, Type, LockKeyhole
+  Activity, AlertTriangle, Car, CalendarDays, RotateCcw, CheckCircle, ClipboardList, DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin, Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText, Plus, X, Save, Upload, Clock, Image, Eye, Search, ChevronRight, UserX, UserCheck, UserMinus, Hash, Tag, Layers, Wrench, Building2, Edit2, Pencil, RefreshCw, ChevronLeft, Menu, MoreHorizontal, XCircle, Settings, User, Home, ShieldCheck, Check, Moon, Globe2, Type, LockKeyhole, Send, Gift
 } from 'lucide-react';
 import './franchisee.css';
 
@@ -51,6 +51,8 @@ const NAV_ITEMS = {
     // ── Network ──
     { id: 'charge-hubs',      label: 'Charge Hubs',           Icon: MapPin,          cat: 'Network'    },
     { id: 'notifications',    label: 'Notifications',         Icon: Bell,            cat: 'Network'    },
+    { id: 'coupons',          label: 'Coupons & Offers',       Icon: Tag,             cat: 'Customers'  },
+    { id: 'broadcasts',       label: 'Customer Broadcasts',   Icon: Send,            cat: 'Network'    },
 
     // ── Finance / legacy ──
     { id: 'financials',       label: 'Financials',            Icon: DollarSign,      cat: 'Finance'    },
@@ -336,6 +338,8 @@ function PageRouter({ page, call, user, setPage }) {
     expenses:         <FleetExpenses call={call} />,
     reports:          <FleetReports call={call} />,
     notifications:    <FleetNotifications call={call} />,
+    coupons:          <FleetCoupons call={call} />,
+    broadcasts:       <FleetBroadcasts call={call} />,
     complaints:       <FranComplaints call={call} />,
     'fault-vehicles': <FaultVehicles call={call} />,
     'charge-hubs':    <FranChargeHubs call={call} />,
@@ -3741,7 +3745,7 @@ function FranComplaints({ call }) {
                             {j.elapsedSeconds>0&&<span>⏱ Work Duration: {fmtElapsed(j.elapsedSeconds)}</span>}
                             {j.totalPauseSeconds>0&&<span>⏸ Total Paused: {fmtElapsed(j.totalPauseSeconds)}</span>}
                             {j.problem&&<span style={{gridColumn:'1/-1'}}>⚠️ Problem: {j.problem}</span>}
-                            {(j.serviceType==='COMPLAINT_SERVICE' || j.solution) && <span style={{gridColumn:'1/-1',color:'#166534',fontWeight:600}}>🛠️ Solution: {j.solution || 'Service completed'}</span>}
+                            {(j.serviceType==='COMPLAINT_SERVICE' || j.solution) && <span style={{gridColumn:'1/-1',color:'#166534',fontWeight:600}}>🛠️ Solution: {j.solution || 'Service completed'}</span>}{j.jobCard && <span style={{gridColumn:'1/-1',padding:'8px 10px',background:'#eff6ff',borderRadius:8,color:'#1d4ed8'}}><b>📄 Job Card {j.jobCard.jobCardNumber||''}</b> · Technician: {j.jobCard.jobCardData?.technicianName||'—'} · Odometer: {j.jobProof?.odometerReading??'—'} km · Final notes: {j.job?.completionNotes||j.jobCard.jobCardData?.notes||'—'}</span>}
                             {j.trackingStatus&&<span style={{gridColumn:'1/-1'}}>📍 Status: {j.trackingStatus}</span>}
                           </div>
                           {(j.pauseHistory||[]).length>0&&<div style={{marginTop:9,padding:9,borderRadius:8,background:'#fffbeb',border:'1px solid #fde68a'}}><div style={{fontWeight:700,color:'#92400e',marginBottom:5}}>⏸ Pause Report</div>{j.pauseHistory.map((pa,pi)=><div key={pi} style={{fontSize:11,color:'#78350f',display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,marginTop:4}}><span>Paused: {fmtDt(pa.pausedAt)}</span><span>Resumed: {pa.resumedAt?fmtDt(pa.resumedAt):'Still paused'}</span><span style={{gridColumn:'1/-1'}}>Reason: {pa.reason||'Not specified'} · Duration: {pa.durationSeconds!=null?fmtElapsed(pa.durationSeconds):'—'}</span></div>)}</div>}
@@ -4582,6 +4586,126 @@ function FranchiseeProfile({ call, user, setPage }) {
   );
 }
 
+
+function FranchiseDashboardInsights({ call, setPage }) {
+  const { data, loading, error, refresh } = useFetch(call, '/franchise/fleet/dashboard-insights');
+  const [dueDays, setDueDays] = useState(1);
+  const [open, setOpen] = useState(null);
+
+  if (loading) return <div className="fr-dashboard-insights-loading"><Loader /></div>;
+  if (error) return <Card title="Dashboard Insights"><Err msg={error} /></Card>;
+  if (!data) return null;
+
+  const dueRows = dueDays === 1 ? (data.todayDue || []) : (data.dueIn1To5 || []).filter(r => {
+    if (!r.endDate) return false;
+    const d = new Date(r.endDate); const now = new Date(); now.setHours(0,0,0,0);
+    const end = new Date(now); end.setDate(end.getDate() + dueDays + 1);
+    const start = new Date(now); start.setDate(start.getDate() + 1);
+    return d >= start && d < end;
+  });
+
+  const cards = [
+    { key:'todayDue', title:"Today's Due", value:(data.todayDue||[]).length, Icon:Clock, tone:'amber', subtitle:'Rentals due today', rows:data.todayDue||[] },
+    { key:'dueRange', title:'Due in 1–5 Days', value:(data.dueIn1To5||[]).length, Icon:CalendarDays, tone:'blue', subtitle:'Upcoming rental dues', rows:dueRows, range:true },
+    { key:'overdue', title:'Overdue Rentals', value:(data.overdueRentals||[]).length, Icon:AlertTriangle, tone:'red', subtitle:'Past due and still open', rows:data.overdueRentals||[] },
+    { key:'payment', title:'Payment Due', value:(data.paymentDue||[]).length, Icon:Wallet, tone:'violet', subtitle:'Bookings needing payment', rows:data.paymentDue||[] },
+    { key:'returns', title:"Today's Returns", value:(data.todayReturns||[]).length, Icon:RotateCcw, tone:'green', subtitle:'Expected returns today', rows:data.todayReturns||[] },
+    { key:'availability', title:'Fleet Availability', value:data.fleetAvailability?.available ?? 0, Icon:Truck, tone:'cyan', subtitle:`${data.fleetAvailability?.rented ?? 0} rented · ${data.fleetAvailability?.inactive ?? 0} inactive`, rows:null },
+    { key:'maintenance', title:'Maintenance Due', value:(data.maintenanceDue||[]).length, Icon:Wrench, tone:'orange', subtitle:'Due within the next 5 days', rows:data.maintenanceDue||[] },
+    { key:'complaints', title:'Complaints', value:(data.complaints||[]).length, Icon:Bell, tone:'rose', subtitle:'Open operational complaints', rows:data.complaints||[] },
+    { key:'notifications', title:'Important Notifications', value:(data.importantNotifications||[]).length, Icon:ShieldCheck, tone:'indigo', subtitle:'Unread or marked important', rows:data.importantNotifications||[] },
+    { key:'coupons', title:'Coupon Summary', value:data.couponSummary?.active ?? 0, Icon:Tag, tone:'pink', subtitle:`${data.couponSummary?.used ?? 0} uses · ${data.couponSummary?.total ?? 0} total`, rows:null },
+    { key:'referrals', title:'Referral Summary', value:data.referralSummary?.successful ?? 0, Icon:Gift, tone:'teal', subtitle:`₹${Number(data.referralSummary?.rewards || 0).toLocaleString('en-IN')} rewards`, rows:null },
+  ];
+
+  const titleFor = c => c.key === 'dueRange' ? `Due in 1–${dueDays} Days` : c.title;
+  const openCard = c => {
+    if (c.key === 'availability') { setPage('inventory'); return; }
+    if (c.key === 'complaints') { setPage('complaints'); return; }
+    if (c.key === 'notifications') { setPage('notifications'); return; }
+    if (c.key === 'coupons') { setPage('coupons'); return; }
+    if (c.key === 'maintenance') { setPage('maintenance'); return; }
+    setOpen(c);
+  };
+
+  const vehicleName = r => [r?.vehicle?.make, r?.vehicle?.model].filter(Boolean).join(' ') || r?.bikeId || 'Vehicle';
+  const RentalRows = ({ rows }) => !rows?.length ? <div className="fr-insight-empty">No related records found.</div> : (
+    <div className="fr-insight-list">
+      {rows.map((r, i) => (
+        <div className="fr-insight-row" key={r._id || i}>
+          <div className="fr-insight-row-main">
+            <strong>{r.customer?.name || r.customerId?.name || vehicleName(r)}</strong>
+            <span>{vehicleName(r)}{r.rentalPlan ? ` · ${r.rentalPlan}` : ''}</span>
+          </div>
+          <div className="fr-insight-row-meta">
+            <b>{r.endDate ? dateOnly(r.endDate) : r.paymentStatus || '—'}</b>
+            <span>{r.pendingExtension?.amount ? money(r.pendingExtension.amount) : r.totalAmount ? money(r.totalAmount) : r.status || '—'}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      <section className="fr-dashboard-insights">
+        <div className="fr-dashboard-insights-head">
+          <div>
+            <div className="fr-dashboard-insights-kicker">OPERATIONS SNAPSHOT</div>
+            <h2>Today & Upcoming</h2>
+            <p>Click any card to open the related records.</p>
+          </div>
+          <button type="button" className="btn-ghost" onClick={refresh}><RefreshCw size={14}/> Refresh</button>
+        </div>
+
+        <div className="fr-insight-grid">
+          {cards.map(c => {
+            const Icon = c.Icon;
+            return (
+              <button type="button" key={c.key} className={`fr-insight-card ${c.key === 'dueRange' ? 'fr-insight-card-range' : ''}`} onClick={() => openCard(c)}>
+                <span className={`fr-insight-icon ${c.tone}`}><Icon size={19}/></span>
+                <span className="fr-insight-copy">
+                  <small>{titleFor(c)}</small>
+                  <strong>{c.value}</strong>
+                  <em>{c.subtitle}</em>
+                </span>
+                <ChevronRight size={17} className="fr-insight-arrow"/>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="fr-due-selector">
+          <div>
+            <strong>Due in 1–5 Days</strong>
+            <span>Choose a window to see upcoming rentals.</span>
+          </div>
+          <div className="fr-due-pills">
+            {[1,2,3,4,5].map(n => (
+              <button key={n} type="button" className={dueDays===n ? 'active' : ''} onClick={() => setDueDays(n)}>{n} day{n>1?'s':''}</button>
+            ))}
+          </div>
+          <div className="fr-due-results">
+            <b>{dueRows.length}</b> rental{dueRows.length===1?'':'s'} due within {dueDays} day{dueDays>1?'s':''}
+          </div>
+        </div>
+      </section>
+
+      {open && (
+        <Drawer
+          open
+          onClose={() => setOpen(null)}
+          title={titleFor(open)}
+          subtitle={open.subtitle}
+          width={720}
+        >
+          {open.key === 'availability' ? null : <RentalRows rows={open.rows} />}
+        </Drawer>
+      )}
+    </>
+  );
+}
+
 function FleetDashboard({call,setPage,user}){
   const {data,loading,error,refresh}=useFetch(call,'/franchise/fleet/overview');
   if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
@@ -4654,6 +4778,8 @@ function FleetDashboard({call,setPage,user}){
 
       <div className="fr-mobile-accent-line" />
 
+      <FranchiseDashboardInsights call={call} setPage={setPage} />
+
       <div className="fr-mobile-stat-grid">
         <button type="button" className="fr-mobile-stat-card" onClick={()=>setPage('inventory')}>
           <span className="fr-stat-icon blue"><Truck size={19}/></span>
@@ -4711,7 +4837,8 @@ function FleetDashboard({call,setPage,user}){
     {/* Existing desktop dashboard remains intact */}
     <section className="fr-desktop-dashboard">
       <PageHeader title="Fleet Operator Dashboard" sub="Live view of your assigned fleet, bookings, customers, payments and operations." actions={<button className="btn-ghost" onClick={refresh}><RefreshCw size={14}/> Refresh</button>}/>
-      <MetricGrid metrics={[
+      <FranchiseDashboardInsights call={call} setPage={setPage} />
+            <MetricGrid metrics={[
         {label:'Fleet Vehicles',value:m.totalFleet,Icon:Truck,color:'#2563eb'},
         {label:'Available',value:m.availableFleet,Icon:CheckCircle,color:'#16a34a'},
         {label:'Active Rentals',value:m.activeRentals,Icon:Car,color:'#7c3aed'},
@@ -4834,7 +4961,36 @@ function FleetDocuments({call}){
  </>;
 }
 
-function FleetCustomers({call}){const [search,setSearch]=useState('');const {data,loading,error}=useFetch(call,`/franchise/fleet/customers?search=${encodeURIComponent(search)}`);if(loading)return <Loader/>;if(error)return <Err msg={error}/>;return <><PageHeader title="Customers" sub="Customers who have booked or purchased vehicles from this fleet operator."/><Card title="Customer Directory" badge={`${data?.length||0}`}><div className="fleet-customer-search"><Search size={16}/><input placeholder="Search name, email or phone" value={search} onChange={e=>setSearch(e.target.value)} /></div><DataTable rows={data||[]} cols={['name','email','phone','totalPaid','createdAt']}/></Card></>}
+function FleetCustomers({call}){
+  const [search,setSearch]=useState('');
+  const {data,loading,error}=useFetch(call,`/franchise/fleet/customers?search=${encodeURIComponent(search)}`);
+  const [selected,setSelected]=useState(null);
+  if(loading)return <Loader/>;if(error)return <Err msg={error}/>;
+  const rows=data||[]; const docUrl=u=>u?(u.startsWith('http')?u:`${API.replace(/\/api\/?$/,'')}${u}`):'';
+  return <><PageHeader title="Customers" sub="Customer profile, KYC details, uploaded documents, bookings and payments connected to this fleet operator."/>
+    <Card title="Customer Directory" badge={`${rows.length}`}>
+      <div className="fleet-customer-search"><Search size={16}/><input placeholder="Search name, email or phone" value={search} onChange={e=>setSearch(e.target.value)} /></div>
+      <div className="table-scroll"><table><thead><tr><th>Customer</th><th>Contact</th><th>Aadhaar</th><th>PAN</th><th>KYC Documents</th><th>Paid</th><th>Action</th></tr></thead>
+      <tbody>{rows.map(r=><tr key={r._id}>
+        <td><strong>{r.name||'—'}</strong><div style={{fontSize:11,color:'#64748b'}}>{r.email||'—'}</div></td>
+        <td>{r.phone||'—'}</td>
+        <td>{r.aadharNumber||'Not provided'}</td>
+        <td>{r.panNumber||'Not provided'}</td>
+        <td><div style={{display:'flex',gap:5,flexWrap:'wrap'}}>{[['Aadhaar',r.kyc?.documents?.aadhar?.url],['PAN',r.kyc?.documents?.pan?.url],['Bill',r.kyc?.documents?.currentBill?.url]].map(([label,url])=>url?<a key={label} href={docUrl(url)} target="_blank" rel="noreferrer" className="status-pill" style={{background:'#eff6ff',color:'#1d4ed8',textDecoration:'none'}}>{label}</a>:<span key={label} className="status-pill" style={{background:'#f1f5f9',color:'#64748b'}}>{label} missing</span>)}</div></td>
+        <td>{money(r.totalPaid)}</td>
+        <td><button className="btn-ghost" onClick={()=>setSelected(r)}>View</button></td>
+      </tr>)}</tbody></table></div>
+    </Card>
+    {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="modal-title">{selected.name}</div><div className="modal-subtitle">{selected.email}</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div><div className="modal-body">
+      <div className="kv-row"><span>Phone</span><strong>{selected.phone||'—'}</strong></div>
+      <div className="kv-row"><span>Aadhaar</span><strong>{selected.aadharNumber||'—'}</strong></div>
+      <div className="kv-row"><span>PAN</span><strong>{selected.panNumber||'—'}</strong></div>
+      <div className="kv-row"><span>Address</span><strong>{typeof selected.address==='string'?selected.address:[selected.address?.line1,selected.address?.line2,selected.address?.city,selected.address?.district,selected.address?.state,selected.address?.pincode].filter(Boolean).join(', ')||'—'}</strong></div>
+      <h3 style={{margin:'16px 0 8px'}}>KYC Documents</h3>
+      {[['Aadhaar',selected.kyc?.documents?.aadhar?.url],['PAN',selected.kyc?.documents?.pan?.url],['Current Bill',selected.kyc?.documents?.currentBill?.url]].map(([label,url])=><div key={label} style={{display:'flex',justifyContent:'space-between',padding:'9px 0',borderBottom:'1px solid #e5e7eb'}}><span>{label}</span>{url?<a href={docUrl(url)} target="_blank" rel="noreferrer" className="btn-ghost">Open document</a>:<span>Not uploaded</span>}</div>)}
+    </div></div></div>}
+  </>;
+}
 function FleetPayments({call}){
   const {data,loading,error}=useFetch(call,'/franchise/fleet/payments');
   const [selectedPayment,setSelectedPayment]=useState(null);
@@ -5013,6 +5169,52 @@ function FleetExpenses({call}){
 
 function FleetReports({call}){const {data,loading,error}=useFetch(call,'/franchise/fleet/reports');if(loading)return <Loader/>;if(error)return <Err msg={error}/>;return <><PageHeader title="Reports & Analytics" sub={`Generated ${dateOnly(data?.generatedAt)}`}/><MetricGrid metrics={[{label:'Revenue',value:money(data?.summary?.revenue),Icon:Wallet,color:'#16a34a'},{label:'Expenses',value:money(data?.summary?.expenses),Icon:DollarSign,color:'#dc2626'},{label:'Maintenance Cost',value:money(data?.summary?.maintenanceCost),Icon:Wrench,color:'#d97706'}]}/><Card title="Monthly Revenue"><DataTable rows={data?.monthlyRevenue||[]} cols={['month','revenue']}/></Card><Card title="Booking Report"><DataTable rows={data?.bookings||[]} cols={['rentalPlan','paymentStatus','status','totalAmount','createdAt']}/></Card></>}
 function FleetNotifications({call}){const {data,loading,error,refresh}=useFetch(call,'/franchise/fleet/notifications');if(loading)return <Loader/>;if(error)return <Err msg={error}/>;return <><PageHeader title="Notifications" sub="Booking, payment, maintenance and operational alerts."/><Card title="Notification Center"><div style={{display:'grid',gap:8}}>{(data||[]).map(n=><div key={n._id} style={{padding:12,border:'1px solid #e5e7eb',borderRadius:9,background:n.read?'#fff':'#eff6ff'}}><div style={{display:'flex',justifyContent:'space-between',gap:10}}><b>{n.title}</b>{!n.read&&<button className="btn-ghost" onClick={async()=>{await call(`/franchise/fleet/notifications/${n._id}/read`,{method:'put'});refresh()}}>Mark read</button>}</div><div style={{fontSize:12,color:'#64748b',marginTop:4}}>{n.message}</div><div style={{fontSize:11,color:'#94a3b8',marginTop:5}}>{dateOnly(n.createdAt)}</div></div>)}{!data?.length&&<div className="empty-state"><Bell size={34}/><p>No notifications.</p></div>}</div></Card></>}
+
+
+function FleetCoupons({call}){
+  const {data:customers}=useFetch(call,'/franchise/fleet/customers');
+  const {data,loading,error,refresh}=useFetch(call,'/franchise/coupons');
+  const [form,setForm]=useState({code:'',title:'',description:'',discountType:'PERCENT',discountValue:'',maxDiscount:'',minOrderAmount:'',expiresAt:'',sendTo:'ALL',recipientIds:[]});
+  const [busy,setBusy]=useState(false);
+  const submit=async()=>{if(!form.code||!form.title||!form.discountValue)return alert('Enter code, title and discount.');setBusy(true);try{await call('/franchise/coupons',{method:'post',data:{...form,discountValue:Number(form.discountValue),maxDiscount:form.maxDiscount?Number(form.maxDiscount):undefined,minOrderAmount:form.minOrderAmount?Number(form.minOrderAmount):0}});setForm({code:'',title:'',description:'',discountType:'PERCENT',discountValue:'',maxDiscount:'',minOrderAmount:'',expiresAt:'',sendTo:'ALL',recipientIds:[]});refresh();alert('Coupon created and sent successfully.')}catch(e){alert(e.response?.data?.message||'Could not create coupon')}finally{setBusy(false)}};
+  if(loading)return <Loader/>;if(error)return <Err msg={error}/>;
+  return <><PageHeader title="Coupons & Offers" sub="Create discount codes and send them to every customer or selected customers."/>
+  <div className="fr-coupon-layout"><Card title="Create Coupon">
+    <div className="fr-form-grid">
+      <Fld label="Coupon Code"><input value={form.code} onChange={e=>setForm({...form,code:e.target.value.toUpperCase()})} placeholder="FESTIVE100"/></Fld>
+      <Fld label="Title"><input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Festival Offer"/></Fld>
+      <Fld label="Discount Type"><select value={form.discountType} onChange={e=>setForm({...form,discountType:e.target.value})}><option value="PERCENT">Percentage %</option><option value="FLAT">Flat ₹</option></select></Fld>
+      <Fld label="Discount Value"><input type="number" min="0" value={form.discountValue} onChange={e=>setForm({...form,discountValue:e.target.value})}/></Fld>
+      <Fld label="Maximum Discount (optional)"><input type="number" min="0" value={form.maxDiscount} onChange={e=>setForm({...form,maxDiscount:e.target.value})}/></Fld>
+      <Fld label="Minimum Order Amount"><input type="number" min="0" value={form.minOrderAmount} onChange={e=>setForm({...form,minOrderAmount:e.target.value})}/></Fld>
+      <Fld label="Expiry"><input type="datetime-local" value={form.expiresAt} onChange={e=>setForm({...form,expiresAt:e.target.value})}/></Fld>
+      <Fld label="Send To"><select value={form.sendTo} onChange={e=>setForm({...form,sendTo:e.target.value,recipientIds:[]})}><option value="ALL">All linked customers</option><option value="SELECTED">Selected customers</option></select></Fld>
+    </div>
+    <Fld label="Description"><textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder="Offer details shown to customers"/></Fld>
+    {form.sendTo==='SELECTED'&&<div className="fr-recipient-list">{(customers||[]).map(c=><label key={c._id}><input type="checkbox" checked={form.recipientIds.includes(c._id)} onChange={e=>setForm({...form,recipientIds:e.target.checked?[...form.recipientIds,c._id]:form.recipientIds.filter(x=>x!==c._id)})}/><span>{c.name} · {c.email}</span></label>)}</div>}
+    <button className="btn-primary" disabled={busy} onClick={submit}>{busy?'Creating…':'Create & Send Coupon'}</button>
+  </Card>
+  <Card title="Created Coupons" badge={`${data?.length||0}`}><DataTable rows={data||[]} cols={['code','title','discountType','discountValue','sendTo','expiresAt','createdAt']}/></Card></div></>;
+}
+
+function FleetBroadcasts({call}){
+  const {data:customers}=useFetch(call,'/franchise/fleet/customers');
+  const [form,setForm]=useState({title:'',message:'',type:'FRANCHISE_BROADCAST',priority:'IMPORTANT',bannerUrl:'',sendTo:'ALL',recipientIds:[]});
+  const [busy,setBusy]=useState(false);
+  const submit=async()=>{if(!form.title||!form.message)return alert('Enter title and message.');setBusy(true);try{const r=await call('/franchise/broadcast-notification',{method:'post',data:form});alert(`${r?.sent||0} customer(s) notified.`);setForm({...form,title:'',message:'',bannerUrl:'',recipientIds:[]});}catch(e){alert(e.response?.data?.message||'Could not send notification')}finally{setBusy(false)}};
+  return <><PageHeader title="Customer Broadcasts" sub="Send important announcements, festival messages, banners and urgent updates as customer pop-ups."/>
+  <Card title="Create Customer Pop-up">
+    <div className="fr-form-grid">
+      <Fld label="Title"><input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} placeholder="Festival Special"/></Fld>
+      <Fld label="Priority"><select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}><option>IMPORTANT</option><option>URGENT</option><option>INFO</option></select></Fld>
+      <Fld label="Send To"><select value={form.sendTo} onChange={e=>setForm({...form,sendTo:e.target.value,recipientIds:[]})}><option value="ALL">All linked customers</option><option value="SELECTED">Selected customers</option></select></Fld>
+      <Fld label="Banner Image URL (optional)"><input value={form.bannerUrl} onChange={e=>setForm({...form,bannerUrl:e.target.value})} placeholder="https://..."/></Fld>
+    </div>
+    <Fld label="Message"><textarea rows="5" value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write the announcement customers should see…"/></Fld>
+    {form.sendTo==='SELECTED'&&<div className="fr-recipient-list">{(customers||[]).map(c=><label key={c._id}><input type="checkbox" checked={form.recipientIds.includes(c._id)} onChange={e=>setForm({...form,recipientIds:e.target.checked?[...form.recipientIds,c._id]:form.recipientIds.filter(x=>x!==c._id)})}/><span>{c.name} · {c.email}</span></label>)}</div>}
+    <button className="btn-primary" disabled={busy} onClick={submit}><Send size={15}/>{busy?'Sending…':'Send Customer Pop-up'}</button>
+  </Card></>;
+}
 
 function FaultVehicles({ call }) {
   const {data,loading,error}=useFetch(call,'/franchise/fault-vehicles');

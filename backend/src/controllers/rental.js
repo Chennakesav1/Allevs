@@ -282,6 +282,23 @@ exports.createOrder = async (req, res) => {
       securityDeposit = Math.max(0, Number(vehicle.securityDeposit || 0)) * vehicleCount;
     }
 
+    // Apply a valid signup coupon once on the customer's first successful booking.
+    let couponId = null, couponCode = '', couponDiscount = 0;
+    const bookingCustomer = await User.findById(req.user._id).select('signupCouponId couponUsedAt');
+    if (bookingCustomer?.signupCouponId && !bookingCustomer.couponUsedAt) {
+      const { Coupon } = require('../models');
+      const coupon = await Coupon.findOne({_id:bookingCustomer.signupCouponId,active:true});
+      if (coupon && (!coupon.expiresAt || new Date(coupon.expiresAt)>new Date()) && (!coupon.startsAt || new Date(coupon.startsAt)<=new Date()) && Number(coupon.usedCount||0)<(coupon.usageLimit||Infinity)) {
+        if (Number(rentalSubtotal)>=Number(coupon.minOrderAmount||0)) {
+          couponDiscount = coupon.discountType==='FLAT'
+            ? Math.min(Number(coupon.discountValue||0), rentalSubtotal)
+            : Math.min(rentalSubtotal, Math.round(rentalSubtotal*Number(coupon.discountValue||0)/100));
+          if (coupon.maxDiscount) couponDiscount=Math.min(couponDiscount,Number(coupon.maxDiscount));
+          couponId=coupon._id; couponCode=coupon.code;
+          discountAmount += couponDiscount;
+        }
+      }
+    }
     const rentalTotal = Math.max(0, rentalSubtotal - discountAmount + securityDeposit);
     if (rentalTotal <= 0) return res.status(400).json({ message: 'Vehicle rental amount is not configured.' });
 
@@ -330,7 +347,7 @@ exports.createOrder = async (req, res) => {
       kycSnapshot: { aadharNumber: String(aadharNumber||'').replace(/\s/g,''), panNumber: String(panNumber||'').trim().toUpperCase(), documents: kycDocuments || undefined },
       purchaseDate: bookingStart, startDate: bookingStart, endDate: dueDate, dueDate, saleQuantity: vehicleCount, durationDays: durationUnits,
       rentalPlan: selectedPlan, planUnits: durationUnits, rentalRate: rate,
-      securityDeposit, discountPercent, discountAmount,
+      securityDeposit, discountPercent, discountAmount, couponId, couponCode, couponDiscount,
       price: rate, pricePerDay: Number(vehicle.pricePerDay || rate), totalAmount: rentalTotal,
       razorpayOrderId: rzOrder.id, paymentStatus: 'PENDING', status: 'BOOKED',
       bookingHistory: [{
@@ -419,6 +436,11 @@ exports.verifyPayment = async (req, res) => {
       vehicle: rental.vehicleSnapshot, startDate:rental.startDate, endDate:rental.endDate, durationDays:rental.durationDays,
     });
     await rental.save();
+    if (rental.couponId) {
+      const { Coupon } = require('../models');
+      const marked = await User.findOneAndUpdate({_id:req.user._id,couponUsedAt:{$exists:false},signupCouponId:rental.couponId},{couponUsedAt:new Date()},{new:true});
+      if (marked) await Coupon.findByIdAndUpdate(rental.couponId,{$inc:{usedCount:1}});
+    }
 
     await audit(req.user._id, 'PAYMENT', 'VehicleRental', rental._id);
     const ownerFranchiseeId = stock.franchiseeId || stock.fleetOperatorId || rental.franchiseeId;

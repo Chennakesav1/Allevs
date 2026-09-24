@@ -963,6 +963,96 @@ function StaffDashboard({ call, user, setPage }) {
   </>;
 }
 
+
+function SignaturePad({ value, onChange }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const last = useRef({x:0,y:0});
+  useEffect(() => {
+    const c = canvasRef.current; if (!c) return;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,c.width,c.height);
+    if (value) { const img = new Image(); img.onload=()=>ctx.drawImage(img,0,0,c.width,c.height); img.src=value; }
+    ctx.lineWidth=2.2; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0f172a';
+  }, [value]);
+  const pos = e => { const c=canvasRef.current; const r=c.getBoundingClientRect(); const src=e.touches?.[0]||e; return {x:(src.clientX-r.left)*(c.width/r.width),y:(src.clientY-r.top)*(c.height/r.height)}; };
+  const start=e=>{e.preventDefault();drawing.current=true;last.current=pos(e);};
+  const move=e=>{if(!drawing.current)return;e.preventDefault();const c=canvasRef.current,ctx=c.getContext('2d'),p=pos(e);ctx.beginPath();ctx.moveTo(last.current.x,last.current.y);ctx.lineTo(p.x,p.y);ctx.stroke();last.current=p;};
+  const end=()=>{if(!drawing.current)return;drawing.current=false;onChange(canvasRef.current.toDataURL('image/png'));};
+  const clear=()=>{const c=canvasRef.current;const ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);onChange('');};
+  return <div className="jc-signature-wrap"><div className="jc-signature-label"><b>Customer Signature</b><button type="button" onClick={clear}>Clear</button></div><canvas ref={canvasRef} width={900} height={230} onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end} onTouchStart={start} onTouchMove={move} onTouchEnd={end} className="jc-signature-canvas"/><small>Customer signs above using mouse, touch or a touchscreen.</small></div>;
+}
+
+const blankJobCardForm = () => ({
+  customer:{name:'',address:'',phone:'',mobile:'',email:''},
+  vehicle:{bikeId:'',model:'',colour:'',registrationNo:'',vinNo:'',motorNo:'',dateOfSale:'',odometerKm:''},
+  receipt:{keyNo:'',toolkit:false,damages:'',mirrorLH:false,mirrorRH:false,mat:false,electricals:false,charger:false},
+  service:{warranty:'',freeServiceNo:'',paidServiceNo:'',repairJob:false,repeatJob:false,accidentalJob:false,postWarranty:false,others:false,othersText:''},
+  technicianName:'', startingTime:'', closingTime:'',
+  serviceLines:Array.from({length:6},()=>({customerVoice:'',supervisorAdvice:'',jobDone:false,estimatedCost:''})),
+  estimate:{repairCost:'',costOfParts:'',deliveryTime:'',supervisorSignature:''},
+  acknowledgement:{jobCardNo:'',date:'',estimatedCost:'',inDate:'',inTime:'',expectedDate:'',expectedTime:'',deliveryDate:'',deliveryTime:''},
+  authorizationText:'I / We authorise the above work and understand that further repairs may be required during the course of work. I / We have received the vehicle in the condition recorded above.',
+  signatureData:'', notes:''
+});
+
+function buildJobCardForm(job) {
+  const f=blankJobCardForm();
+  const c=job?.customerId||{}; const v=job?.commandVehicleId||job?.vehicleId||job?.vehicleSnapshot||{}; const comp=job?.complaintId||{}; const data=job?.jobCard?.jobCardData||{};
+  const old={...f,...data};
+  old.customer={...f.customer,...(data.customer||{})};
+  old.vehicle={...f.vehicle,...(data.vehicle||{})};
+  old.receipt={...f.receipt,...(data.receipt||{})}; old.service={...f.service,...(data.service||{})}; old.estimate={...f.estimate,...(data.estimate||{})}; old.acknowledgement={...f.acknowledgement,...(data.acknowledgement||{})};
+  old.serviceLines=Array.isArray(data.serviceLines)&&data.serviceLines.length?data.serviceLines.map((x,i)=>({...f.serviceLines[i%6],...x})):f.serviceLines;
+  old.customer={...old.customer,name:old.customer.name||c.name||job?.customerSnapshot?.name||'',phone:old.customer.phone||c.phone||job?.customerSnapshot?.phone||'',mobile:old.customer.mobile||c.phone||job?.customerSnapshot?.phone||'',email:old.customer.email||c.email||job?.customerSnapshot?.email||'',address:old.customer.address||(typeof c.address==='string'?c.address:'')||(typeof job?.customerSnapshot?.address==='string'?job.customerSnapshot.address:'')||''};
+  old.vehicle={...old.vehicle,bikeId:old.vehicle.bikeId||v.bikeId||job?.bikeId||'',model:old.vehicle.model||v.model||'',colour:old.vehicle.colour||v.color||v.colour||'',registrationNo:old.vehicle.registrationNo||v.registrationNo||'',vinNo:old.vehicle.vinNo||v.vin||v.chassisNo||'',motorNo:old.vehicle.motorNo||v.motorNo||'',dateOfSale:old.vehicle.dateOfSale||v.dateOfSale||'',odometerKm:old.vehicle.odometerKm||job?.odometerReading||v.odometerKm||''};
+  old.technicianName=old.technicianName||job?.technicianId?.name||'';
+  old.serviceLines[0]={...old.serviceLines[0],customerVoice:old.serviceLines[0].customerVoice||comp.message||job?.problem||''};
+  old.acknowledgement={...old.acknowledgement,jobCardNo:old.acknowledgement.jobCardNo||job?.jobCard?.jobCardNumber||`JC-${String(job?._id||'').slice(-8).toUpperCase()}`,date:old.acknowledgement.date||new Date().toISOString().slice(0,10)};
+  old.signatureData=old.signatureData||job?.jobCard?.customerSignature||'';
+  return old;
+}
+
+function DigitalJobCardModal({ job: sourceJob, mode='assigned', call, user, onClose, onCreated, onCompleted, historyLookup }) {
+  const [job,setJob]=useState(sourceJob||null); const [form,setForm]=useState(()=>buildJobCardForm(sourceJob));
+  const [stage,setStage]=useState('edit'); const [busy,setBusy]=useState(false); const [history,setHistory]=useState(null); const [historyBusy,setHistoryBusy]=useState(false);
+  const set=(path,val)=>setForm(f=>{const root=Array.isArray(f)?[...f]:{...f};const parts=path.split('.');let cur=root;for(let i=0;i<parts.length-1;i++){const key=parts[i];const next=cur[key];cur[key]=Array.isArray(next)?[...next]:(next&&typeof next==='object'?{...next}:{});cur=cur[key];}cur[parts[parts.length-1]]=val;return root;});
+  const bikeId=job?.bikeId||job?.commandVehicleId?.bikeId||job?.vehicleSnapshot?.bikeId||form.vehicle.bikeId||'';
+  useEffect(()=>{let alive=true;const id=job?._id||job?.id;if(!id)return;call(`/staff/jobs/${id}/job-card`).then(card=>{if(!alive||!card)return;setForm(f=>{const data=card.jobCardData||{};return {...f,...data,customer:{...f.customer,...(data.customer||{})},vehicle:{...f.vehicle,...(data.vehicle||{})},receipt:{...f.receipt,...(data.receipt||{})},service:{...f.service,...(data.service||{})},estimate:{...f.estimate,...(data.estimate||{})},acknowledgement:{...f.acknowledgement,...(data.acknowledgement||{})},serviceLines:Array.isArray(data.serviceLines)&&data.serviceLines.length?data.serviceLines:f.serviceLines,signatureData:data.signatureData||card.customerSignature||f.signatureData}})}).catch(()=>{});return()=>{alive=false}},[job?._id||job?.id]);
+  const lookup=async()=>{const id=String(bikeId||form.vehicle.bikeId||'').trim(); if(!id)return;try{setHistoryBusy(true);const h=await call(`/staff/vehicle-history?bikeId=${encodeURIComponent(id)}`);setHistory(h||null);if(h?.vehicle){const v=h.vehicle;setForm(f=>({...f,vehicle:{...f.vehicle,model:f.vehicle.model||`${v.make||''} ${v.model||''}`.trim(),registrationNo:f.vehicle.registrationNo||v.registrationNo||'',vinNo:f.vehicle.vinNo||v.chassisNo||v.vin||'',motorNo:f.vehicle.motorNo||v.motorNo||'',odometerKm:f.vehicle.odometerKm||v.odometerKm||''},customer:{...f.customer,name:f.customer.name||h.latest?.customer?.name||'',phone:f.customer.phone||h.latest?.customer?.phone||'',mobile:f.customer.mobile||h.latest?.customer?.phone||'',email:f.customer.email||h.latest?.customer?.email||''}}));}}catch(e){setHistory(null)}finally{setHistoryBusy(false)}};
+  const validate=()=>{if(!form.customer.name.trim())return 'Customer name is required.';if(!form.customer.phone.trim()&&!form.customer.mobile.trim())return 'Customer mobile number is required.';if(!bikeId&&!form.vehicle.registrationNo.trim())return 'Bike ID or registration number is required.';if(!form.serviceLines.some(x=>x.customerVoice.trim()))return 'Customer complaint / customer voice is required.';if(!form.signatureData)return 'Customer signature is required.';return ''};
+  const saveInitial=async()=>{const err=validate();if(err)return alert(err);setBusy(true);try{let current=job;if(mode==='create'&&!current){const res=await call('/staff/own-job-cards',{method:'post',data:{customer:{name:form.customer.name,phone:form.customer.phone||form.customer.mobile,email:form.customer.email,address:form.customer.address},bike:{bikeId:form.vehicle.bikeId||bikeId,registrationNo:form.vehicle.registrationNo,chassisNo:form.vehicle.vinNo,motorNo:form.vehicle.motorNo,make:form.vehicle.model.split(' ')[0]||'',model:form.vehicle.model,odometerKm:form.vehicle.odometerKm},problem:form.serviceLines.find(x=>x.customerVoice)?.customerVoice||'',priority:'NORMAL',serviceType:'STAFF_CREATED_SERVICE',notes:form.notes}});current=res.job;setJob(current);onCreated?.(current);}
+      const id=current?._id||current?.id; if(!id)throw Error('Job could not be created'); const cardData={jobCardNumber:form.acknowledgement.jobCardNo||`JC-${String(id).slice(-8).toUpperCase()}`,complaint:form.serviceLines[0]?.customerVoice||current.problem||'',customerApproval:true,customerSignature:form.signatureData,customerSignatureAt:new Date(),previewSubmittedAt:new Date(),submittedAt:new Date(),jobCardData:form,vehicleReceiptCondition:form.receipt,serviceTypeData:form.service,estimateData:form.estimate,authorizationText:form.authorizationText}; const saved=await call(`/staff/jobs/${id}/job-card`,{method:'put',data:cardData}); setJob({...current,jobCard:saved}); setStage('saved');}catch(e){alert(e.response?.data?.message||e.message||'Could not save job card')}finally{setBusy(false)}};
+  const complete=async()=>{if(!job)return;const err=validate();if(err)return alert(err);if(!form.vehicle.odometerKm||form.vehicle.odometerKm==='')return alert('Current odometer reading is required.');setBusy(true);try{const id=job._id||job.id;const now=new Date();const finalForm={...form,closingTime:form.closingTime||new Date().toISOString().slice(0,16)};setForm(finalForm);const res=await call(`/staff/jobs/${id}/complete`,{method:'post',data:{completedAt:now.toISOString(),elapsedSeconds:job.elapsedSeconds||0,remarks:form.serviceLines.map(x=>x.supervisorAdvice).filter(Boolean).join('\n'),odometerReading:Number(form.vehicle.odometerKm),batteryPercent:job.batteryPercent??job.commandVehicleId?.batterySoc,diagnosis:form.serviceLines.map(x=>x.customerVoice).filter(Boolean).join('\n'),workPerformed:form.serviceLines.map(x=>x.supervisorAdvice).filter(Boolean).join('\n'),solution:form.serviceLines.map(x=>x.supervisorAdvice).filter(Boolean).join('\n'),partsReplaced:'',completionNotes:form.notes,signatureData:form.signatureData,jobCardData:finalForm,vehicleReceiptCondition:finalForm.receipt,serviceTypeData:form.service,estimateData:form.estimate,authorizationText:form.authorizationText}});setStage('completed');onCompleted?.(res); }catch(e){alert(e.response?.data?.message||e.message||'Could not complete job card')}finally{setBusy(false)}};
+  const saveDuringWork=async()=>{if(!job)return;setBusy(true);try{const id=job._id||job.id;await call(`/staff/jobs/${id}/job-card`,{method:'put',data:{jobCardNumber:form.acknowledgement.jobCardNo,jobCardData:form,vehicleReceiptCondition:form.receipt,serviceTypeData:form.service,estimateData:form.estimate,customerSignature:form.signatureData,technicianNotes:form.notes}});alert('Job Card details saved.');}catch(e){alert(e.response?.data?.message||e.message||'Could not save details')}finally{setBusy(false)}};
+  const title=mode==='final'?'Complete Job Card':mode==='create'?'Create Job Card':'Job Card';
+  return <div className="jc-modal-backdrop"><div className="jc-modal">
+    <div className="jc-modal-head"><div><span>ALLEV · DIGITAL JOB CARD</span><h2>{title}</h2><small>{bikeId||form.vehicle.bikeId||'New vehicle'} · {form.vehicle.model||'Vehicle'} {job?.problem?`· ${job.problem}`:''}</small></div><button onClick={()=>!busy&&onClose()}><X size={18}/></button></div>
+    {stage==='saved'&&<div className="jc-success-banner"><CheckCircle size={20}/><div><b>Job Card submitted successfully</b><span>Customer details, vehicle condition and signature are saved. Start the work timer when the technician begins.</span></div><button onClick={onClose}>Continue</button></div>}
+    {stage==='completed'&&<div className="jc-success-banner complete"><CheckCircle size={20}/><div><b>Job Card completed and submitted</b><span>The complete service report is now stored against this vehicle and complaint.</span></div><button onClick={onClose}>Done</button></div>}
+    {stage!=='saved'&&stage!=='completed'&&<>
+      <div className="jc-stepbar"><span className="active">1 · Details</span><span>2 · Customer sign</span><span>3 · Preview</span>{mode==='final'&&<span>4 · Complete</span>}</div>
+      {stage==='edit'&&<div className="jc-body">
+        <section className="jc-paper">
+          <div className="jc-paper-title"><img src={allevLogo} alt="AllEV"/><div><b>JOB CARD</b><small>Job Card No. {form.acknowledgement.jobCardNo||'—'}</small></div></div>
+          <div className="jc-grid jc-top"><div><h4>Customer Details</h4><div className="jc-fields">{[['customer.name','Name'],['customer.address','Address'],['customer.phone','Tel. No.'],['customer.mobile','Mobile'],['customer.email','E-mail id']].map(([k,l])=><label key={k}>{l}<input value={k.split('.').reduce((o,x)=>o[x],form)} onChange={e=>set(k,e.target.value)}/></label>)}</div></div><div><h4>Vehicle Details</h4><div className="jc-fields">{[['vehicle.bikeId','Bike ID'],['vehicle.model','Model Name'],['vehicle.colour','Colour'],['vehicle.registrationNo','Reg No.'],['vehicle.vinNo','VIN No.'],['vehicle.motorNo','Motor No.'],['vehicle.dateOfSale','Date of sale'],['vehicle.odometerKm','Kms covered']].map(([k,l])=><label key={k}>{l}<input value={k.split('.').reduce((o,x)=>o[x],form)} onChange={e=>set(k,e.target.value)} onBlur={k==='vehicle.bikeId'?lookup:undefined}/></label>)}</div></div><div><h4>Vehicle Receipt Condition</h4><div className="jc-condition"><label>Key No.<input value={form.receipt.keyNo} onChange={e=>set('receipt.keyNo',e.target.value)}/></label><label>Damages / Breakages<textarea value={form.receipt.damages} onChange={e=>set('receipt.damages',e.target.value)}/></label>{[['toolkit','Tool Kit'],['mirrorLH','Mirrors L/H'],['mirrorRH','Mirrors R/H'],['mat','Mat'],['electricals','Electricals'],['charger','Charger']].map(([k,l])=><label className="jc-check" key={k}><input type="checkbox" checked={!!form.receipt[k]} onChange={e=>set(`receipt.${k}`,e.target.checked)}/>{l}</label>)}</div></div></div>
+          <div className="jc-section"><h4>Type of Service</h4><div className="jc-check-row">{[['warranty','Warranty'],['freeServiceNo','Free service no.'],['paidServiceNo','Paid service No.'],['repairJob','Repair job'],['repeatJob','Repeat job'],['accidentalJob','Accidental job'],['postWarranty','Post warranty / paid service'],['others','Others']].map(([k,l])=><label key={k}><input type={k.includes('No')?'text':'checkbox'} checked={k.includes('No')?undefined:!!form.service[k]} value={k.includes('No')?form.service[k]:undefined} onChange={e=>set(`service.${k}`,k.includes('No')?e.target.value:e.target.checked)}/>{l}</label>)}</div>{form.service.others&&<input className="jc-inline" placeholder="Other service" value={form.service.othersText} onChange={e=>set('service.othersText',e.target.value)}/>}</div>
+          <div className="jc-tech-row"><label>Technician Name<input value={form.technicianName} onChange={e=>set('technicianName',e.target.value)}/></label><label>Starting time<input type="datetime-local" value={form.startingTime} onChange={e=>set('startingTime',e.target.value)}/></label><label>Closing time<input type="datetime-local" value={form.closingTime} onChange={e=>set('closingTime',e.target.value)}/></label></div>
+          <div className="jc-lines"><div className="jc-lines-head"><span>Sr.</span><span>Customer voice</span><span>Supervisor advice to Technician</span><span>Job Done</span><span>Estimated Cost</span></div>{form.serviceLines.map((row,i)=><div className="jc-line" key={i}><span>{i+1}</span><textarea value={row.customerVoice} onChange={e=>set(`serviceLines.${i}.customerVoice`,e.target.value)}/><textarea value={row.supervisorAdvice} onChange={e=>set(`serviceLines.${i}.supervisorAdvice`,e.target.value)}/><input type="checkbox" checked={row.jobDone} onChange={e=>set(`serviceLines.${i}.jobDone`,e.target.checked)}/><input value={row.estimatedCost} onChange={e=>set(`serviceLines.${i}.estimatedCost`,e.target.value)}/></div>)}</div>
+          <div className="jc-estimate"><h4>Estimation</h4><label>Cost of Repair<input value={form.estimate.repairCost} onChange={e=>set('estimate.repairCost',e.target.value)}/></label><label>Cost of parts<input value={form.estimate.costOfParts} onChange={e=>set('estimate.costOfParts',e.target.value)}/></label><label>Delivery Time<input value={form.estimate.deliveryTime} onChange={e=>set('estimate.deliveryTime',e.target.value)}/></label><label>Supervisor Signature / Name<input value={form.estimate.supervisorSignature} onChange={e=>set('estimate.supervisorSignature',e.target.value)}/></label></div>
+          <div className="jc-auth"><h4>Customer Authorisation</h4><textarea value={form.authorizationText} onChange={e=>set('authorizationText',e.target.value)}/></div>
+          <SignaturePad value={form.signatureData} onChange={v=>set('signatureData',v)}/>
+          <div className="jc-ack"><h4>Acknowledgement</h4><div className="jc-ack-grid">{[['jobCardNo','Job Card No.'],['date','Date'],['estimatedCost','Estimated Cost'],['inDate','IN DATE'],['inTime','TIME'],['expectedDate','Expected'],['expectedTime','TIME'],['deliveryDate','Delivery date'],['deliveryTime','TIME']].map(([k,l])=><label key={k}>{l}<input value={form.acknowledgement[k]} onChange={e=>set(`acknowledgement.${k}`,e.target.value)}/></label>)}</div></div>
+        </section>
+        <aside className="jc-side"><div className="jc-side-card"><b>Vehicle History</b><span>Enter/confirm the Bike ID to see previous job cards.</span><button onClick={lookup} disabled={historyBusy}>{historyBusy?'Checking…':'Check Previous Job Cards'}</button>{history?.history?.length?<div className="jc-history-list">{history.history.slice(0,6).map(h=><div key={h._id}><b>{h.problem||h.serviceType||'Service'}</b><small>{h.status} · {h.completedAt?new Date(h.completedAt).toLocaleDateString('en-IN'):'—'}</small><span>{h.workPerformed||h.solution||h.diagnosis||'No report summary'}</span></div>)}</div>:<small>{history?'No previous job cards found for this vehicle.':''}</small>}</div><div className="jc-side-card"><b>Workflow</b><div className="jc-flow"><span>✓ Customer / vehicle auto-fill</span><span>✓ Customer signature</span><span>→ Preview & submit</span><span>→ Start / pause / resume</span><span>→ Complete final report</span><span>→ Franchisee + customer + Command Center</span></div></div></aside>
+      </div>
+      }
+      {stage==='edit'&&<div className="jc-modal-actions">{mode==='final'?<button className="jc-primary" onClick={complete} disabled={busy}>{busy?'Submitting…':'✓ Submit Final Job Card & Complete'}</button>:<button className="jc-primary" onClick={()=>setStage('preview')} disabled={busy}>Preview Job Card →</button>}<button className="jc-secondary" onClick={onClose} disabled={busy}>Cancel</button></div>}
+    </>}
+    {stage==='preview'&&<div className="jc-preview"><div className="jc-preview-note"><b>Preview before submit</b><span>Check every field and customer signature. Nothing is submitted until you confirm.</span></div><div className="jc-paper jc-preview-paper"><div className="jc-paper-title"><img src={allevLogo} alt="AllEV"/><div><b>JOB CARD</b><small>{form.acknowledgement.jobCardNo}</small></div></div><div className="jc-preview-grid"><div><b>Customer</b><span>{form.customer.name}</span><span>{form.customer.mobile||form.customer.phone}</span><span>{form.customer.email}</span></div><div><b>Vehicle</b><span>{form.vehicle.model}</span><span>{form.vehicle.registrationNo}</span><span>{bikeId||form.vehicle.vinNo}</span></div><div><b>Complaint / Customer Voice</b><span>{form.serviceLines.map(x=>x.customerVoice).filter(Boolean).join(' · ')}</span></div><div><b>Receipt Condition</b><span>{['toolkit','mirrorLH','mirrorRH','mat','electricals','charger'].filter(k=>form.receipt[k]).join(', ')||'No checklist items marked'}</span></div></div><div className="jc-preview-sign"><b>Customer Signature</b>{form.signatureData?<img src={form.signatureData} alt="Customer signature"/>:<span>Not signed</span>}</div></div><div className="jc-modal-actions"><button className="jc-primary" onClick={saveInitial} disabled={busy}>{busy?'Submitting…':'✓ Confirm & Submit Job Card'}</button><button className="jc-secondary" onClick={()=>setStage('edit')} disabled={busy}>← Edit</button></div></div>}
+  </div></div>;
+}
+
 // ══════════════════════════════════════════════════════════════════
 // MY WORKS — PENDING + COMPLETED + COMPLAINT JOB CARDS
 // ══════════════════════════════════════════════════════════════════
@@ -994,6 +1084,8 @@ function MyWorks({ user, call, setPage }) {
   const [ownHistoryLoading, setOwnHistoryLoading] = useState(false);
   const [ownVehicleHistory, setOwnVehicleHistory] = useState(null);
   const [ownJobForm, setOwnJobForm] = useState({customer:{name:'',phone:'',email:''},bike:{bikeId:'',registrationNo:'',chassisNo:'',motorNo:'',make:'',model:'',odometerKm:'',batterySoc:''},problem:'',priority:'NORMAL',serviceType:'STAFF_CREATED_SERVICE',notes:''});
+  const [jobCardEditor, setJobCardEditor] = useState(null);
+  const [completedJobCardViewer, setCompletedJobCardViewer] = useState(null);
 
   // Live tick for elapsed timer
   useEffect(() => {
@@ -1160,10 +1252,7 @@ function MyWorks({ user, call, setPage }) {
   };
 
   // Open proof modal instead of completing immediately
-  const markComplete = (jc) => {
-    setProofModal(jc);
-    setProofForm({ remarks:'', odometerReading:'', batteryPercent:'', diagnosis:'', rootCause:'', workPerformed:'', solution:'', partsReplaced:'', testResult:'', finalCondition:'', recommendations:'', nextServiceAt:'', labourHours:'', completionNotes:'' });
-  };
+  const markComplete = (jc) => { setJobCardEditor({mode:'final',job:jc}); };
 
   // Actually submit proof + complete the job
   const submitProofAndComplete = async () => {
@@ -1320,7 +1409,7 @@ function MyWorks({ user, call, setPage }) {
   return <>
     <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8, marginBottom:4}}>
       <PageHeader title="My Works" sub="Complaint job cards assigned to you and your personal task list." back={() => setPage && setPage('dashboard')} />
-      <button onClick={()=>setOwnJobOpen(true)} style={{display:'flex',alignItems:'center',gap:7,padding:'9px 15px',border:0,borderRadius:10,background:'linear-gradient(135deg,#2563eb,#4f46e5)',color:'#fff',fontWeight:800,fontSize:12,cursor:'pointer',boxShadow:'0 8px 20px rgba(37,99,235,.18)'}}>＋ Create Job Card</button>
+      <button onClick={()=>setJobCardEditor({mode:'create',job:null})} style={{display:'flex',alignItems:'center',gap:7,padding:'9px 15px',border:0,borderRadius:10,background:'linear-gradient(135deg,#2563eb,#4f46e5)',color:'#fff',fontWeight:800,fontSize:12,cursor:'pointer',boxShadow:'0 8px 20px rgba(37,99,235,.18)'}}>＋ Create Job Card</button>
       <button onClick={fetchMyJobCards} disabled={jcLoading} style={{
         display:'flex', alignItems:'center', gap:6, padding:'8px 16px', borderRadius:8,
         background:'#f8fafc', border:'1.5px solid #e2e8f0', cursor:'pointer', fontWeight:600, fontSize:13,
@@ -1428,8 +1517,14 @@ function MyWorks({ user, call, setPage }) {
                   </div>
 
                   {/* Action Buttons */}
-                  {jc.status !== 'COMPLETED' && (
+                  {jc.status === 'COMPLETED' ? (
                     <div style={{display:'flex', gap:8}}>
+                      <button onClick={() => setCompletedJobCardViewer(jc)} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:8,padding:'7px 13px',cursor:'pointer',fontWeight:700,fontSize:12}}>📄 View Complete Job Card</button>
+                      <button onClick={() => openHistory(jc)} style={{background:'#fff',color:'#0f172a',border:'1px solid #cbd5e1',borderRadius:8,padding:'7px 13px',cursor:'pointer',fontWeight:700,fontSize:12}}>📚 Previous Work</button>
+                    </div>
+                  ) : (
+                    <div style={{display:'flex', gap:8}}>
+                      <button onClick={() => setJobCardEditor({mode:'assigned',job:jc})} style={{background:'#0f172a',color:'#fff',border:'none',borderRadius:8,padding:'7px 13px',cursor:'pointer',fontWeight:700,fontSize:12}}>📄 {isRunning||jc.status==='PAUSED'?'Edit Job Card':'Open Job Card'}</button>
                       {!isRunning && jc.status !== 'PAUSED' && (
                         <button onClick={() => startWork(jc)} style={{
                           background:'#16a34a', color:'#fff', border:'none', borderRadius:8,
@@ -1561,7 +1656,7 @@ function MyWorks({ user, call, setPage }) {
     )}
 
     {/* ── Previous vehicle work history ── */}
-    {ownJobOpen && <div className="feature-modal-backdrop" onClick={()=>!ownCreateBusy&&setOwnJobOpen(false)}><div className="feature-modal-panel" onClick={e=>e.stopPropagation()} style={{maxWidth:760,width:'96%',maxHeight:'90vh',overflow:'auto'}}>
+    {false && ownJobOpen && <div className="feature-modal-backdrop" onClick={()=>!ownCreateBusy&&setOwnJobOpen(false)}><div className="feature-modal-panel" onClick={e=>e.stopPropagation()} style={{maxWidth:760,width:'96%',maxHeight:'90vh',overflow:'auto'}}>
       <div className="feature-card-head"><div><b style={{fontSize:18}}>Create Job Card</b><small style={{display:'block',color:'#64748b',marginTop:3}}>Create a staff-owned service job, review previous bike work, then start work immediately.</small></div><button className="icon-btn" onClick={()=>!ownCreateBusy&&setOwnJobOpen(false)}>✕</button></div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,padding:'16px'}}>
         <div style={{gridColumn:'1/-1',fontSize:11,fontWeight:800,letterSpacing:'.08em',color:'#64748b'}}>CUSTOMER DETAILS</div>
@@ -1705,7 +1800,7 @@ function MyWorks({ user, call, setPage }) {
     )}
 
     {/* ── Completion Proof Modal ── */}
-    {proofModal && (() => {
+    {false && proofModal && (() => {
       const jc = proofModal;
       const bikeId = jc.bikeId || jc.commandVehicleId?.bikeId || jc.vehicleSnapshot?.bikeId || '';
       const canSubmit = proofForm.remarks.trim() && proofForm.odometerReading.trim() && proofForm.batteryPercent.trim();
@@ -1804,6 +1899,9 @@ function MyWorks({ user, call, setPage }) {
         </div>
       );
     })()}
+
+    {jobCardEditor && <DigitalJobCardModal job={jobCardEditor.job} mode={jobCardEditor.mode} call={call} user={user} onClose={()=>setJobCardEditor(null)} onCreated={(created)=>{setJobCards(prev=>[created,...prev.filter(x=>(x._id||x.id)!==(created._id||created.id))]);}} onCompleted={()=>{fetchMyJobCards();setJobCardEditor(null);}} />}
+    {completedJobCardViewer && <StaffCompletedJobCardViewer job={completedJobCardViewer} call={call} onClose={()=>setCompletedJobCardViewer(null)} />}
 
   </>;
 }
@@ -2665,6 +2763,36 @@ function DocumentsVault({call,setPage}) { const {data,loading}=useStaffLive(call
 function Payslips({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/payslips',60000); const rows=data||[]; const money=v=>`₹${Number(v||0).toLocaleString('en-IN')}`; return <><FeatureHeader title="Payslips" sub="Salary statements and take-home history" setPage={setPage} Icon={CircleDollarSign}/>{!rows.length&&!loading?<div className="premium-empty"><CircleDollarSign size={28}/><b>No payslips published</b><span>Your monthly salary statements will appear here.</span></div>:<div className="payslip-grid">{rows.map(p=><div className="payslip-card" key={p._id}><div className="payslip-top"><div><small>{p.month}</small><strong>{money(p.net)}</strong></div><span>NET TAKE-HOME</span></div><div className="salary-lines"><span>Gross <b>{money(p.gross)}</b></span>{Object.entries(p.earnings||{}).slice(0,3).map(([k,v])=><span key={k}>{k}<b>{money(v)}</b></span>)}{Object.entries(p.deductions||{}).slice(0,3).map(([k,v])=><span key={k}>{k}<b>− {money(v)}</b></span>)}</div>{p.url?<a className="premium-btn ghost full" href={p.url} target="_blank" rel="noreferrer"><Download size={15}/> Download</a>:<span className="published-pill">Published</span>}</div>)}</div>}</> }
 
 function SupportTickets({call,setPage}) { const {data,loading,refresh}=useStaffLive(call,'/staff/support',30000); const [open,setOpen]=useState(false); const [form,setForm]=useState({category:'TECHNICAL',subject:'',description:'',priority:'NORMAL'}); const [reply,setReply]=useState({}); const submit=async()=>{if(!form.subject||!form.description)return;await call('/staff/support',{method:'post',data:form});setForm({category:'TECHNICAL',subject:'',description:'',priority:'NORMAL'});setOpen(false);refresh()}; const sendReply=async(id)=>{if(!reply[id])return;await call(`/staff/support/${id}/messages`,{method:'post',data:{message:reply[id]}});setReply(r=>({...r,[id]:''}));refresh()}; return <><FeatureHeader title="Support" sub="Raise and track staff requests" setPage={setPage} Icon={MessageSquare} action={<button className="premium-btn" onClick={()=>setOpen(true)}><Plus size={15}/> New request</button>}/><div className="support-category-grid">{[['TECHNICAL','Technical',Settings],['HR','HR & People',UserCheck],['PAYROLL','Payroll',CircleDollarSign],['OPERATIONS','Operations',Briefcase]].map(([key,label,Icon])=><button key={key} className={'support-category '+(form.category===key?'active':'')} onClick={()=>{setForm({...form,category:key});setOpen(true)}}><span><Icon size={19}/></span><b>{label}</b><small>Raise {label.toLowerCase()} request</small></button>)}</div>{open&&<div className="feature-card"><div className="feature-card-head"><b>Raise a request</b><button className="icon-btn" onClick={()=>setOpen(false)}><X size={17}/></button></div><div className="form-field"><label>Category</label><select value={form.category} onChange={e=>setForm({...form,category:e.target.value})}><option>TECHNICAL</option><option>HR</option><option>PAYROLL</option><option>OPERATIONS</option><option>GENERAL</option></select></div><div className="form-field"><label>Subject</label><input value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}/></div><div className="form-field"><label>Details</label><textarea rows="4" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div><button className="premium-btn full" onClick={submit}><Send size={15}/> Submit request</button></div>}<div className="feature-stack">{loading&&<Loader/>}{!loading&&!data?.length&&<div className="premium-empty"><MessageSquare size={28}/><b>No support tickets</b><span>Need help? Create your first request.</span></div>}{(data||[]).map(t=><div className="ticket-card" key={t._id}><div className="ticket-head"><span>#{t.ticketNo}</span><em>{t.status}</em></div><strong>{t.subject}</strong><p>{t.description}</p><div className="ticket-thread">{(t.messages||[]).slice(-4).map((m,i)=><div key={i} className={m.senderRole=== 'STAFF'?'mine':'theirs'}><b>{m.senderRole}</b><span>{m.message}</span></div>)}</div><div className="ticket-reply"><input placeholder="Reply…" value={reply[t._id]||''} onChange={e=>setReply(r=>({...r,[t._id]:e.target.value}))}/><button onClick={()=>sendReply(t._id)}><Send size={15}/></button></div></div>)}</div></> }
+
+
+function StaffCompletedJobCardViewer({job,call,onClose}) {
+  const [card,setCard]=useState(job?.jobCard||null);
+  const [loading,setLoading]=useState(!job?.jobCard);
+  useEffect(()=>{let alive=true;const id=job?._id||job?.id;if(!id)return;call(`/staff/jobs/${id}/job-card`).then(x=>{if(alive)setCard(x)}).catch(()=>{}).finally(()=>alive&&setLoading(false));return()=>{alive=false}},[job?._id||job?.id]);
+  const data=card?.jobCardData||{};
+  const customer=data.customer||job?.customerId||job?.customerSnapshot||{};
+  const vehicle=data.vehicle||job?.vehicleSnapshot||job?.commandVehicleId||job?.bikeDetails||{};
+  const fmt=d=>d?new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+  const display=v=>v===undefined||v===null||v===''?'—':typeof v==='boolean'?(v?'Yes':'No'):Array.isArray(v)?(v.length?v.map((x,i)=>typeof x==='object'?JSON.stringify(x):String(x)).join(', '):'—'):typeof v==='object'?JSON.stringify(v):String(v);
+  const Field=({label,value})=><div style={{padding:'9px 11px',border:'1px solid #e2e8f0',borderRadius:9,background:'#f8fafc'}}><div style={{fontSize:10,color:'#64748b',fontWeight:700,textTransform:'uppercase',letterSpacing:'.04em'}}>{label}</div><div style={{fontSize:12,fontWeight:650,color:'#0f172a',marginTop:3,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{display(value)}</div></div>;
+  const ObjectFields=({obj,exclude=[]})=><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:8}}>{Object.entries(obj||{}).filter(([k])=>!exclude.includes(k)).map(([k,v])=><Field key={k} label={k.replace(/([A-Z])/g,' $1').replace(/_/g,' ')} value={v}/>)}</div>;
+  return <div className="modal-overlay" onClick={onClose}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(980px,100%)',maxHeight:'94vh',display:'flex',flexDirection:'column'}}>
+    <div className="modal-head"><div><div className="modal-title">Completed Job Card</div><div className="modal-subtitle">{card?.jobCardNumber||`JC-${String(job?._id||'').slice(-8).toUpperCase()}`} · Completed {fmt(card?.completedAt||job?.completedAt)}</div></div><button className="icon-btn" onClick={onClose}>✕</button></div>
+    <div className="modal-body" style={{overflowY:'auto'}}>
+      {loading?<div style={{padding:40,textAlign:'center',color:'#64748b'}}>Loading complete job card…</div>:<div style={{display:'grid',gap:14}}>
+        <section style={{padding:14,border:'1px solid #dbeafe',borderRadius:14,background:'#eff6ff'}}><div style={{fontWeight:850,fontSize:13,color:'#1d4ed8',marginBottom:9}}>Customer Details</div><ObjectFields obj={customer}/></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Vehicle Details</div><ObjectFields obj={vehicle}/></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Vehicle Receipt Condition</div><ObjectFields obj={data.receipt||card?.vehicleReceiptCondition}/></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Service / Job Details</div><ObjectFields obj={data.service||card?.serviceTypeData}/><div style={{marginTop:10}}><Field label="Customer Complaint / Voice" value={card?.complaint||job?.problem||data.serviceLines?.map(x=>x.customerVoice).filter(Boolean).join('\n')}/></div></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Service Lines</div>{Array.isArray(data.serviceLines)&&data.serviceLines.length?<div style={{display:'grid',gap:8}}>{data.serviceLines.map((x,i)=><div key={i} style={{padding:11,border:'1px solid #e2e8f0',borderRadius:10}}><b style={{fontSize:12}}>Service Item {i+1}</b><ObjectFields obj={x}/></div>)}</div>:<div style={{color:'#64748b',fontSize:12}}>No service-line entries.</div>}</section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Estimate</div><ObjectFields obj={data.estimate||card?.estimateData}/></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Acknowledgement</div><ObjectFields obj={data.acknowledgement}/></section>
+        <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Authorization & Notes</div><Field label="Authorization" value={data.authorizationText||card?.authorizationText}/><div style={{marginTop:8}}><Field label="Notes" value={data.notes||job?.remarks||card?.technicianNotes}/></div></section>
+        <section style={{padding:14,border:'1px solid #bbf7d0',borderRadius:14,background:'#f0fdf4'}}><div style={{fontWeight:850,fontSize:13,color:'#166534',marginBottom:9}}>Acknowledgement / Completion</div><ObjectFields obj={{Job_Card_Number:card?.jobCardNumber,Customer_Approval:card?.customerApproval,Customer_Signature_At:fmt(card?.customerSignatureAt),Submitted_At:fmt(card?.submittedAt),Completed_At:fmt(card?.completedAt)}}/>{card?.customerSignature&&<div style={{marginTop:10}}><div style={{fontSize:10,color:'#64748b',fontWeight:700,textTransform:'uppercase'}}>Customer Signature</div><img src={card.customerSignature} alt="Customer signature" style={{marginTop:6,maxWidth:300,maxHeight:110,objectFit:'contain',background:'#fff',border:'1px solid #e2e8f0',borderRadius:8,padding:6}}/></div>}</section>
+      </div>}
+    </div><div className="modal-footer"><button className="btn-ghost" onClick={onClose}>Close</button></div>
+  </div></div>;
+}
 
 function StaffPerformance({call,setPage}) { const {data,loading}=useStaffLive(call,'/staff/performance',60000); const p=data||{}; return <><FeatureHeader title="Performance" sub="Your work and attendance snapshot" setPage={setPage} Icon={TrendingUp}/><div className="performance-hero"><div><small>Completion rate</small><strong>{p.completionRate||0}%</strong></div><div className="progress-ring"><span>{p.completedJobs||0}</span><small>completed</small></div></div><div className="mini-stat-grid"><div><b>{p.totalJobs||0}</b><span>Total jobs</span></div><div><b>{p.completedJobs||0}</b><span>Completed</span></div><div><b>{p.attendanceRate||0}%</b><span>Attendance</span></div><div><b>{p.presentDays||0}</b><span>Present days</span></div></div></> }
 

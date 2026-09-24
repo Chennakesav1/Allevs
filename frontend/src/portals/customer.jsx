@@ -7,7 +7,7 @@ import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
   DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
-  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal, Headphones, Search, Filter, ChevronRight, ChevronDown, MessageCircle, Clock3, CircleHelp, LifeBuoy, Inbox, CheckCheck, AlertCircle
+  Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal, Headphones, Search, Filter, ChevronRight, ChevronDown, MessageCircle, Clock3, CircleHelp, LifeBuoy, Inbox, CheckCheck, AlertCircle, Gift, Copy
 } from 'lucide-react';
 import './customer.css';
 
@@ -33,6 +33,7 @@ const NAV_ITEMS = {
     { id: 'vehicles',            label: 'My Vehicles',        Icon: Car },
     { id: 'purchases',            label: 'Purchases',           Icon: ClipboardList },
     { id: 'wallet',              label: 'Wallet',             Icon: Wallet },
+    { id: 'referral',           label: 'Refer & Earn',        Icon: Gift },
     { id: 'invoices',            label: 'Invoices',           Icon: FileText },
     { id: 'complaints',          label: 'Support',            Icon: Bell },
     { id: 'notifications',      label: 'Notification Center', Icon: BellRing },
@@ -232,6 +233,7 @@ export default function App() {
     const socket=io((API||window.location.origin).replace(/\/api\/?$/,''),{auth:{token},transports:['websocket','polling']});
     const onLifecycle=payload=>window.dispatchEvent(new CustomEvent('vehicle:lifecycle',{detail:payload}));
     socket.on('vehicle:lifecycle',onLifecycle);
+    socket.on('notification:new',payload=>window.dispatchEvent(new CustomEvent('customer:notification',{detail:payload})));
     return ()=>socket.disconnect();
   }, [token]);
 
@@ -420,7 +422,7 @@ function LoginPage({ setScreen, setPendingEmail, onAuth }) {
 // SCREEN 2 — REGISTER
 // ══════════════════════════════════════════════════════════════════
 function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
-  const [form, setForm] = useState({ name: '', email: '', phone: '', pincode: '', state: '', district: '', password: '', password2: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', pincode: '', state: '', district: '', referralCode: '', couponCode: '', password: '', password2: '' });
   const [pinBusy, setPinBusy] = useState(false);
   const [pinMsg, setPinMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -433,7 +435,7 @@ function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
     if (form.password !== form.password2) { setMsg({ type: 'error', text: 'Passwords do not match.' }); return; }
     setBusy(true); setMsg({ type: '', text: '' });
     try {
-      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone, pincode: form.pincode, state: form.state, district: form.district });
+      await axios.post(`${API}/auth/customer/register`, { name: form.name, email: form.email, phone: form.phone, pincode: form.pincode, state: form.state, district: form.district, referralCode: form.referralCode.trim().toUpperCase() || undefined, couponCode: form.couponCode.trim().toUpperCase() || undefined });
       setPendingEmail(form.email);
       if (setPendingPassword) setPendingPassword(form.password);
       setScreen('verify-register');
@@ -479,6 +481,14 @@ function RegisterPage({ setScreen, setPendingEmail, setPendingPassword }) {
           </label>
           <label>District
             <input type="text" value={form.district} readOnly placeholder="Auto-filled from pincode" style={{background:'#f8fafc'}} />
+          </label>
+        </div>
+        <div className="row-2">
+          <label>Referral Code (optional)
+            <input type="text" value={form.referralCode} onChange={e => setForm({ ...form, referralCode: e.target.value.toUpperCase() })} placeholder="Friend's referral code" />
+          </label>
+          <label>Coupon Code (optional)
+            <input type="text" value={form.couponCode} onChange={e => setForm({ ...form, couponCode: e.target.value.toUpperCase() })} placeholder="Coupon code" />
           </label>
         </div>
         <label>Password * <span style={{fontSize:11,color:'#94a3b8'}}>(min 8 characters)</span>
@@ -743,6 +753,33 @@ const BOTTOM_NAV_COUNT = 4;
 function Shell({ user, page, setPage, call, logout }) {
   const navItems = NAV_ITEMS[kind] || NAV_ITEMS.command;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [popupNote,setPopupNote]=useState(null);
+
+  useEffect(()=>{
+    let alive=true;
+    const check=async()=>{
+      try{
+        const notes=await call('/customer/notifications');
+        const n=(Array.isArray(notes)?notes:[]).find(x=>!x.read && ['FRANCHISE_BROADCAST','COUPON'].includes(String(x.type||'')));
+        if(!n||!alive)return;
+        const key=`ev_popup_${n._id}`;
+        if(localStorage.getItem(key))return;
+        localStorage.setItem(key,'1');
+        setPopupNote(n);
+      }catch(e){}
+    };
+    const onPush=e=>{const n=e.detail;if(n&&!n.read&&['FRANCHISE_BROADCAST','COUPON'].includes(String(n.type||''))){const key=`ev_popup_${n._id||Date.now()}`;if(!localStorage.getItem(key)){localStorage.setItem(key,'1');setPopupNote(n);}}};
+    window.addEventListener('customer:notification',onPush);
+    check();
+    const t=setInterval(check,15000);
+    return()=>{alive=false;clearInterval(t);window.removeEventListener('customer:notification',onPush)};
+  },[call]);
+
+  const closePopup=async()=>{
+    if(!popupNote)return;
+    try{await call(`/customer/notifications/${popupNote._id}/read`,{method:'put'});}catch(e){}
+    setPopupNote(null);
+  };
 
   const navigate = (id) => {
     setPage(id);
@@ -815,6 +852,17 @@ function Shell({ user, page, setPage, call, logout }) {
     : null;
 
   return (
+    <>
+    {popupNote && <div className="customer-popup-overlay" onClick={closePopup}>
+      <div className="customer-popup-card" onClick={e=>e.stopPropagation()}>
+        {popupNote.data?.bannerUrl && <img src={popupNote.data.bannerUrl} alt="" className="customer-popup-banner" />}
+        <div className="customer-popup-icon">{popupNote.type==='COUPON'?'🎁':'⚡'}</div>
+        <span className="notification-kicker">{popupNote.type==='COUPON'?'SPECIAL OFFER':'IMPORTANT UPDATE'}</span>
+        <h2>{popupNote.title}</h2>
+        <p>{popupNote.message}</p>
+        <button className="btn-primary" onClick={closePopup}>Got it</button>
+      </div>
+    </div>}
     <div className={`shell customer-shell${menuOpen ? ' menu-open' : ''}`}>
       {/* Desktop sidebar. On mobile this is hidden; the portal drawer above is used. */}
       <aside className="sidebar desktop-sidebar">
@@ -872,6 +920,7 @@ function Shell({ user, page, setPage, call, logout }) {
       {/* Mobile menu replaces the old bottom navigation. */}
       {mobileMenu}
     </div>
+    </>
   );
 }
 // ══════════════════════════════════════════════════════════════════
@@ -886,6 +935,7 @@ function PageRouter({ page, call, setPage }) {
       vehicles:             <CustVehicles          call={P.call} setPage={P.setPage} />,
       purchases:             <CustBookings          {...P} />,
       wallet:               <CustWallet            {...P} />,
+      referral:            <CustReferral          {...P} />,
       invoices:             <CustInvoices          {...P} />,
       complaints:           <CustComplaints        {...P} />,
       notifications:        <CustNotifications     {...P} />,
@@ -897,6 +947,7 @@ function PageRouter({ page, call, setPage }) {
       vehicles: 'My Vehicles',
       purchases: 'Purchases',
       wallet: 'Wallet',
+      referral: 'Refer & Earn',
       invoices: 'Invoices',
       complaints: 'Support',
       'charging-stations': 'Charging Stations',
@@ -2320,6 +2371,7 @@ function CustComplaints({ call }) {
                   ) : null;
                 })()}
                 {c.resolution && <div className="support-resolution"><CheckCircle size={16}/><div><strong>Resolution</strong><span>{c.resolution}</span></div></div>}
+                {c.jobCard && (() => { const d=c.jobCard.jobCardData||{}; const lines=Array.isArray(d.serviceLines)?d.serviceLines.filter(x=>x.customerVoice||x.supervisorAdvice||x.jobDone):[]; return <div style={{marginTop:12,padding:14,border:'1px solid #dbeafe',borderRadius:14,background:'#f8fbff'}}><div style={{display:'flex',justifyContent:'space-between',gap:8,alignItems:'center',marginBottom:9}}><strong style={{color:'#1d4ed8'}}>Service Job Card Report</strong><span style={{fontSize:10,fontWeight:800,color:'#64748b'}}>{c.jobCard.jobCardNumber||'Job Card'}</span></div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8,fontSize:11}}><span><b>Vehicle</b><br/>{d.vehicle?.model||c.vehicleSnapshot?.model||'—'}</span><span><b>Registration</b><br/>{d.vehicle?.registrationNo||c.vehicleSnapshot?.registrationNo||'—'}</span><span><b>Technician</b><br/>{d.technicianName||'—'}</span><span><b>Odometer</b><br/>{c.job?.odometerReading??'—'} km</span></div>{lines.length>0&&<div style={{marginTop:10,display:'grid',gap:6}}>{lines.map((x,i)=><div key={i} style={{padding:8,borderRadius:9,background:'#fff',border:'1px solid #e2e8f0'}}><b style={{fontSize:11}}>#{i+1} {x.customerVoice||'Service item'}</b>{x.supervisorAdvice&&<div style={{fontSize:10,color:'#475569',marginTop:3}}>Work / advice: {x.supervisorAdvice}</div>}</div>)}</div>}{lines.length>0&&<div style={{marginTop:10,padding:9,borderRadius:9,background:'#fff',border:'1px solid #e2e8f0'}}><b style={{fontSize:11}}>Work / supervisor details</b>{lines.map((x,i)=><div key={i} style={{fontSize:10,color:'#475569',marginTop:5}}>#{i+1} · {x.supervisorAdvice||'—'} {x.estimatedCost?`· ₹${x.estimatedCost}`:''} · {x.jobDone?'Done':'Open'}</div>)}</div>}{d.receipt&&<div style={{marginTop:9,fontSize:10,color:'#475569'}}><b>Receipt condition:</b> {[['Tool Kit',d.receipt.toolkit],['L/H mirror',d.receipt.mirrorLH],['R/H mirror',d.receipt.mirrorRH],['Mat',d.receipt.mat],['Electricals',d.receipt.electricals],['Charger',d.receipt.charger]].filter(x=>x[1]).map(x=>x[0]).join(', ')||'No checklist items marked'}{d.receipt.damages?` · Damages: ${d.receipt.damages}`:''}</div>}{c.job?.completionNotes&&<div style={{marginTop:9,fontSize:11,color:'#475569'}}><b>Final notes:</b> {c.job.completionNotes}</div>}{d.estimate&&<div style={{marginTop:9,fontSize:10,color:'#475569'}}><b>Estimate:</b> Repair ₹{d.estimate.repairCost||0} · Parts ₹{d.estimate.costOfParts||0} · Delivery {d.estimate.deliveryTime||'—'}</div>}{c.job?.completedAt&&<div style={{marginTop:8,fontSize:10,color:'#64748b'}}>Completed {new Date(c.job.completedAt).toLocaleString('en-IN')}</div>}</div> })()}
                 {c.replacementVehicleSnapshot && <div className="support-detail-row"><span>Replacement vehicle</span><strong>{c.replacementVehicleSnapshot.make} {c.replacementVehicleSnapshot.model}</strong></div>}
                 {c.status==='SOLVED' && !c.feedbackSubmitted && <div className="support-feedback"><div><strong>How was the service?</strong><span>Rate your support experience.</span></div><div className="support-stars">{[1,2,3,4,5].map(n=><button key={n} className={feedback[c._id]?.rating===n?'active':''} onClick={()=>setFeedback(f=>({...f,[c._id]:{...f[c._id],rating:n}}))}>★</button>)}</div><textarea placeholder="Share a short comment (optional)" value={feedback[c._id]?.comment||''} onChange={e=>setFeedback(f=>({...f,[c._id]:{...f[c._id],comment:e.target.value}}))}/><button className="support-primary small" onClick={()=>sendFeedback(c)} disabled={feedbackBusy===c._id}>{feedbackBusy===c._id?'Saving…':'Submit review'}</button></div>}
               </div>}
@@ -2795,6 +2847,7 @@ function BookingFlow({ vehicle, call, onClose, onSuccess }) {
         fd.append('currentBill', kycFiles.currentBill);
         if (kycNumbers.aadharNumber) fd.append('aadharNumber', String(kycNumbers.aadharNumber).replace(/\s/g,''));
         if (kycNumbers.panNumber) fd.append('panNumber', String(kycNumbers.panNumber).toUpperCase());
+        if (vehicle?.franchiseeId) fd.append('franchiseeId', String(vehicle.franchiseeId));
         const result = await call('/customer/kyc/documents', { method:'POST', data:fd });
         setCustomerProfile(result?.user || customerProfile);
         setKycNumbers({ aadharNumber:result?.aadharNumber || kycNumbers.aadharNumber || '', panNumber:result?.panNumber || kycNumbers.panNumber || '' });
@@ -4028,6 +4081,31 @@ function CustNotifications({ call, setPage }) {
     <section className="notification-trust"><div><ShieldCheck size={18}/><span><strong>Private & secure</strong>Notifications are tied to your account.</span></div><div><Inbox size={18}/><span><strong>Focused updates</strong>No duplicate service status messages.</span></div><div><Clock3 size={18}/><span><strong>Always available</strong>Review recent activity whenever you need it.</span></div></section>
 
 
+  </div>;
+}
+
+
+function CustReferral({ call }) {
+  const [data,setData]=useState(null), [loading,setLoading]=useState(true), [copied,setCopied]=useState(false);
+  const load=async()=>{setLoading(true);try{setData(await call('/customer/referral'));}catch(e){}finally{setLoading(false)}};
+  useEffect(()=>{load()},[]);
+  const copy=async()=>{if(!data?.code)return;try{await navigator.clipboard.writeText(data.code);setCopied(true);setTimeout(()=>setCopied(false),1800)}catch(e){}};
+  if(loading&&!data)return <Loader/>;
+  return <div className="referral-page">
+    <PageHeader title="Refer & Earn" sub="Share your referral code. When a new customer joins with it, both customers receive ₹100 in their wallets."/>
+    <div className="referral-hero">
+      <div><span className="notification-kicker"><Gift size={14}/> CUSTOMER REFERRAL</span><h2>Give ₹100. Get ₹100.</h2><p>Your referral reward is credited after the referred customer's account is successfully verified.</p></div>
+      <div className="referral-code-box"><span>Your code</span><strong>{data?.code||'—'}</strong><button className="btn-primary" onClick={copy}><Copy size={15}/>{copied?'Copied':'Copy code'}</button></div>
+    </div>
+    <div className="referral-stats">
+      <div><span>Wallet balance</span><strong>₹{Number(data?.walletBalance||0).toLocaleString('en-IN')}</strong></div>
+      <div><span>Reward per referral</span><strong>₹100 + ₹100</strong></div>
+      <div><span>Total referrals</span><strong>{data?.totalReferrals||0}</strong></div>
+    </div>
+    <Card title="Referral history">
+      {!data?.rewards?.length?<div className="empty-state"><Gift size={32}/><p>No referrals yet. Share your code to get started.</p></div>:
+      <div style={{display:'grid',gap:9}}>{data.rewards.map(r=><div key={r._id} className="referral-history-row"><div><strong>{r.referredId?.name||'Customer'}</strong><small>{r.status} · {new Date(r.createdAt).toLocaleString('en-IN')}</small></div><strong>₹{r.amount||100}</strong></div>)}</div>}
+    </Card>
   </div>;
 }
 

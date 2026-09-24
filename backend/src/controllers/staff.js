@@ -6,7 +6,7 @@ exports.jobs=async(req,res)=>{
   try {
     const staffId = req.user._id;
     const jobs = await Job.find({ technicianId: staffId })
-      .populate('vehicleId customerId technicianId hubId commandVehicleId rentalId')
+      .populate('vehicleId customerId technicianId hubId commandVehicleId rentalId complaintId')
       .sort('-createdAt');
     res.json(jobs);
   } catch(e) { res.status(500).json({ message: e.message }); }
@@ -77,14 +77,14 @@ exports.createOwnJobCard = async (req,res) => {
       customerSnapshot:{name:customer.name||'',phone:customer.phone||'',email:customer.email||''},
       commandVehicleId:vehicle?._id,bikeId:bikeId||vehicle?.bikeId||'',bikeDetails:{...bike,matchedVehicleId:vehicle?._id},
       vehicleSnapshot:vehicle||undefined,previousWorkSummary,
-      technicianId:req.user._id,serviceType:body.serviceType||'STAFF_CREATED_SERVICE',problem:String(body.problem||'').trim(),priority:body.priority||'NORMAL',
-      status:'IN_PROGRESS',trackingStatus:'Work in Progress',startedAt:now,elapsedSeconds:0,location:body.location||undefined,remarks:body.notes||''
+      technicianId:req.user._id,franchiseeId:vehicle?.fleetOperatorId||req.user.franchiseeId||undefined,hubId:vehicle?.hubId||req.user.hubId||undefined,serviceType:body.serviceType||'STAFF_CREATED_SERVICE',problem:String(body.problem||'').trim(),priority:body.priority||'NORMAL',
+      status:'PENDING',trackingStatus:'Job Card Created — Awaiting Start',elapsedSeconds:0,location:body.location||undefined,remarks:body.notes||''
     });
     await M.JobCard.create({jobId:job._id,complaint:String(body.problem||''),diagnosis:previousWorkSummary?'Previous work found and shown to staff.':''});
     const admins=await M.User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean();
     if(M.Notification && admins.length){await M.Notification.insertMany(admins.map(a=>({userId:a._id,type:'STAFF_OWN_JOB_CARD',title:'Staff created a job card',message:`${req.user.name||'Staff'} created a new job card for ${bikeId||vehicle?.bikeId||'vehicle'}.`,data:{jobId:job._id,staffId:req.user._id,bikeId:bikeId||vehicle?.bikeId||''}})));}
     const populated=await M.Job.findById(job._id).populate('customerId','name email phone').populate('technicianId','name role').populate('commandVehicleId').lean();
-    return res.status(201).json({job:populated,previousHistory:previous,started:true});
+    return res.status(201).json({job:populated,previousHistory:previous,started:false});
   } catch(e){ return res.status(400).json({message:e.message}); }
 };
 
@@ -199,7 +199,8 @@ exports.complete = async (req,res) => {
     }
 
     // One canonical proof record for the staff member, linked to the same Job/Bike.
-    const proof=await M.JobProof.findOneAndUpdate({jobId:j._id,userId:req.user._id},{jobId:j._id,userId:req.user._id,bikeId:j.bikeId||j.vehicleSnapshot?.bikeId||'',odometerReading:j.odometerReading,batteryPercent:j.batteryPercent,report:{...report,issue:j.problem,notes:report.completionNotes,completionSummary:report.workPerformed||report.solution},pauseHistory:j.pauseHistory,submittedAt:now},{new:true,upsert:true});
+    const proof=await M.JobProof.findOneAndUpdate({jobId:j._id,userId:req.user._id},{jobId:j._id,userId:req.user._id,bikeId:j.bikeId||j.vehicleSnapshot?.bikeId||'',odometerReading:j.odometerReading,batteryPercent:j.batteryPercent,signatureData:String(b.signatureData||''),report:{...report,issue:j.problem,notes:report.completionNotes,completionSummary:report.workPerformed||report.solution},pauseHistory:j.pauseHistory,submittedAt:now},{new:true,upsert:true});
+    const finalCard=await M.JobCard.findOneAndUpdate({jobId:j._id},{jobId:j._id,complaint:j.problem,diagnosis:j.diagnosis,workPerformed:j.workPerformed,technicianNotes:j.completionNotes||j.remarks,customerSignature:String(b.signatureData||''),customerSignatureAt:b.signatureData?now:undefined,submittedAt:now,completedAt:now,jobCardData:b.jobCardData||{},vehicleReceiptCondition:b.vehicleReceiptCondition||{},serviceTypeData:b.serviceTypeData||{},estimateData:b.estimateData||{},authorizationText:b.authorizationText||''},{new:true,upsert:true});
 
     let maintenance=null;
     if(j.maintenanceId){
@@ -233,7 +234,7 @@ exports.complete = async (req,res) => {
       const admins=await User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean(); for(const a of admins) await notify(a._id,'COMPLAINT_PROGRESS','Staff Completed','A complaint service job has been completed by staff and is awaiting resolution.',baseData);
     }
     await audit(req.user._id,'UPDATE','Job',j._id,{status:j.status,completedAt:now,proofId:proof._id,report});
-    return res.json({...j.toObject(),proof,maintenance,complaint});
+    return res.json({...j.toObject(),proof,jobCard:finalCard,maintenance,complaint});
   } catch(e){return res.status(500).json({message:e.message});}
 };
 

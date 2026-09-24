@@ -59,6 +59,7 @@ cr.post('/services',              P.customer.book);
 cr.get( '/bookings',              P.customer.bookings);
 cr.get( '/tracking/:id',          P.customer.tracking);
 cr.get( '/wallet',                    P.customer.wallet);
+cr.get( '/referral',                  P.customer.referral);
 cr.get( '/wallet/transactions',       P.customer.walletTx);
 cr.post('/wallet/add-money',          P.customer.addMoney);
 cr.post('/wallet/recharge-order',     P.customer.walletRechargeOrder);
@@ -148,6 +149,7 @@ fr.use(auth, allow('FRANCHISEE', 'CENTRAL_ADMIN', 'SUPER_ADMIN'));
 fr.get( '/dashboard',          Fr.dashboard);
 fr.get( '/financials',         Fr.financials);
 fr.get( '/fleet/overview',      Fr.fleetOverview);
+fr.get( '/fleet/dashboard-insights', Fr.dashboardInsights);
 fr.get( '/fleet/vehicles',      Fr.fleetVehicles);
 fr.get( '/fleet/vehicles/:id',  Fr.fleetVehicleDetail);
 fr.put( '/fleet/vehicles/:id/status', Fr.updateFleetStatus);
@@ -157,6 +159,9 @@ fr.put( '/fleet/maintenance/:id', Fr.updateMaintenance);
 fr.post('/fleet/rentals/:id/inspection', Fr.handoverInspection);
 fr.get( '/fleet/vehicles/:vehicleId/inspection-history', Fr.vehicleInspectionHistory);
 fr.get( '/fleet/customers',     Fr.customers);
+fr.get( '/coupons',             Fr.coupons);
+fr.post('/coupons',             Fr.createCoupon);
+fr.post('/broadcast-notification', Fr.sendBroadcastNotification);
 fr.get( '/fleet/payments',      Fr.payments);
 fr.get( '/fleet/expenses',      Fr.expenses);
 fr.post('/fleet/expenses',      Fr.createExpense);
@@ -267,7 +272,10 @@ pr.get('/complaints/:id/vehicle-history', async (req, res) => {
       M.FleetMaintenance.find({ vehicleId:c.vehicleId }).sort('-createdAt').limit(30).lean(),
     ]);
     const mm=new Map(maintenance.map(m=>[String(m._id),m]));
-    for(const j of jobs){ const m=j.maintenanceId?mm.get(String(j.maintenanceId)):null; j.solution=m?.staffCompletionSummary||m?.completionSummary||j.remarks||m?.notes||''; j.pauseHistory=j.pauseHistory||m?.staffPauseHistory||[]; j.staffStartedAt=m?.staffStartedAt||j.startedAt; j.staffCompletedAt=m?.staffCompletedAt||j.completedAt; j.staffCompletionSummary=m?.staffCompletionSummary||j.remarks||''; }
+    const jobIds=jobs.map(j=>j._id);
+    const cards=jobIds.length?await M.JobCard.find({jobId:{$in:jobIds}}).lean():[];
+    const cardMap=new Map(cards.map(card=>[String(card.jobId),card]));
+    for(const j of jobs){ const m=j.maintenanceId?mm.get(String(j.maintenanceId)):null; j.solution=m?.staffCompletionSummary||m?.completionSummary||j.remarks||m?.notes||''; j.pauseHistory=j.pauseHistory||m?.staffPauseHistory||[]; j.staffStartedAt=m?.staffStartedAt||j.startedAt; j.staffCompletedAt=m?.staffCompletedAt||j.completedAt; j.staffCompletionSummary=m?.staffCompletionSummary||j.remarks||''; j.jobCard=(j.createdSource==='STAFF_OWN'&&j.selfCreated)?(cardMap.get(String(j._id))||null):null; }
     res.json({ jobs, rentals, maintenance });
   } catch(e){ res.status(500).json({message:e.message}); }
 });

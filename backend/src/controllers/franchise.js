@@ -179,6 +179,116 @@ exports.updateFleetVehicle = async (req, res) => {
 // Fleet Operator v4 — complete operational flow
 // ══════════════════════════════════════════════════════════════════
 
+
+exports.dashboardInsights = async (req, res) => {
+  try {
+    const M = require('../models');
+    const fid = req.user._id;
+    const now = new Date();
+    const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
+    const endToday = new Date(startToday); endToday.setDate(endToday.getDate() + 1);
+    const start5 = new Date(endToday); start5.setDate(start5.getDate() + 5);
+
+    const [
+      fleet,
+      rentals,
+      maintenance,
+      complaints,
+      notifications,
+      coupons,
+      referrals,
+    ] = await Promise.all([
+      M.CommandVehicle.find({ fleetOperatorId: fid, status: { $in: ['ACTIVE', 'ASSIGNED', 'INACTIVE'] } }).lean(),
+      M.VehicleRental.find({ franchiseeId: fid }).populate('customerId', 'name phone email').sort({ endDate: 1, createdAt: -1 }).lean(),
+      M.FleetMaintenance.find({ franchiseeId: fid }).populate('vehicleId', 'make model registrationNo bikeId').sort({ scheduledAt: 1, createdAt: -1 }).lean(),
+      M.Complaint.find({ franchiseeId: fid, status: { $in: ['OPEN', 'IN_PROGRESS', 'PAUSED', 'STAFF_COMPLETED'] } }).populate('customerId', 'name phone').sort('-createdAt').lean(),
+      M.Notification.find({ userId: fid }).sort('-createdAt').limit(50).lean(),
+      M.Coupon.find({ franchiseeId: fid }).sort('-createdAt').lean(),
+      M.ReferralReward.find({ franchiseeId: fid }).sort('-createdAt').lean(),
+    ]);
+
+    const isOpenRental = r => !['COMPLETED', 'CANCELLED'].includes(r.status);
+    const activeRentals = rentals.filter(r => isOpenRental(r) && ['HANDED_OVER', 'ACTIVE'].includes(r.status) && r.rentalPlan !== 'SALE');
+
+    const inRange = (value, start, end) => {
+      if (!value) return false;
+      const d = new Date(value);
+      return !Number.isNaN(d.getTime()) && d >= start && d < end;
+    };
+
+    const todayDue = rentals.filter(r => isOpenRental(r) && r.rentalPlan !== 'SALE' && inRange(r.endDate, startToday, endToday));
+    const dueIn1To5 = rentals.filter(r => isOpenRental(r) && r.rentalPlan !== 'SALE' && r.endDate && new Date(r.endDate) >= endToday && new Date(r.endDate) < start5);
+    const overdue = rentals.filter(r => isOpenRental(r) && r.rentalPlan !== 'SALE' && r.endDate && new Date(r.endDate) < startToday);
+    const paymentDue = rentals.filter(r => !['COMPLETED', 'CANCELLED'].includes(r.status) && (r.paymentStatus !== 'PAID' || Number(r.pendingExtension?.amount || 0) > 0));
+    const todayReturns = rentals.filter(r => isOpenRental(r) && r.rentalPlan !== 'SALE' && inRange(r.endDate, startToday, endToday));
+
+    const activeVehicleIds = new Set(activeRentals.map(r => String(r.vehicleId)));
+    const availability = {
+      total: fleet.length,
+      available: fleet.filter(v => ['ACTIVE', 'ASSIGNED'].includes(v.status) && !activeVehicleIds.has(String(v._id))).length,
+      rented: activeVehicleIds.size,
+      inactive: fleet.filter(v => v.status === 'INACTIVE').length,
+    };
+
+    const maintenanceDue = maintenance.filter(m => {
+      if (m.status === 'COMPLETED') return false;
+      if (!m.scheduledAt) return ['DUE', 'OVERDUE', 'PENDING'].includes(String(m.status || '').toUpperCase());
+      return new Date(m.scheduledAt) < start5;
+    });
+
+    const importantNotifications = notifications.filter(n =>
+      !n.read || ['HIGH', 'IMPORTANT', 'URGENT'].includes(String(n.data?.priority || n.priority || '').toUpperCase())
+    ).slice(0, 12);
+
+    const activeCoupons = coupons.filter(c => c.active !== false && (!c.expiresAt || new Date(c.expiresAt) >= now));
+    const couponSummary = {
+      total: coupons.length,
+      active: activeCoupons.length,
+      used: coupons.reduce((sum, c) => sum + Number(c.usedCount || 0), 0),
+      discountValue: coupons.reduce((sum, c) => sum + Number(c.usedCount || 0) * Number(c.discountValue || 0), 0),
+    };
+
+    const successfulReferrals = referrals.filter(r => r.status === 'SUCCESS');
+    const referralSummary = {
+      total: referrals.length,
+      successful: successfulReferrals.length,
+      rewards: successfulReferrals.reduce((sum, r) => sum + Number(r.referrerWalletAmount ?? r.amount ?? 0), 0),
+    };
+
+    const simplifyRental = r => ({
+      _id: r._id,
+      customer: r.customerId ? { name: r.customerId.name, phone: r.customerId.phone, email: r.customerId.email } : null,
+      vehicle: r.vehicleSnapshot || {},
+      bikeId: r.bikeId,
+      rentalPlan: r.rentalPlan,
+      status: r.status,
+      paymentStatus: r.paymentStatus,
+      startDate: r.startDate,
+      endDate: r.endDate,
+      totalAmount: r.totalAmount,
+      pendingExtension: r.pendingExtension || null,
+      handoverDate: r.handoverDate,
+    });
+
+    res.json({
+      todayDue: todayDue.map(simplifyRental),
+      dueIn1To5: dueIn1To5.map(simplifyRental),
+      overdueRentals: overdue.map(simplifyRental),
+      paymentDue: paymentDue.map(simplifyRental),
+      todayReturns: todayReturns.map(simplifyRental),
+      fleetAvailability: availability,
+      maintenanceDue: maintenanceDue.slice(0, 30),
+      complaints: complaints.slice(0, 30),
+      importantNotifications,
+      couponSummary,
+      referralSummary,
+      generatedAt: now,
+    });
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
 exports.fleetOverview = async (req, res) => {
   try {
     const M = require('../models');
@@ -524,8 +634,24 @@ exports.handoverInspection = async (req,res) => {
 };
 
 exports.customers = async (req,res) => {
-  try { const M=require('../models'); const ids=await M.VehicleRental.distinct('customerId',{franchiseeId:req.user._id}); const q={_id:{$in:ids},role:'CUSTOMER'}; if(req.query.search){q.$or=[{name:{$regex:req.query.search,$options:'i'}},{email:{$regex:req.query.search,$options:'i'}},{phone:{$regex:req.query.search,$options:'i'}}]}; const users=await M.User.find(q).select('name email phone address aadharNumber panNumber identityDocuments active createdAt').lean(); const rows=await Promise.all(users.map(async u=>{const [rentals,payments,vehicles]=await Promise.all([M.VehicleRental.find({franchiseeId:req.user._id,customerId:u._id}).sort('-createdAt').lean(),M.Payment.find({customerId:u._id}).sort('-createdAt').lean(),M.Vehicle.find({customerId:u._id}).lean()]); return {...u,rentals,payments,vehicles,totalPaid:rentals.filter(r=>r.paymentStatus==='PAID').reduce((s,r)=>s+Number(r.totalAmount||0),0)};})); res.json(rows); }
-  catch(e){res.status(500).json({message:e.message});}
+  try {
+    const M=require('../models');
+    const rentalIds=await M.VehicleRental.distinct('customerId',{franchiseeId:req.user._id});
+    const q={role:'CUSTOMER',$or:[{_id:{$in:rentalIds}},{franchiseeId:req.user._id},{kycFranchiseeId:req.user._id}]};
+    if(req.query.search){q.$and=[{$or:[{name:{$regex:req.query.search,$options:'i'}},{email:{$regex:req.query.search,$options:'i'}},{phone:{$regex:req.query.search,$options:'i'}}]}];}
+    const users=await M.User.find(q).select('name email phone address aadharNumber panNumber identityDocuments active createdAt referralCode referredBy').lean();
+    const rows=await Promise.all(users.map(async u=>{
+      const [rentals,payments,vehicles]=await Promise.all([
+        M.VehicleRental.find({franchiseeId:req.user._id,customerId:u._id}).sort('-createdAt').lean(),
+        M.Payment.find({customerId:u._id}).sort('-createdAt').lean(),
+        M.Vehicle.find({customerId:u._id}).lean()
+      ]);
+      return {...u,rentals,payments,vehicles,totalPaid:rentals.filter(r=>r.paymentStatus==='PAID').reduce((s,r)=>s+Number(r.totalAmount||0),0),
+        kyc:{aadharNumber:u.aadharNumber||'',panNumber:u.panNumber||'',documents:u.identityDocuments||{}}
+      };
+    }));
+    res.json(rows);
+  } catch(e){res.status(500).json({message:e.message});}
 };
 
 exports.payments = async (req,res) => {
@@ -561,6 +687,49 @@ exports.readNotification = async (req,res) => {
 exports.readAllNotifications = async (req,res) => {
   try { const M=require('../models'); await M.Notification.updateMany({userId:req.user._id,read:false},{$set:{read:true}}); res.json({ok:true}); }
   catch(e){res.status(400).json({message:e.message});}
+};
+
+
+exports.coupons = async (req,res) => {
+  try {
+    const M=require('../models');
+    const rows=await M.Coupon.find({franchiseeId:req.user._id}).sort('-createdAt').lean();
+    res.json(rows);
+  } catch(e){res.status(500).json({message:e.message});}
+};
+exports.createCoupon = async (req,res) => {
+  try {
+    const M=require('../models');
+    const code=String(req.body.code||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'');
+    const title=String(req.body.title||'').trim();
+    const discountValue=Number(req.body.discountValue);
+    if(!code||!title||!(discountValue>0)) return res.status(400).json({message:'Code, title and a positive discount are required.'});
+    if(req.body.discountType==='PERCENT' && discountValue>100) return res.status(400).json({message:'Percentage discount cannot exceed 100.'});
+    const recipientIds=Array.isArray(req.body.recipientIds)?req.body.recipientIds:[];
+    const c=await M.Coupon.create({...req.body,code,title,discountValue,franchiseeId:req.user._id,sendTo:req.body.sendTo==='SELECTED'?'SELECTED':'ALL',recipientIds});
+    const ids=c.sendTo==='ALL'
+      ? await M.User.distinct('_id',{role:'CUSTOMER',active:{$ne:false},$or:[{franchiseeId:req.user._id},{kycFranchiseeId:req.user._id},{_id:{$in:await M.VehicleRental.distinct('customerId',{franchiseeId:req.user._id})}}]})
+      : recipientIds;
+    const notes=ids.map(userId=>({userId,type:'COUPON',title:`New coupon: ${c.code}`,message:`${c.title} — ${c.discountType==='PERCENT'?c.discountValue+'%':'₹'+c.discountValue} discount${c.expiresAt?' until '+new Date(c.expiresAt).toLocaleDateString('en-IN'):''}.`,data:{couponId:c._id,code:c.code,discountType:c.discountType,discountValue:c.discountValue,expiresAt:c.expiresAt}}));
+    if(notes.length) { const created=await M.Notification.insertMany(notes); if(req.io) created.forEach(n=>req.io.to(`user:${String(n.userId)}`).emit('notification:new',n)); }
+    res.status(201).json(c);
+  } catch(e){res.status(400).json({message:e.code===11000?'Coupon code already exists for this franchisee.':e.message});}
+};
+exports.sendBroadcastNotification = async (req,res) => {
+  try {
+    const M=require('../models');
+    const title=String(req.body.title||'').trim(), message=String(req.body.message||'').trim();
+    if(!title||!message) return res.status(400).json({message:'Title and message are required.'});
+    const recipientIds=Array.isArray(req.body.recipientIds)?req.body.recipientIds:[];
+    const ids=req.body.sendTo==='SELECTED'
+      ? recipientIds
+      : await M.User.distinct('_id',{role:'CUSTOMER',active:{$ne:false},$or:[{franchiseeId:req.user._id},{kycFranchiseeId:req.user._id},{_id:{$in:await M.VehicleRental.distinct('customerId',{franchiseeId:req.user._id})}}]});
+    const type=String(req.body.type||'FRANCHISE_BROADCAST').toUpperCase();
+    const notes=ids.map(userId=>({userId,type,title,message,data:{bannerUrl:req.body.bannerUrl||'',priority:req.body.priority||'IMPORTANT',popup:true,franchiseeId:req.user._id}}));
+    if(notes.length) await M.Notification.insertMany(notes);
+    if(req.io) ids.forEach(id=>req.io.to(`user:${String(id)}`).emit('notification:new',{type,title,message,data:{bannerUrl:req.body.bannerUrl||'',popup:true}}));
+    res.json({sent:ids.length,title,message});
+  } catch(e){res.status(400).json({message:e.message});}
 };
 
 exports.report = async (req,res) => {

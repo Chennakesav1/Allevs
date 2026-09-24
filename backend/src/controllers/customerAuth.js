@@ -40,6 +40,51 @@ async function hashOTP(otp) {
   return bcrypt.hash(otp, 10);
 }
 
+function makeReferralCode(name='EV') {
+  const clean = String(name).toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5) || 'EV';
+  return `${clean}${Math.random().toString(36).slice(2,8).toUpperCase()}`;
+}
+
+async function ensureReferralCode(user) {
+  if (user.referralCode) return user.referralCode;
+  for (let i=0;i<5;i++) {
+    const code=makeReferralCode(user.name);
+    if (!await User.exists({referralCode:code})) { user.referralCode=code; await user.save(); return code; }
+  }
+  throw new Error('Could not generate referral code');
+}
+
+async function creditReferralWallet(userId, amount, referenceId, description) {
+  const { Wallet, WalletTransaction } = require('../models');
+  const wallet=await Wallet.findOneAndUpdate({customerId:userId},{$inc:{balance:amount}},{new:true,upsert:true});
+  await WalletTransaction.create({customerId:userId,type:'CREDIT',amount,referenceType:'REFERRAL',referenceId,description,balanceAfter:wallet.balance,status:'SUCCESS'});
+  return wallet;
+}
+
+async function processReferral(user) {
+  if (!user?.referredBy || user.referralProcessed) return null;
+  const { User, ReferralReward, Financial, Notification } = require('../models');
+  const referrer=await User.findOne({_id:user.referredBy,role:'CUSTOMER',active:{$ne:false}});
+  if (!referrer || String(referrer._id)===String(user._id)) return null;
+  const existing=await ReferralReward.findOne({referrerId:referrer._id,referredId:user._id});
+  if (existing) { user.referralProcessed=true; await user.save(); return existing; }
+  const franchiseeId=referrer.franchiseeId || user.franchiseeId || user.kycFranchiseeId || undefined;
+  const reward=await ReferralReward.create({
+    franchiseeId, referrerId:referrer._id, referredId:user._id, amount:100,
+    referrerWalletAmount:100, referredWalletAmount:100,
+    details:{referrerName:referrer.name,referredName:user.name,referralCode:referrer.referralCode}
+  });
+  await creditReferralWallet(referrer._id,100,reward._id,`Referral reward for referring ${user.name}`);
+  await creditReferralWallet(user._id,100,reward._id,`Referral reward for joining with ${referrer.name}'s code`);
+  if (franchiseeId) {
+    await Financial.create({franchiseeId,kind:'REFERRAL_REWARD',category:'REFERRAL',amount:100,referenceId:reward._id,description:`Referral reward — ${referrer.name} referred ${user.name}`});
+  }
+  await Notification.create({userId:referrer._id,type:'REFERRAL_REWARD',title:'Referral reward credited',message:`₹100 has been added to your wallet for referring ${user.name}.`,data:{rewardId:reward._id,amount:100,referredCustomerId:user._id}});
+  await Notification.create({userId:user._id,type:'REFERRAL_REWARD',title:'Welcome referral reward',message:'₹100 has been added to your wallet for joining with a referral code.',data:{rewardId:reward._id,amount:100,referrerId:referrer._id}});
+  user.referralProcessed=true; await user.save();
+  return reward;
+}
+
 async function sendEmail(to, subject, otp, purpose = 'OTP') {
   const from = process.env.EMAIL_FROM || process.env.SMTP_USER;
 
@@ -79,7 +124,7 @@ function issueTokens(user) {
 // ──────────────────────────────────────────────────────────────────
 exports.register = async (req, res) => {
   try {
-    const { name, email, phone, pincode, state, district } = req.body;
+    const { name, email, phone, pincode, state, district, referralCode, couponCode } = req.body;
     if (!name || !email) return res.status(400).json({ message: 'name and email are required' });
 
     // Sanitize phone — treat blank string as absent
@@ -111,6 +156,22 @@ exports.register = async (req, res) => {
       }
     }
 
+    let referredBy;
+    if (referralCode) {
+      const referrer = await User.findOne({ referralCode: String(referralCode).trim().toUpperCase(), role:'CUSTOMER', active:{$ne:false} }).select('_id');
+      if (!referrer) return res.status(400).json({ message:'Invalid referral code.' });
+      referredBy = referrer._id;
+    }
+    let signupCoupon;
+    if (couponCode) {
+      const { Coupon } = require('../models');
+      signupCoupon = await Coupon.findOne({
+        code:String(couponCode).trim().toUpperCase(), active:true,
+        startsAt:{$lte:new Date()},
+        $or:[{expiresAt:{$exists:false}},{expiresAt:null},{expiresAt:{$gt:new Date()}}]
+      });
+      if (!signupCoupon) return res.status(400).json({ message:'Invalid or expired coupon code.' });
+    }
     const otp = genOTP();
     const u   = await User.create({
       name,
@@ -118,6 +179,10 @@ exports.register = async (req, res) => {
       phone:        cleanPhone,          // undefined if blank — sparse index allows multiple nulls
       address:      (pincode || state || district) ? { pincode: pincode || '', state: state || '', district: district || '' } : undefined,
       role:         'CUSTOMER',
+      referredBy,
+      signupCouponCode: signupCoupon?.code,
+      signupCouponId: signupCoupon?._id,
+      franchiseeId: signupCoupon?.franchiseeId,
       otpHash:      await hashOTP(otp),
       otpExpiry:    otpExpiry(),
       otpVerified:  false,
@@ -162,6 +227,8 @@ exports.verifyOtp = async (req, res) => {
     const { accessToken, refreshToken, rt } = issueTokens(u);
     u.refreshTokenHash = await bcrypt.hash(rt, 10);
     await u.save();
+    await ensureReferralCode(u);
+    await processReferral(u).catch(err=>console.error('Referral reward processing failed:',err));
 
     res.json({
       accessToken, refreshToken,

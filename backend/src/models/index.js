@@ -1,11 +1,11 @@
 const mongoose=require('mongoose'); const {Schema}=mongoose;
 const id=Schema.Types.ObjectId;
-const userSchema=new Schema({name:{type:String,required:true},email:{type:String,unique:true,sparse:true,lowercase:true},phone:{type:String,unique:true,sparse:true},address:Schema.Types.Mixed,profileImage:String,aadharNumber:String,panNumber:String,identityDocuments:{aadhar:{url:String,fileName:String,uploadedAt:Date},pan:{url:String,fileName:String,uploadedAt:Date},currentBill:{url:String,fileName:String,uploadedAt:Date}},settings:{type:Schema.Types.Mixed,default:{notifications:true,securityAlerts:true,offers:false}},passwordHash:{type:String},role:{type:String,enum:['CUSTOMER','TECHNICIAN','STAFF','HUB_MANAGER','FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'],required:true},franchiseeId:id,hubId:id,active:{type:Boolean,default:true},refreshTokenHash:String,otpHash:String,otpExpiry:Date,otpVerified:{type:Boolean,default:false},isPasswordSet:{type:Boolean,default:false},monthlySalary:{type:Number,default:0,min:0},joiningDate:Date,payrollNotes:String},{timestamps:true});
+const userSchema=new Schema({name:{type:String,required:true},email:{type:String,unique:true,sparse:true,lowercase:true},phone:{type:String,unique:true,sparse:true},address:Schema.Types.Mixed,profileImage:String,aadharNumber:String,panNumber:String,identityDocuments:{aadhar:{url:String,fileName:String,uploadedAt:Date},pan:{url:String,fileName:String,uploadedAt:Date},currentBill:{url:String,fileName:String,uploadedAt:Date}},settings:{type:Schema.Types.Mixed,default:{notifications:true,securityAlerts:true,offers:false}},passwordHash:{type:String},role:{type:String,enum:['CUSTOMER','TECHNICIAN','STAFF','HUB_MANAGER','FRANCHISEE','CENTRAL_ADMIN','SUPER_ADMIN'],required:true},franchiseeId:id,hubId:id,active:{type:Boolean,default:true},refreshTokenHash:String,otpHash:String,otpExpiry:Date,otpVerified:{type:Boolean,default:false},isPasswordSet:{type:Boolean,default:false},referralCode:{type:String,unique:true,sparse:true,index:true},referredBy:{type:id,ref:'User'},referralProcessed:{type:Boolean,default:false},signupCouponCode:String,signupCouponId:{type:id,ref:'Coupon'},couponUsedAt:Date,kycFranchiseeId:{type:id,ref:'User'},monthlySalary:{type:Number,default:0,min:0},joiningDate:Date,payrollNotes:String},{timestamps:true});
 const vehicleSchema=new Schema({customerId:{type:id,ref:'User',required:true},vin:{type:String,unique:true,required:true},registrationNo:String,model:String,batterySoc:{type:Number,default:0},batterySoh:{type:Number,default:100},status:{type:String,default:'ACTIVE'},sourcePurchaseId:{type:id,ref:'VehicleRental'}},{timestamps:true});
 const hubSchema=new Schema({name:String,code:{type:String,unique:true},city:String,address:String,lat:Number,lng:Number,status:{type:String,default:'ONLINE'},chargerCount:{type:Number,default:0},franchiseeId:id},{timestamps:true});
 const chargerSchema=new Schema({hubId:{type:id,ref:'Hub'},code:{type:String,unique:true},status:{type:String,default:'AVAILABLE'},powerKw:{type:Number,default:7.2},connectorType:{type:String,default:'AC'},pricePerKwh:{type:Number,default:12},lastHeartbeat:Date,lastTelemetry:Schema.Types.Mixed},{timestamps:true});
 const jobSchema=new Schema({createdBy:{type:id,ref:'User',index:true},createdSource:{type:String,enum:['ASSIGNED','STAFF_OWN'],default:'ASSIGNED',index:true},selfCreated:{type:Boolean,default:false,index:true},customerSnapshot:Schema.Types.Mixed,bikeDetails:Schema.Types.Mixed,previousWorkSummary:String,customerId:{type:id,ref:'User'},vehicleId:{type:id,ref:'Vehicle'},commandVehicleId:{type:id,ref:'CommandVehicle'},maintenanceId:{type:id,ref:'FleetMaintenance',index:true},complaintId:{type:id,ref:'Complaint',index:true},vehicleSnapshot:Schema.Types.Mixed, bikeId:String, rentalId:{type:id,ref:'VehicleRental'},franchiseeId:{type:id,ref:'User'},hubId:{type:id,ref:'Hub'},technicianId:{type:id,ref:'User'},serviceType:{type:String,default:'REPAIR'},problem:String,priority:{type:String,default:'NORMAL'},status:{type:String,enum:['PENDING','ASSIGNED','EN_ROUTE','REACHED','INSPECTION','IN_PROGRESS','PAUSED','WAITING_FOR_PARTS','QC','COMPLETED','CANCELLED','EMERGENCY'],default:'PENDING'},location:Schema.Types.Mixed,parts:[{partId:id,qty:Number,unitPrice:Number}],labourAmount:{type:Number,default:0},totalAmount:{type:Number,default:0},diagnosis:String,rootCause:String,workPerformed:String,solution:String,partsReplaced:[String],testResult:String,finalCondition:String,recommendations:String,nextServiceAt:Date,labourHours:Number,completionNotes:String,trackingStatus:{type:String,default:'Technician Assigned'},slaDueAt:Date,startedAt:Date,pausedAt:Date,pauseReason:String,pauseHistory:[{pausedAt:Date,resumedAt:Date,reason:String,category:String,details:String,expectedResumeAt:Date,workCompletedBeforePause:String,partsRequired:String,durationSeconds:Number}],elapsedSeconds:{type:Number,default:0},completedAt:Date,remarks:String,odometerReading:Number,batteryPercent:Number},{timestamps:true});
-const jobCardSchema=new Schema({jobId:{type:id,ref:'Job',unique:true},complaint:String,diagnosis:String,workPerformed:String,technicianNotes:String,partsUsed:[{partId:id,qty:Number,unitPrice:Number}],photos:[String],beforeAfter:[{before:String,after:String}],customerApproval:{type:Boolean,default:false},qcApproved:{type:Boolean,default:false},completedAt:Date},{timestamps:true});
+const jobCardSchema=new Schema({jobId:{type:id,ref:'Job',unique:true},complaint:String,diagnosis:String,workPerformed:String,technicianNotes:String,partsUsed:[{partId:id,qty:Number,unitPrice:Number}],photos:[String],beforeAfter:[{before:String,after:String}],customerApproval:{type:Boolean,default:false},customerSignature:String,customerSignatureAt:Date,previewSubmittedAt:Date,submittedAt:Date,qcApproved:{type:Boolean,default:false},completedAt:Date,jobCardNumber:String,jobCardData:{type:Schema.Types.Mixed,default:{}},vehicleReceiptCondition:{type:Schema.Types.Mixed,default:{}},serviceTypeData:{type:Schema.Types.Mixed,default:{}},estimateData:{type:Schema.Types.Mixed,default:{}},authorizationText:String},{timestamps:true});
 const inventorySchema=new Schema({hubId:id,sku:{type:String,unique:true},name:String,category:String,quantity:{type:Number,default:0},reorderLevel:{type:Number,default:5},unitPrice:{type:Number,default:0},supplierId:id},{timestamps:true});
 const supplierSchema=new Schema({name:String,phone:String,email:String,address:String,active:{type:Boolean,default:true}},{timestamps:true});
 const purchaseOrderSchema=new Schema({hubId:id,supplierId:id,items:[{sku:String,quantity:Number,unitPrice:Number}],status:{type:String,default:'DRAFT'},total:{type:Number,default:0}},{timestamps:true});
@@ -49,6 +49,39 @@ const chargingSchema=new Schema({chargerId:id,customerId:id,vehicleId:id,energyK
 const telemetrySchema=new Schema({vehicleId:id,chargerId:id,soc:Number,soh:Number,temperature:Number,voltage:Number,current:Number,powerKw:Number,faultCodes:[String],source:String,recordedAt:{type:Date,default:Date.now}},{timestamps:true});
 const diagnosticSchema=new Schema({vehicleId:id,faultCodes:[String],healthScore:Number,summary:String,raw:Schema.Types.Mixed,createdAt:{type:Date,default:Date.now}});
 const notificationSchema=new Schema({userId:id,type:String,title:String,message:String,read:{type:Boolean,default:false},data:Schema.Types.Mixed},{timestamps:true});
+
+const couponSchema=new Schema({
+  franchiseeId:{type:id,ref:'User',required:true,index:true},
+  code:{type:String,required:true,uppercase:true,trim:true},
+  title:{type:String,required:true},
+  description:String,
+  discountType:{type:String,enum:['PERCENT','FLAT'],default:'PERCENT'},
+  discountValue:{type:Number,required:true,min:0},
+  maxDiscount:{type:Number,min:0},
+  minOrderAmount:{type:Number,default:0,min:0},
+  startsAt:{type:Date,default:Date.now},
+  expiresAt:Date,
+  active:{type:Boolean,default:true},
+  sendTo:{type:String,enum:['ALL','SELECTED'],default:'ALL'},
+  recipientIds:[{type:id,ref:'User'}],
+  usageLimit:{type:Number,min:1},
+  usedCount:{type:Number,default:0},
+},{timestamps:true});
+couponSchema.index({franchiseeId:1,code:1},{unique:true});
+
+const referralRewardSchema=new Schema({
+  franchiseeId:{type:id,ref:'User',index:true},
+  referrerId:{type:id,ref:'User',required:true},
+  referredId:{type:id,ref:'User',required:true},
+  amount:{type:Number,default:100},
+  referrerWalletAmount:{type:Number,default:100},
+  referredWalletAmount:{type:Number,default:100},
+  status:{type:String,enum:['SUCCESS','FAILED'],default:'SUCCESS'},
+  processedAt:{type:Date,default:Date.now},
+  details:Schema.Types.Mixed,
+},{timestamps:true});
+referralRewardSchema.index({referrerId:1,referredId:1},{unique:true});
+
 const reviewSchema=new Schema({customerId:id,jobId:id,rating:{type:Number,min:1,max:5},comment:String,technicianRating:Number,serviceRating:Number,chargerRating:Number,franchiseeId:id,franchiseeRating:{type:Number,min:1,max:5}});
 const complaintSchema=new Schema({
   customerId:{type:id,ref:'User',required:true},
@@ -238,6 +271,9 @@ const vehicleRentalSchema = new Schema({
   securityDeposit:  { type: Number, default: 0 },
   discountPercent:  { type: Number, default: 0 },
   discountAmount:   { type: Number, default: 0 },
+  couponId: {type:id,ref:'Coupon'},
+  couponCode: String,
+  couponDiscount: {type:Number,default:0},
   pricePerDay:      Number,
   price:            Number,
   totalAmount:      Number,
@@ -477,6 +513,8 @@ const models={
   Telemetry:mongoose.model('Telemetry',telemetrySchema),
   Diagnostic:mongoose.model('Diagnostic',diagnosticSchema),
   Notification:mongoose.model('Notification',notificationSchema),
+  Coupon:mongoose.model('Coupon',couponSchema),
+  ReferralReward:mongoose.model('ReferralReward',referralRewardSchema),
   Review:mongoose.model('Review',reviewSchema),
   Complaint:mongoose.model('Complaint',complaintSchema),
   FaultVehicle:mongoose.model('FaultVehicle',faultVehicleSchema),
