@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const { commandDashboard } = require('../services/analytics');
 const { Hub, Charger, Job, Payment, User, Expansion } = require('../models');
 const smInfrastructureHubs = require('../data/smInfrastructureHubs.json');
@@ -371,6 +372,21 @@ exports.updateVehicle = async (req, res) => {
     if (updates.insuranceExpiry) updates.insuranceExpiry = new Date(updates.insuranceExpiry);
     const vehicle = await CommandVehicle.findByIdAndUpdate(req.params.id, updates, { new: true });
     if (!vehicle) return res.status(404).json({ message: 'Vehicle not found' });
+
+    // CommandVehicle is the shared source of truth. Refresh denormalized snapshots
+    // used by active customer rentals, staff jobs and fleet documents as well.
+    const M = require('../models');
+    const snapshotFields = ['bikeId','make','model','category','year','color','registrationNo','chassisNo','motorNo','batteryCapacityKwh','rangeKm','chargingType','odometerKm','pricePerDay','images'];
+    const snapshot = {};
+    snapshotFields.forEach(k => { snapshot[k] = vehicle[k]; });
+    const snapSet = {}; Object.entries(snapshot).forEach(([k,v]) => { snapSet[`vehicleSnapshot.${k}`] = v; });
+    await Promise.all([
+      M.VehicleRental?.updateMany({ vehicleId: vehicle._id }, { $set: snapSet }),
+      M.Job?.updateMany({ $or: [{ vehicleId: vehicle._id }, { commandVehicleId: vehicle._id }] }, { $set: snapSet }),
+      M.FleetMaintenance?.updateMany({ vehicleId: vehicle._id }, { $set: snapSet }),
+      M.FaultVehicle?.updateMany({ vehicleId: vehicle._id }, { $set: snapSet }),
+      M.FleetDocument?.updateMany({ vehicleId: vehicle._id }, { $set: snapSet }),
+    ].filter(Boolean));
     res.json({
       ...vehicle.toObject(),
       franchiseeId:    vehicle.fleetOperatorId,
@@ -380,6 +396,26 @@ exports.updateVehicle = async (req, res) => {
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
+};
+
+/** POST /api/admin/staff — Command Center creates a staff account after email OTP verification */
+exports.createStaff = async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const { email, name, phone, aadharNumber, panNumber, profileImage, role, joiningDate } = req.body || {};
+    if (!name || !email || !phone || !aadharNumber || !panNumber || !role) return res.status(400).json({ message: 'Name, email, phone, Aadhaar, PAN and role are required.' });
+    const allowedRoles = ['STAFF','TECHNICIAN','HUB_MANAGER'];
+    if (!allowedRoles.includes(role)) return res.status(400).json({ message: 'Invalid staff role.' });
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const exists = await User.findOne({ email: normalizedEmail }).select('_id').lean();
+    if (exists) return res.status(409).json({ message: 'A user already exists with this email.' });
+    const chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$';
+    const generatedPassword=Array.from({length:12},()=>chars[Math.floor(Math.random()*chars.length)]).join('');
+    const passwordHash=await bcrypt.hash(generatedPassword,12);
+    const user=await User.create({ name:String(name).trim(), email:normalizedEmail, phone:String(phone).trim(), aadharNumber:String(aadharNumber).trim(), panNumber:String(panNumber).trim().toUpperCase(), profileImage:profileImage||'', role, joiningDate:joiningDate?new Date(joiningDate):undefined, passwordHash, isPasswordSet:true, otpVerified:true, active:true });
+    const safe=user.toObject(); delete safe.passwordHash; delete safe.refreshTokenHash; delete safe.otpHash; delete safe.otpExpiry;
+    res.status(201).json({ ...safe, generatedPassword });
+  } catch(e) { res.status(500).json({ message:e.message }); }
 };
 
 /** DELETE /api/admin/vehicles/:id — remove a command center vehicle */

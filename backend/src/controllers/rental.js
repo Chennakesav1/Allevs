@@ -45,6 +45,42 @@ function activeReservationQuery(vehicleId) {
   };
 }
 
+// Resolve the live rental plans for an existing rental. Older bookings may not
+// have the plans copied into vehicleSnapshot, and some legacy records have a
+// vehicleSource value that does not match the current CommandVehicle flow.
+async function resolveRentalPlans(rental) {
+  let rentalPlans = rental.rentalPlans || rental.vehicleSnapshot?.rentalPlans || null;
+  const hasUsablePlans = plans => plans && ['daily', 'weekly', 'monthly'].some(k => plans[k]?.enabled && Number(plans[k]?.amount || 0) > 0);
+  if (hasUsablePlans(rentalPlans)) return rentalPlans;
+
+  const commandOr = [];
+  const pendingOr = [];
+  if (rental.vehicleId) {
+    commandOr.push({ _id: rental.vehicleId });
+    pendingOr.push({ _id: rental.vehicleId });
+  }
+  const vs = rental.vehicleSnapshot || {};
+  if (rental.bikeId || vs.bikeId) commandOr.push({ bikeId: rental.bikeId || vs.bikeId });
+  if (vs.registrationNo) commandOr.push({ registrationNo: vs.registrationNo });
+  if (vs.chassisNo) commandOr.push({ chassisNo: vs.chassisNo });
+
+  // Command Center vehicles are the source that carries Daily/Weekly/Monthly
+  // rental plans in this application.
+  if (commandOr.length) {
+    const commandVehicle = await M.CommandVehicle.findOne({ $or: commandOr }).select('rentalPlans').lean();
+    if (hasUsablePlans(commandVehicle?.rentalPlans)) rentalPlans = commandVehicle.rentalPlans;
+  }
+
+  // Keep a PendingVehicle lookup as a safe compatibility fallback if the model
+  // is extended with rental plans later, without changing today's data model.
+  if (!hasUsablePlans(rentalPlans) && pendingOr.length) {
+    const pendingVehicle = await M.PendingVehicle.findOne({ $or: pendingOr }).select('rentalPlans').lean().catch(() => null);
+    if (hasUsablePlans(pendingVehicle?.rentalPlans)) rentalPlans = pendingVehicle.rentalPlans;
+  }
+
+  return rentalPlans;
+}
+
 // ── HTML invoice builder ─────────────────────────────────────────────
 function buildInvoiceHTML(rental, customer, inv) {
   const vs   = rental.vehicleSnapshot || {};
@@ -231,6 +267,64 @@ async function sendInvoiceEmail(customer, rental, inv) {
   } catch (e) {
     console.error('Invoice email error:', e.message);
     // Non-fatal — don't throw, payment is already confirmed
+  }
+}
+
+// ── Send rental-extension success email ──────────────────────────────
+async function sendExtensionSuccessEmail(customer, rental, details) {
+  try {
+    if (!customer?.email) return;
+    const mailer = getMailer();
+    const vs = rental.vehicleSnapshot || {};
+    const money = n => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+    const date = d => d
+      ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+      : '—';
+    const vehicleName = `${vs.make || 'Electric'} ${vs.model || 'Vehicle'}`.trim();
+    const unitLabel = details.units === 1 ? details.unitLabel : `${details.unitLabel}s`;
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"/><title>Rental Extension Successful — allEV</title></head>
+<body style="margin:0;background:#f4f7fb;font-family:Segoe UI,Arial,sans-serif;color:#172033">
+  <div style="max-width:680px;margin:32px auto;background:#fff;border-radius:18px;overflow:hidden;box-shadow:0 8px 30px rgba(15,23,42,.10)">
+    <div style="background:linear-gradient(135deg,#0f172a,#1e3a8a,#2563eb);padding:30px 34px;color:#fff">
+      <div style="font-size:12px;letter-spacing:1.5px;font-weight:800;opacity:.8">allEV · RENTAL UPDATE</div>
+      <h1 style="margin:8px 0 4px;font-size:25px">Rental Extension Successful ✓</h1>
+      <p style="margin:0;color:#dbeafe">Your payment was verified and your rental due date has been extended.</p>
+    </div>
+    <div style="padding:30px 34px">
+      <p style="margin:0 0 20px;font-size:15px">Hi ${customer?.name || 'Customer'},</p>
+      <div style="border:1px solid #dbeafe;background:#f8fbff;border-radius:14px;padding:20px;margin-bottom:20px">
+        <div style="font-size:18px;font-weight:800">${vehicleName}</div>
+        <div style="margin-top:6px;color:#64748b">Bike ID: ${details.bikeId || vs.bikeId || '—'}</div>
+        <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><small style="color:#64748b">PLAN</small><div style="font-weight:800;margin-top:3px">${details.plan}</div></div>
+          <div><small style="color:#64748b">EXTENSION</small><div style="font-weight:800;margin-top:3px">${details.units} ${unitLabel}</div></div>
+          <div><small style="color:#64748b">AMOUNT PAID</small><div style="font-weight:800;margin-top:3px">${money(details.amount)}</div></div>
+          <div><small style="color:#64748b">NEW DUE DATE</small><div style="font-weight:800;margin-top:3px">${date(details.newDueDate)}</div></div>
+        </div>
+      </div>
+      <div style="padding:14px 16px;background:#ecfdf5;border:1px solid #bbf7d0;border-radius:10px;color:#166534;font-weight:700">
+        Payment ID: ${details.paymentId || '—'}
+      </div>
+      ${details.invoiceNo ? `<p style="margin:18px 0 0;color:#64748b;font-size:13px">Invoice: <strong>${details.invoiceNo}</strong></p>` : ''}
+      <p style="margin:22px 0 0;color:#64748b;font-size:13px;line-height:1.6">Thank you for choosing allEV. Please keep this email for your rental records.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    await mailer.sendMail({
+      from: process.env.EMAIL_FROM || '"EV Core" <noreply@evcore.in>',
+      to: customer.email,
+      subject: `Rental Extension Successful — ${vehicleName}`,
+      html,
+    });
+    console.log(`Rental extension success email sent to ${customer.email}`);
+  } catch (e) {
+    console.error('Rental extension email error:', e.message);
+    // Non-fatal — payment and rental update are already confirmed.
   }
 }
 
@@ -528,8 +622,23 @@ exports.verifyPayment = async (req, res) => {
 // ── GET /customer/rentals ─────────────────────────────────────────────
 exports.myRentals = async (req, res) => {
   try {
-    const rentals = await VehicleRental.find({ customerId: req.user._id }).sort('-createdAt');
-    res.json(rentals);
+    const rentals = await VehicleRental.find({ customerId: req.user._id }).sort('-createdAt').lean();
+
+    // Always resolve plans from the live vehicle when an older booking does not
+    // contain them. This fixes the extension modal showing ₹0 and no plan cards.
+    const enriched = await Promise.all(rentals.map(async r => {
+      const rentalPlans = await resolveRentalPlans(r);
+      return {
+        ...r,
+        rentalPlans: rentalPlans || null,
+        vehicleSnapshot: {
+          ...(r.vehicleSnapshot || {}),
+          ...(rentalPlans ? { rentalPlans } : {}),
+        },
+      };
+    }));
+
+    res.json(enriched);
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
@@ -601,7 +710,8 @@ exports.createExtensionOrder = async (req, res) => {
     }
     const units = Math.max(1, Math.min(365, Math.floor(Number(req.body.units || 1))));
     const unitLabel = requestedPlan === 'DAILY' ? 'day' : requestedPlan === 'WEEKLY' ? 'week' : 'month';
-    const planData = rental.rentalPlans?.[requestedPlan.toLowerCase()] || rental.vehicleSnapshot?.rentalPlans?.[requestedPlan.toLowerCase()];
+    const rentalPlans = await resolveRentalPlans(rental);
+    const planData = rentalPlans?.[requestedPlan.toLowerCase()];
     if (!planData?.enabled || Number(planData.amount) <= 0) {
       return res.status(400).json({ message: `${unitLabel.charAt(0).toUpperCase() + unitLabel.slice(1)} rental plan is not available for this vehicle.` });
     }
@@ -622,6 +732,10 @@ exports.createExtensionOrder = async (req, res) => {
       },
     });
 
+    if (rentalPlans) {
+      rental.rentalPlans = rentalPlans;
+      rental.vehicleSnapshot = { ...(rental.vehicleSnapshot || {}), rentalPlans };
+    }
     rental.pendingExtension = { days: units, amount, orderId: rzOrder.id, createdAt: new Date(), unitLabel, plan: requestedPlan, rate };
     rental.bookingHistory = rental.bookingHistory || [];
     rental.bookingHistory.push({
@@ -807,6 +921,19 @@ exports.verifyExtensionPayment = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // Send the customer a success confirmation only after the Razorpay
+    // signature has been verified and the extension payment is recorded.
+    await sendExtensionSuccessEmail(customer, rental, {
+      plan,
+      units,
+      unitLabel,
+      amount,
+      newDueDate,
+      bikeId,
+      paymentId: razorpay_payment_id,
+      invoiceNo: invoice?.invoiceNo || null,
+    });
+
     if (ownerFranchiseeId) {
       await Financial.create({
         franchiseeId: ownerFranchiseeId,
@@ -832,8 +959,6 @@ exports.verifyExtensionPayment = async (req, res) => {
       message: `Your ${vs.make || ''} ${vs.model || ''} (${bikeId || 'Bike ID not set'}) has been extended by ${units} ${unitLabel}${units !== 1 ? 's' : ''}. New due date: ${newDueDate.toLocaleDateString('en-IN')}.`,
       data: { rentalId: rental._id, paymentId: payment._id, bikeId, extensionCount: nextExtensionCount, amount, dueDate: newDueDate },
     });
-
-    if (invoice) sendInvoiceEmail(customer, rental, invoice);
 
     res.json({ success: true, rental, payment, invoiceId: invoice?._id || null, extensionCount: nextExtensionCount, previousDueDate: currentDueDate, dueDate: newDueDate });
   } catch (e) {

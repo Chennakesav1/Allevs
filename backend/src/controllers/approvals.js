@@ -32,6 +32,7 @@ async function sendMail(to, subject, html) {
 
 // ── OTP store (in-memory, ok for single-instance) ──────────────
 const otpStore = new Map(); // key: email => { otp, expiry }
+const verifiedStaffEmailStore = new Map(); // email => expiry, used by Command Center staff creation
 
 function generateOtp() {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -87,6 +88,7 @@ exports.verifyStaffEmailOtp = async (req, res) => {
   }
   if (stored.otp !== String(otp)) return res.status(400).json({ message: 'Invalid OTP' });
   otpStore.delete(email.toLowerCase());
+  verifiedStaffEmailStore.set(email.toLowerCase(), Date.now() + 15 * 60 * 1000);
   res.json({ verified: true, message: 'Email verified successfully' });
 };
 
@@ -340,6 +342,63 @@ exports.rejectVehicle = async (req, res) => {
   if (!doc) return res.status(404).json({ message: 'Submission not found' });
   await audit(req.user._id, 'REJECT', 'PendingVehicle', doc._id);
   res.json(doc);
+};
+
+// ═══════════════════════════════════════════════════════════════
+// COMMAND CENTER STAFF CREATION
+// ═══════════════════════════════════════════════════════════════
+exports.createCommandStaff = async (req, res) => {
+  try {
+    const { name, email, phone, aadharNumber, panNumber, profileImage, role, joiningDate } = req.body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!name || !normalizedEmail || !phone || !aadharNumber || !panNumber || !role)
+      return res.status(400).json({ message: 'Name, email, phone, Aadhaar, PAN and role are required.' });
+
+    const verifiedUntil = verifiedStaffEmailStore.get(normalizedEmail);
+    if (!verifiedUntil || Date.now() > verifiedUntil) {
+      verifiedStaffEmailStore.delete(normalizedEmail);
+      return res.status(400).json({ message: 'Please verify the staff email with OTP before creating the account.' });
+    }
+
+    const allowedRoles = ['STAFF','TECHNICIAN','HUB_MANAGER'];
+    if (!allowedRoles.includes(String(role))) return res.status(400).json({ message: 'Invalid staff role.' });
+
+    const existing = await User.findOne({ email: normalizedEmail });
+    if (existing) return res.status(409).json({ message: `A user with email ${normalizedEmail} already exists.` });
+    const phoneExisting = await User.findOne({ phone: String(phone).trim() });
+    if (phoneExisting) return res.status(409).json({ message: 'A user with this phone number already exists.' });
+
+    const plainPw = genPassword();
+    const hash = await bcrypt.hash(plainPw, 12);
+    const user = await User.create({
+      name: String(name).trim(),
+      email: normalizedEmail,
+      phone: String(phone).trim(),
+      aadharNumber: String(aadharNumber).trim(),
+      panNumber: String(panNumber).trim().toUpperCase(),
+      profileImage: profileImage || undefined,
+      role: String(role),
+      joiningDate: joiningDate ? new Date(joiningDate) : undefined,
+      passwordHash: hash,
+      isPasswordSet: true,
+      active: true,
+    });
+
+    verifiedStaffEmailStore.delete(normalizedEmail);
+    await audit(req.user._id, 'CREATE', 'User', user._id);
+    res.status(201).json({
+      message: 'Staff account created successfully.',
+      staff: {
+        _id: user._id, name: user.name, email: user.email, phone: user.phone,
+        aadharNumber: user.aadharNumber, panNumber: user.panNumber,
+        profileImage: user.profileImage, role: user.role, active: user.active,
+        joiningDate: user.joiningDate, createdAt: user.createdAt,
+      },
+      password: plainPw,
+    });
+  } catch (e) {
+    res.status(400).json({ message: e.message });
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════

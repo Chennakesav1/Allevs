@@ -663,6 +663,35 @@ function FranFinancials({ call }) {
 // ══════════════════════════════════════════════════════════════════
 // FRAN INVENTORY PAGE
 // ══════════════════════════════════════════════════════════════════
+function FleetCommandVehicleDetails({ vehicle }) {
+  const details = [
+    ['Category', vehicle?.category], ['Make', vehicle?.make], ['Model / Name', vehicle?.model],
+    ['Year', vehicle?.year], ['Color', vehicle?.color], ['Bike ID', vehicle?.bikeId],
+    ['Bike Number / Registration', vehicle?.registrationNo], ['Chassis Number', vehicle?.chassisNo], ['Motor Number', vehicle?.motorNo],
+    ['Insurance Expiry', vehicle?.insuranceExpiry ? new Date(vehicle.insuranceExpiry).toLocaleDateString('en-IN') : ''],
+    ['Odometer', vehicle?.odometerKm != null ? `${vehicle.odometerKm} km` : ''], ['Battery SOC', vehicle?.batterySoc != null ? `${vehicle.batterySoc}%` : ''],
+    ['Seating Capacity', vehicle?.seatingCapacity], ['Top Speed', vehicle?.topSpeedKph != null ? `${vehicle.topSpeedKph} km/h` : ''],
+    ['Battery Capacity', vehicle?.batteryCapacityKwh != null ? `${vehicle.batteryCapacityKwh} kWh` : ''], ['Range', vehicle?.rangeKm != null ? `${vehicle.rangeKm} km` : ''],
+    ['Charging Type', vehicle?.chargingType], ['Price / Day', vehicle?.pricePerDay != null ? `₹${Number(vehicle.pricePerDay).toLocaleString('en-IN')}` : ''],
+    ['Quantity', vehicle?.quantity], ['Security Deposit', vehicle?.securityDeposit != null ? `₹${Number(vehicle.securityDeposit).toLocaleString('en-IN')}` : ''],
+    ['Discount', vehicle?.discountPercent != null ? `${vehicle.discountPercent}%` : ''], ['Inventory Status', vehicle?.fleetInventoryStatus],
+    ['Vehicle Status', vehicle?.status], ['Fleet Location', vehicle?.fleetLocationStatus], ['Fleet Operator', vehicle?.fleetOperatorName],
+    ['Fleet Operator Email', vehicle?.fleetOperatorEmail], ['Assigned At', vehicle?.assignedAt ? new Date(vehicle.assignedAt).toLocaleString('en-IN') : ''],
+    ['Description', vehicle?.description], ['Next General Service', vehicle?.nextGeneralServiceAt ? new Date(vehicle.nextGeneralServiceAt).toLocaleDateString('en-IN') : ''],
+  ].filter(([,value]) => value !== undefined && value !== null && String(value).trim() !== '');
+  const rp = vehicle?.rentalPlans || {};
+  return <div className="fleet-command-details">
+    <div className="fleet-command-details-head"><strong>Command Center Vehicle Details</strong><span>{details.length} details</span></div>
+    <div className="fleet-command-details-grid">
+      {details.map(([label,value]) => <div key={label}><small>{label}</small><b>{String(value)}</b></div>)}
+    </div>
+    {(rp.daily?.enabled || rp.weekly?.enabled || rp.monthly?.enabled) && <div className="fleet-command-plans">
+      <small>Rental Plans</small>
+      <div>{rp.daily?.enabled && <span>Daily ₹{Number(rp.daily.amount||0).toLocaleString('en-IN')}</span>}{rp.weekly?.enabled && <span>Weekly ₹{Number(rp.weekly.amount||0).toLocaleString('en-IN')}</span>}{rp.monthly?.enabled && <span>Monthly ₹{Number(rp.monthly.amount||0).toLocaleString('en-IN')}</span>}</div>
+    </div>}
+  </div>;
+}
+
 function FranInventory({ call, user, setPage }) {
   const { data: assignedVehicles, loading: avLoading, refresh: refreshAssigned } = useFetch(call, '/franchise/assigned-vehicles');
   const [activeTab, setActiveTab] = useState('setup');
@@ -717,6 +746,7 @@ function FranInventory({ call, user, setPage }) {
         </div>
         <span className={`fleet-status ${atCustomer ? 'live' : 'at-fleet'}`}>{atCustomer ? <><Car size={12}/> At Customer</> : <><Package size={12}/> At Fleet</>}</span>
       </div>
+      <FleetCommandVehicleDetails vehicle={v} />
       <div className="fleet-finance-strip">
         <div><span>Issued Days</span><b>{v.assignedAt ? Math.max(0, Math.floor((Date.now()-new Date(v.assignedAt).getTime())/86400000)) : 0}</b></div>
         <div><span>General Service</span><b>{v.nextGeneralServiceAt ? new Date(v.nextGeneralServiceAt).toLocaleDateString('en-IN') : '—'}</b></div>
@@ -768,6 +798,7 @@ function FranInventory({ call, user, setPage }) {
           <div><span>Range</span><b>{v.rangeKm ? `${v.rangeKm} km` : '—'}</b></div>
           <div><span>Bike ID</span><b>{v.bikeId || '—'}</b></div>
         </div>
+        <FleetCommandVehicleDetails vehicle={v} />
         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
           <button className="btn-primary fleet-configure-btn" onClick={()=>setSetupVehicle(v)}><Package size={15}/> Move to Fleet Inventory</button>
           {v.documents?.length ? <button className="btn-ghost fleet-configure-btn" onClick={()=>setDocumentsVehicle(v)}><FileText size={15}/> Documents ({v.documents.length})</button> : null}
@@ -798,17 +829,28 @@ function FranInventory({ call, user, setPage }) {
 function FleetVehicleDocumentsModal({ vehicle, onClose }) {
   const docs=Array.isArray(vehicle?.documents)?vehicle.documents:[];
   const fileUrl=u=>u?(u.startsWith('http')?u:`${API}${u}`):'';
+  const types=[...new Set(docs.map(d=>String(d.type||'OTHER')).filter(Boolean))];
+  const [selectedType,setSelectedType]=useState(types.length===1?types[0]:'');
+  const [preview,setPreview]=useState(null);
+  const selectedDocs=selectedType?docs.filter(d=>String(d.type||'OTHER')===selectedType):[];
   return <div className="modal-overlay" onClick={onClose}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(720px,100%)',maxHeight:'90vh',display:'flex',flexDirection:'column'}}>
-    <div className="modal-head"><div><div className="modal-title">Vehicle Documents</div><div className="modal-subtitle">{vehicle?.bikeId||'Bike ID'} · {vehicle?.make||''} {vehicle?.model||''} · {vehicle?.registrationNo||'Registration pending'}</div></div><button className="icon-btn" onClick={onClose}><X size={20}/></button></div>
-    <div className="modal-body" style={{overflowY:'auto'}}>
-      <div style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:12,padding:'14px 16px',marginBottom:14}}>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}><span className="fleet-bike-id">{vehicle?.bikeId||'No Bike ID'}</span><span style={{fontWeight:800,color:'#1e3a8a'}}>{vehicle?.make} {vehicle?.model}</span></div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:8,fontSize:11,color:'#475569'}}>
-          <span>Registration: <b>{vehicle?.registrationNo||'—'}</b></span><span>Year: <b>{vehicle?.year||'—'}</b></span><span>Color: <b>{vehicle?.color||'—'}</b></span><span>Battery: <b>{vehicle?.batteryCapacityKwh?`${vehicle.batteryCapacityKwh} kWh`:'—'}</b></span><span>Range: <b>{vehicle?.rangeKm?`${vehicle.rangeKm} km`:'—'}</b></span><span>Charging: <b>{vehicle?.chargingType||'—'}</b></span>
-        </div>
+    <div className="modal-head"><div><div className="modal-title">View Vehicle Documents</div><div className="modal-subtitle">Select a document type to view it</div></div><button className="icon-btn" onClick={onClose}><X size={20}/></button></div>
+    {!preview ? <div className="modal-body" style={{overflowY:'auto'}}>
+      <div className="fleet-document-vehicle-summary">
+        <div><small>Bike ID</small><b>{vehicle?.bikeId||'—'}</b></div>
+        <div><small>Chassis Number</small><b>{vehicle?.chassisNo||'—'}</b></div>
+        <div><small>Bike Number</small><b>{vehicle?.registrationNo||'—'}</b></div>
+        <div><small>Name of Bike</small><b>{vehicle?.make ? `${vehicle.make} ${vehicle.model||''}`.trim() : vehicle?.model||'—'}</b></div>
       </div>
-      {docs.length===0?<div className="fleet-empty"><FileText size={36}/><h3>No documents received</h3><p>Command Center has not shared documents for this bike yet.</p></div>:<div style={{display:'flex',flexDirection:'column',gap:8}}>{docs.map(d=><div key={d._id} style={{display:'flex',alignItems:'center',gap:12,padding:12,border:'1px solid #e2e8f0',borderRadius:12,background:'#fff'}}><div className="command-doc-icon"><FileText size={17}/></div><div style={{flex:1,minWidth:0}}><strong style={{display:'block',fontSize:13,color:'#111827'}}>{d.title||'Vehicle document'}</strong><span style={{display:'block',fontSize:11,color:'#64748b',marginTop:3}}>{d.type||'OTHER'}{d.number?` · ${d.number}`:''}{d.expiresAt?` · Expires ${new Date(d.expiresAt).toLocaleDateString('en-IN')}`:''}</span>{d.notes&&<small style={{display:'block',fontSize:10,color:'#94a3b8',marginTop:3}}>{d.notes}</small>}</div>{d.url&&<a className="btn-ghost btn-sm" href={fileUrl(d.url)} target="_blank" rel="noreferrer"><Eye size={13}/> View</a>}</div>)}</div>}
-    </div>
+      {!docs.length ? <div className="fleet-empty"><FileText size={36}/><h3>No documents received</h3><p>Command Center has not shared documents for this bike yet.</p></div> : <div className="fleet-document-selector">
+        <label>Document Type<select value={selectedType} onChange={e=>setSelectedType(e.target.value)}><option value="">Select document type…</option>{types.map(t=><option key={t} value={t}>{t}</option>)}</select></label>
+        {selectedType && !selectedDocs.length && <div className="fleet-empty"><p>No document available for this type.</p></div>}
+        {selectedDocs.map(d=><div key={d._id} className="fleet-document-select-row"><div><strong>{d.title||d.type||'Vehicle document'}</strong><small>{d.number?`Document No: ${d.number} · `:''}{d.expiresAt?`Expires ${new Date(d.expiresAt).toLocaleDateString('en-IN')}`:''}</small></div><button className="btn-primary btn-sm" disabled={!d.url} onClick={()=>setPreview({name:d.fileName||d.title||d.type,url:fileUrl(d.url),doc:d})}><Eye size={13}/> View</button></div>)}
+      </div>}
+    </div> : <div className="modal-body" style={{height:'calc(100% - 70px)',padding:10,display:'flex',flexDirection:'column'}}>
+      <div className="fleet-document-preview-bar"><strong>{preview.name||'Vehicle Document'}</strong><button className="btn-ghost btn-sm" onClick={()=>setPreview(null)}>← Back to documents</button></div>
+      <div style={{flex:1,minHeight:420}}>{/\.(png|jpe?g|webp)$/i.test(preview.url||'')?<img src={preview.url} alt={preview.name} style={{width:'100%',height:'100%',objectFit:'contain',display:'block'}}/>:<iframe title={preview.name||'Document'} src={preview.url} style={{width:'100%',height:'100%',border:'1px solid #e2e8f0',borderRadius:8}}/>}</div>
+    </div>}
     <div className="modal-footer"><button className="btn-ghost" onClick={onClose}>Close</button></div>
   </div></div>;
 }
@@ -4913,6 +4955,7 @@ function FleetHandover({call}){
 
 function FleetMaintenance({call}){
  const {data,loading,error,refresh}=useFetch(call,'/franchise/fleet/maintenance'); const {data:fv}=useFetch(call,'/franchise/fleet/vehicles');
+ useEffect(()=>{const t=setInterval(()=>refresh(),10000);return()=>clearInterval(t)},[refresh]);
  const [vehicleInfo,setVehicleInfo]=useState(null); const [vehicleLoading,setVehicleLoading]=useState(false);
  const [activeTab,setActiveTab]=useState('schedule');
  const [form,setForm]=useState({vehicleId:'',type:'SERVICE',title:'',description:'',priority:'NORMAL',scheduledAt:'',cost:0,vendor:'allevs [somajiguda]',vendorLocation:'allevs [somajiguda], Somajiguda, Hyderabad',notes:'',customerId:'',customerSnapshot:null,customerLocation:'',customerMapsUrl:'',vendorMapsUrl:''});
@@ -4953,8 +4996,17 @@ function FleetMaintenance({call}){
         <div className="form-section"><div className="form-section-title"><span className="form-section-icon">📝</span><div><strong>Internal Notes</strong><small>Add information for the fleet and service teams.</small></div></div><Fld label="Notes"><textarea value={form.notes} placeholder="Add parts, instructions, observations or special notes…" onChange={e=>setForm({...form,notes:e.target.value})}/></Fld></div>
         <div className="form-actions"><div><strong>Ready to register?</strong><small>Saving creates the maintenance record for this vehicle.</small></div><button className="btn-primary" disabled={busy}>{busy?'Saving…':'Schedule & Save Maintenance'}</button></div>
       </form>
-    </Card> : <Card title="Maintenance Register" badge={`${(data||[]).length} records`} action={<span className="card-section-note">Service history</span>}>
-      <div className="maintenance-table-wrap"><DataTable rows={data||[]} cols={['title','type','priority','status','cost','scheduledAt','nextServiceAt']} renderActions={m=><div className="maintenance-row-context">{m.bikeId&&<div>🏷️ {m.bikeId}</div>}{m.customerSnapshot?.name&&<div>👤 {m.customerSnapshot.name}</div>}{m.vendor&&<div>🏢 {m.vendor}</div>}{m.customerMapsUrl&&<a href={m.customerMapsUrl} target="_blank" rel="noreferrer">📍 Customer map</a>}</div>}/></div>
+    </Card> : <Card title="Maintenance Register" badge={`${(data||[]).length} records`} action={<span className="card-section-note">Live service progress</span>}>
+      <div className="maintenance-register-list">{(data||[]).length ? (data||[]).map(m=>{
+        const assigned=!!m.commandAssignedTo; const working=['IN_PROGRESS'].includes(m.staffStatus)||m.status==='IN_PROGRESS'; const staffDone=m.staffStatus==='COMPLETED'||!!m.staffCompletedAt; const closed=m.status==='COMPLETED';
+        const steps=[['Registered',true],['Staff Assigned',assigned],['Working on it',working||staffDone||closed],['Staff Completed',staffDone||closed],['Final Completed',closed]];
+        return <div className="maintenance-register-card" key={m._id}>
+          <div className="maintenance-register-top"><div><span className="service-eyebrow">{m.type||'SERVICE'} · {m.priority||'NORMAL'}</span><h3>{m.title||'Maintenance Service'}</h3><p>{m.bikeId||m.vehicleId?.bikeId||'Vehicle'}{m.customerSnapshot?.name?` · ${m.customerSnapshot.name}`:''}</p></div><span className={`maintenance-register-status ${closed?'done':staffDone?'staffdone':working?'working':'scheduled'}`}>{closed?'COMPLETED':staffDone?'STAFF COMPLETED':working?'WORKING':'SCHEDULED'}</span></div>
+          <div className="maintenance-progress-track">{steps.map(([label,done],i)=><div key={label} className={done?'done':''}><span>{done?'✓':i+1}</span><small>{label}</small>{i<steps.length-1&&<i/>}</div>)}</div>
+          <div className="maintenance-register-meta"><span>📅 {m.scheduledAt?new Date(m.scheduledAt).toLocaleString('en-IN'):'Not scheduled'}</span><span>👤 Staff: {m.commandAssignedTo?.name||'Awaiting assignment'}</span><span>🔧 {m.staffStatus||m.status||'SCHEDULED'}</span></div>
+          {m.staffCompletionSummary&&<div className="maintenance-completion-note"><b>Staff completion:</b> {m.staffCompletionSummary}</div>}
+        </div>
+      }) : <div className="fleet-empty"><Wrench size={40}/><h3>No maintenance records</h3><p>Scheduled services will appear here with live progress.</p></div>}</div>
     </Card>}
    </div>
  </div></>;
@@ -4962,11 +5014,16 @@ function FleetMaintenance({call}){
 
 function FleetViewDocuments({call}){
  const {data,loading,error}=useFetch(call,'/franchise/fleet/documents');
- const [preview,setPreview]=useState(null);
+ const [openVehicle,setOpenVehicle]=useState(null);
  const fileUrl=u=>u?(u.startsWith('http')?u:`${API}${u}`):'';
  if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
  const docs=Array.isArray(data)?data:[];
- return <><PageHeader title="View Documents" sub="Documents issued by Command Center for bikes assigned to your fleet."/><MetricGrid metrics={[{label:'Documents Received',value:docs.length,Icon:FileText,color:'#2563eb'},{label:'Bikes Covered',value:new Set(docs.map(d=>String(d.vehicleId))).size,Icon:Car,color:'#16a34a'},{label:'Expiring / Expired',value:docs.filter(d=>d.status==='EXPIRED').length,Icon:AlertTriangle,color:'#dc2626'}]}/><Card title="Issued Vehicle Documents" badge={`${docs.length} documents`}>{!docs.length?<div className="fleet-empty"><FileText size={40}/><h3>No documents issued yet</h3><p>Command Center documents will appear here after they are issued to your fleet.</p></div>:<div style={{display:'grid',gap:10}}>{docs.map(d=><div key={d._id} style={{display:'flex',alignItems:'center',gap:12,padding:14,border:'1px solid #e2e8f0',borderRadius:14,background:'#fff'}}><div className="command-doc-icon"><FileText size={18}/></div><div style={{flex:1,minWidth:0}}><strong style={{display:'block',fontSize:14}}>{d.title||'Vehicle document'}</strong><span style={{display:'block',fontSize:12,color:'#64748b',marginTop:3}}>{d.type||'OTHER'} · Bike ID: {d.bikeId||d.vehicleSnapshot?.bikeId||'—'}</span><span style={{display:'block',fontSize:11,color:'#94a3b8',marginTop:3}}>{d.vehicleSnapshot?.make||''} {d.vehicleSnapshot?.model||''} · {d.vehicleSnapshot?.registrationNo||'Registration —'}{d.expiresAt?` · Expires ${new Date(d.expiresAt).toLocaleDateString('en-IN')}`:''}</span></div><button className="btn-primary btn-sm" onClick={()=>setPreview({name:d.fileName||d.title,url:fileUrl(d.url),doc:d})}><Eye size={13}/> View Document</button></div>)}</div>}</Card>{preview&&<div className="modal-overlay" onClick={()=>setPreview(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(900px,100%)',height:'90vh'}}><div className="modal-head"><div><div className="modal-title">{preview.name||'Vehicle Document'}</div><div className="modal-subtitle">Bike ID: {preview.doc?.bikeId||preview.doc?.vehicleSnapshot?.bikeId||'—'} · Issued by Command Center</div></div><button className="icon-btn" onClick={()=>setPreview(null)}>✕</button></div><div className="modal-body" style={{height:'calc(100% - 70px)',padding:10}}>{/\.(png|jpe?g|webp)$/i.test(preview.url||'')?<img src={preview.url} alt={preview.name} style={{maxWidth:'100%',maxHeight:'100%',objectFit:'contain',display:'block',margin:'auto'}}/>:<iframe title={preview.name||'Document'} src={preview.url} style={{width:'100%',height:'100%',border:'1px solid #e2e8f0',borderRadius:8}}/>}</div></div></div>}</>;
+ const groups=Array.from(docs.reduce((map,d)=>{const key=String(d.vehicleId||d.bikeId||d.vehicleSnapshot?.bikeId||'unknown');if(!map.has(key))map.set(key,[]);map.get(key).push(d);return map;},new Map()).entries()).map(([key,items])=>({key,items,vehicle:items[0]?.vehicleSnapshot||{}}));
+ return <><PageHeader title="View Documents" sub="Select a bike first, then choose the document type you want to view."/>
+ <Card title="Vehicle Documents" badge={`${groups.length} bikes`}>
+   {!groups.length?<div className="fleet-empty"><FileText size={40}/><h3>No documents issued yet</h3><p>Command Center documents will appear here after they are issued to your fleet.</p></div>:<div className="fleet-view-doc-list">{groups.map(g=>{const v=g.vehicle;const bikeId=g.items[0]?.bikeId||v.bikeId||'—';const chassis=v.chassisNo||'—';const bikeNo=v.registrationNo||'—';const bikeName=v.make?`${v.make} ${v.model||''}`.trim():v.model||'—';return <div className="fleet-view-doc-card" key={g.key}><div className="fleet-document-vehicle-summary compact"><div><small>Bike ID</small><b>{bikeId}</b></div><div><small>Chassis Number</small><b>{chassis}</b></div><div><small>Bike Number</small><b>{bikeNo}</b></div><div><small>Name of Bike</small><b>{bikeName}</b></div></div><div className="fleet-view-doc-action"><span>{g.items.length} document{g.items.length===1?'':'s'} available</span><button className="btn-primary" onClick={()=>setOpenVehicle({bikeId,chassisNo:chassis,registrationNo:bikeNo,make:v.make,model:v.model,documents:g.items})}><Eye size={14}/> Select & View</button></div></div>})}</div>}
+ </Card>
+ {openVehicle&&<FleetVehicleDocumentsModal vehicle={openVehicle} onClose={()=>setOpenVehicle(null)}/>}</>;
 }
 
 function FleetDocuments({call}){

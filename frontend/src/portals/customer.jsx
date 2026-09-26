@@ -5,7 +5,7 @@ import allevLogo from '../allevlogo.png';
 import axios from 'axios';
 import {
   Activity, AlertTriangle, Car, CheckCircle, ClipboardList,
-  DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin,
+  DollarSign, Factory, Gauge, LayoutDashboard, LogOut, MapPin, LocateFixed,
   Package, Users, Zap, Truck, Shield, TrendingUp, Wallet, Bell, FileText,
   Sparkles, Battery, Gauge as GaugeIcon, Image, Plus, Menu, X, MoreHorizontal, ArrowLeft, Camera, Mail, Phone, CreditCard, ShieldCheck, BellRing, LockKeyhole, MapPinned, Pencil, Save, Eye, EyeOff, Check, SlidersHorizontal, Headphones, Search, Filter, ChevronRight, ChevronDown, MessageCircle, Clock3, CircleHelp, LifeBuoy, Inbox, CheckCheck, AlertCircle, Gift, Copy
 } from 'lucide-react';
@@ -755,20 +755,33 @@ function Shell({ user, page, setPage, call, logout }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [popupNote,setPopupNote]=useState(null);
 
+  const popupNotificationTypes=['FRANCHISE_BROADCAST','COUPON','MAINTENANCE_REGISTERED'];
   useEffect(()=>{
     let alive=true;
     const check=async()=>{
       try{
         const notes=await call('/customer/notifications');
-        const n=(Array.isArray(notes)?notes:[]).find(x=>!x.read && ['FRANCHISE_BROADCAST','COUPON'].includes(String(x.type||'')));
+        const list=Array.isArray(notes)?notes:[];
+        // Maintenance registration is a real service alert: show it whenever the
+        // customer opens the portal (or while the portal is already open).
+        // Unlike general broadcasts, closing this popup must NOT mark it read.
+        const n=list.find(x=>!x.read && popupNotificationTypes.includes(String(x.type||'')));
         if(!n||!alive)return;
         const key=`ev_popup_${n._id}`;
-        if(localStorage.getItem(key))return;
-        localStorage.setItem(key,'1');
+        if(String(n.type||'')!=='MAINTENANCE_REGISTERED' && localStorage.getItem(key))return;
+        if(String(n.type||'')!=='MAINTENANCE_REGISTERED') localStorage.setItem(key,'1');
         setPopupNote(n);
       }catch(e){}
     };
-    const onPush=e=>{const n=e.detail;if(n&&!n.read&&['FRANCHISE_BROADCAST','COUPON'].includes(String(n.type||''))){const key=`ev_popup_${n._id||Date.now()}`;if(!localStorage.getItem(key)){localStorage.setItem(key,'1');setPopupNote(n);}}};
+    const onPush=e=>{
+      const n=e.detail;
+      if(!n || n.read || !popupNotificationTypes.includes(String(n.type||'')))return;
+      const key=`ev_popup_${n._id||Date.now()}`;
+      if(String(n.type||'')==='MAINTENANCE_REGISTERED' || !localStorage.getItem(key)){
+        if(String(n.type||'')!=='MAINTENANCE_REGISTERED') localStorage.setItem(key,'1');
+        setPopupNote(n);
+      }
+    };
     window.addEventListener('customer:notification',onPush);
     check();
     const t=setInterval(check,15000);
@@ -777,7 +790,11 @@ function Shell({ user, page, setPage, call, logout }) {
 
   const closePopup=async()=>{
     if(!popupNote)return;
-    try{await call(`/customer/notifications/${popupNote._id}/read`,{method:'put'});}catch(e){}
+    // Maintenance popup is informational only. Keep the Notification Center
+    // entry unread until the customer explicitly opens it there.
+    if(String(popupNote.type||'')!=='MAINTENANCE_REGISTERED'){
+      try{await call(`/customer/notifications/${popupNote._id}/read`,{method:'put'});}catch(e){}
+    }
     setPopupNote(null);
   };
 
@@ -801,10 +818,7 @@ function Shell({ user, page, setPage, call, logout }) {
             <div className="mobile-menu-head">
               <div className="mobile-menu-brand">
                 <img src={allevLogo} alt="allEV" />
-                <div>
-                  <div className="mobile-menu-title">Customer Portal</div>
-                  <div className="mobile-menu-sub">Your EV journey</div>
-                </div>
+                <div className="mobile-menu-title">Customer Portal</div>
               </div>
               <button
                 className="mobile-menu-close"
@@ -1255,154 +1269,270 @@ function Err({ msg }) {
 // CUSTOMER PAGES
 // ══════════════════════════════════════════════════════════════════
 function CustDashboard({ call, setPage }) {
-  const { data: v, loading: lv } = useFetch(call, '/customer/vehicles');
-  const { data: b, loading: lb } = useFetch(call, '/customer/purchases');
-  const { data: w, loading: lw } = useFetch(call, '/customer/wallet');
-  const { data: complaints, loading: lc } = useFetch(call, '/customer/complaints');
-  const [user, setUser] = React.useState(null);
-  React.useEffect(() => { call('/customer/profile').then(setUser).catch(() => {}); }, []);
+  // IMPORTANT: Dashboard is presentation-only. It keeps the existing customer
+  // API calls and actions intact; this redesign only changes how the data is
+  // surfaced to the customer.
+  const { data: purchasesRaw, loading: lp } = useFetch(call, '/customer/purchases');
+  const { data: wallet, loading: lw } = useFetch(call, '/customer/wallet');
+  const { data: complaintsRaw, loading: lc } = useFetch(call, '/customer/complaints');
+  const { data: hubsRaw } = useFetch(call, '/hubs');
+  const { data: profile } = useFetch(call, '/customer/profile');
+  const [nearestStations, setNearestStations] = useState([]);
+  const [showNearestStations, setShowNearestStations] = useState(false);
+  const [locatingStations, setLocatingStations] = useState(false);
+  const [stationLocationError, setStationLocationError] = useState('');
 
-  if ((lv && !v) || (lb && !b)) return <Loader />;
+  if ((lp && !purchasesRaw) || (lw && !wallet)) return <Loader />;
 
-  const allPurchases = Array.isArray(b) ? b : [];
-  const handedOver = allPurchases.filter(p => ['HANDED_OVER','ACTIVE'].includes(p.status));
-  const purchases = allPurchases.filter(p => !['HANDED_OVER','ACTIVE'].includes(p.status));
-  const pending = purchases.filter(p => ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING'].includes(p.status));
-  const recent = [...purchases].sort((a,b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 5);
-  const complaintList = Array.isArray(complaints) ? complaints : (Array.isArray(complaints?.complaints) ? complaints.complaints : []);
-  const openTickets = complaintList.filter(c => !['SOLVED','CLOSED'].includes(c.status));
-  const walletBal = w?.balance ?? 0;
+  const purchases = Array.isArray(purchasesRaw) ? purchasesRaw : [];
+  const activeRentals = purchases.filter(p => ['HANDED_OVER', 'ACTIVE'].includes(p.status));
+  const activeRental = activeRentals[0] || null;
+  const pending = purchases.filter(p => ['BOOKED', 'PAYMENT_DONE', 'HANDOVER_PENDING'].includes(p.status));
+  const completed = purchases.filter(p => ['COMPLETED', 'CANCELLED'].includes(p.status));
+  const complaintList = Array.isArray(complaintsRaw)
+    ? complaintsRaw
+    : (Array.isArray(complaintsRaw?.complaints) ? complaintsRaw.complaints : []);
+  const openTickets = complaintList.filter(c => !['SOLVED', 'CLOSED'].includes(c.status));
+  const hubs = Array.isArray(hubsRaw) ? hubsRaw : [];
+  const walletBalance = Number(wallet?.balance || 0);
 
-  const STATUS_CFG = {
-    BOOKED:           { label: 'Awaiting Payment',  color: '#d97706', bg: '#fef3c7', icon: '🕐' },
-    PAYMENT_DONE:     { label: 'Paid – Awaiting Handover', color: '#2563eb', bg: '#eff6ff', icon: '💳' },
-    HANDOVER_PENDING: { label: 'Handover Pending',  color: '#7c3aed', bg: '#f5f3ff', icon: '⏳' },
-    HANDED_OVER:      { label: 'Handed Over',       color: '#16a34a', bg: '#f0fdf4', icon: '✅' },
-    ACTIVE:           { label: 'Active',             color: '#16a34a', bg: '#f0fdf4', icon: '✅' },
-    COMPLETED:        { label: 'Completed',          color: '#16a34a', bg: '#f0fdf4', icon: '✓'  },
-    CANCELLED:        { label: 'Cancelled',          color: '#dc2626', bg: '#fef2f2', icon: '✗'  },
+  const locateNearestStations = () => {
+    if (locatingStations) return;
+    if (!navigator.geolocation) {
+      setStationLocationError('Location is not available in this browser.');
+      setShowNearestStations(true);
+      return;
+    }
+
+    setLocatingStations(true);
+    setStationLocationError('');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const current = [Number(coords.latitude), Number(coords.longitude)];
+        const nearest = dedupeCustomerHubs(hubs)
+          .map(h => ({ ...h, _coords: custGetCoords(h) }))
+          .filter(h => h._coords)
+          .map(h => ({ ...h, _distance: haversineKm(current, h._coords) }))
+          .sort((a, b) => a._distance - b._distance)
+          .slice(0, 8);
+        setNearestStations(nearest);
+        setShowNearestStations(true);
+        setLocatingStations(false);
+      },
+      () => {
+        setStationLocationError('Please allow location access to find nearby charging stations.');
+        setShowNearestStations(true);
+        setLocatingStations(false);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }
+    );
+  };
+
+  const stationMapsUrl = station => {
+    const coords = station?._coords || custGetCoords(station);
+    return coords
+      ? `https://www.google.com/maps/dir/?api=1&destination=${coords[0]},${coords[1]}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([station?.address, station?.city].filter(Boolean).join(', '))}`;
+  };
+
+  const vs = activeRental?.vehicleSnapshot || {};
+  const vehicleImage = vs.images?.[0]?.url || vs.images?.[0] || '';
+  const battery = Number(vs.batterySoc ?? activeRental?.batterySoc ?? vs.batterySOC ?? 0);
+  const hasBattery = Number.isFinite(battery) && battery > 0;
+  const range = vs.rangeKm ?? activeRental?.rangeKm ?? null;
+  const dueDate = activeRental?.dueDate || activeRental?.endDate || null;
+  const startDate = activeRental?.startDate || activeRental?.purchaseDate || activeRental?.createdAt || null;
+  const isRental = !!activeRental && activeRental.rentalPlan && activeRental.rentalPlan !== 'SALE';
+  const daysLeft = dueDate
+    ? Math.max(0, Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86400000))
+    : null;
+  const totalPeriod = startDate && dueDate
+    ? Math.max(1, Math.ceil((new Date(dueDate).getTime() - new Date(startDate).getTime()) / 86400000))
+    : null;
+  const elapsed = startDate
+    ? Math.max(0, Math.ceil((Date.now() - new Date(startDate).getTime()) / 86400000))
+    : 0;
+  const rentalProgress = totalPeriod ? Math.min(100, Math.max(4, (elapsed / totalPeriod) * 100)) : 0;
+  const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const money = n => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+  const firstName = profile?.name?.split(' ')?.[0] || 'there';
+  const pickupName = [activeRental?.pickupLocation?.name || activeRental?.franchiseeName, activeRental?.pickupLocation?.address]
+    .filter(Boolean).join(' · ') || 'Pickup location will appear after booking';
+
+  const STATUS = {
+    BOOKED: { label: 'Payment pending', tone: 'amber' },
+    PAYMENT_DONE: { label: 'Paid · Handover pending', tone: 'blue' },
+    HANDOVER_PENDING: { label: 'Handover pending', tone: 'violet' },
+    HANDED_OVER: { label: 'Active rental', tone: 'green' },
+    ACTIVE: { label: 'Active rental', tone: 'green' },
+    COMPLETED: { label: 'Completed', tone: 'slate' },
+    CANCELLED: { label: 'Cancelled', tone: 'red' },
   };
 
   return (
-    <div className="cust-dashboard">
-      {/* ── Welcome Banner ── */}
-      <div className="cust-welcome-banner">
-        <div className="cust-welcome-left">
-          <div className="cust-welcome-tag">⚡ Customer Portal</div>
-          <h1 className="cust-welcome-title">Welcome back{user?.name ? `, ${user.name.split(' ')[0]}` : ''}! 👋</h1>
-          <p className="cust-welcome-sub">Here's an overview of your EV journey with allEV.</p>
-          <div className="cust-welcome-actions">
-            <button className="cust-btn-primary" onClick={() => setPage('available-vehicles')}>
-              🚗 Browse Vehicles
-            </button>
-            <button className="cust-btn-secondary" onClick={() => setPage('wallet')}>
-              💰 Wallet: ₹{walletBal.toLocaleString('en-IN')}
-            </button>
-          </div>
+    <div className="allevs-home">
+      {/* Premium app-style header */}
+      <section className="allevs-home-head">
+        <div>
+          <h1>Good morning, {firstName} <span>👋</span></h1>
         </div>
-        <div className="cust-welcome-art">
-          <div className="cust-art-circle cust-art-c1" />
-          <div className="cust-art-circle cust-art-c2" />
-          <div className="cust-art-icon">⚡</div>
+        <div className="allevs-head-actions">
+          <button className="allevs-icon-button" onClick={() => setPage('notifications')} aria-label="Notifications"><BellRing size={19} /></button>
+          {/* Profile is intentionally kept in the global topbar only to avoid duplicate profile controls. */}
         </div>
-      </div>
+      </section>
 
-      {/* ── Stat Grid ── */}
-      <div className="cust-stat-grid">
-        {[
-          { icon: '🏍️', label: 'Vehicles Owned', value: handedOver.length, color: '#2563eb', bg: '#eff6ff', onClick: () => setPage('vehicles') },
-          { icon: '📦', label: 'Total Purchases', value: purchases.length, color: '#7c3aed', bg: '#f5f3ff', onClick: () => setPage('purchases') },
-          { icon: '⏳', label: 'Pending Orders', value: pending.length, color: '#d97706', bg: '#fef3c7', onClick: () => setPage('purchases') },
-          { icon: '🎫', label: 'Open Tickets', value: openTickets.length, color: '#dc2626', bg: '#fef2f2', onClick: () => setPage('complaints') },
-        ].map(s => (
-          <button key={s.label} className="cust-stat-card" onClick={s.onClick} style={{'--stat-color': s.color, '--stat-bg': s.bg}}>
-            <div className="cust-stat-icon">{s.icon}</div>
-            <div className="cust-stat-body">
-              <div className="cust-stat-value">{s.value}</div>
-              <div className="cust-stat-label">{s.label}</div>
+      {/* Main app canvas */}
+      <section className="allevs-home-main-grid">
+        <article className={`allevs-ride-card${activeRental ? '' : ' is-empty'}`}>
+          <div className="allevs-ride-top">
+            <div>
+              <span className="allevs-card-kicker">{activeRental ? 'YOUR ACTIVE EV' : 'YOUR NEXT RIDE'}</span>
+              <h2>{activeRental ? `${vs.make || 'allEV'} ${vs.model || 'Electric Scooter'}` : 'Ready for your next EV?'}</h2>
+              <p>{activeRental ? `${vs.year || ''}${vs.color ? ` · ${vs.color}` : ''}` : 'Choose an electric vehicle and start your rental in a few taps.'}</p>
             </div>
-            <div className="cust-stat-arrow">→</div>
-          </button>
-        ))}
-      </div>
-
-      {/* ── App launcher: PhonePe-style service icons ── */}
-      <section className="cust-app-launcher" aria-label="Customer services">
-        <div className="cust-app-launcher-head">
-          <div>
-            <h2>All services</h2>
-            <p>Everything you need, one tap away</p>
+            {activeRental && <span className="allevs-status-chip"><i /> {STATUS[activeRental.status]?.label || 'Active'}</span>}
           </div>
-          <span className="cust-app-launcher-badge">allEV</span>
-        </div>
-        <div className="cust-app-icon-grid">
+
+          <div className="allevs-ride-body">
+            <div className="allevs-bike-stage">
+              <div className="allevs-bike-glow" />
+              {vehicleImage ? (
+                <img src={vehicleImage} alt={`${vs.make || 'allEV'} ${vs.model || 'EV'}`} />
+              ) : (
+                <div className="allevs-bike-placeholder"><span>⚡</span><strong>allEV</strong></div>
+              )}
+              {activeRental && <div className="allevs-floating-label"><Zap size={13} /> Electric ride</div>}
+            </div>
+
+            {activeRental ? (
+              <div className="allevs-ride-metrics">
+                <div className="allevs-battery-panel">
+                  <div className="allevs-battery-ring" style={{ '--soc': `${hasBattery ? Math.min(100, battery) : 0}%` }}>
+                    <div><strong>{hasBattery ? Math.round(battery) : '—'}</strong><span>{hasBattery ? '%' : 'SOC'}</span></div>
+                  </div>
+                  <div><strong>Battery</strong><span>{hasBattery ? 'Ready to ride' : 'Live status unavailable'}</span></div>
+                </div>
+                <div className="allevs-mini-metrics">
+                  <div><span>Range</span><strong>{range != null ? `${range} km` : '—'}</strong></div>
+                  <div><span>Plan</span><strong>{isRental ? activeRental.rentalPlan : 'Purchase'}</strong></div>
+                  <div><span>Due date</span><strong>{fmtDate(dueDate)}</strong></div>
+                  <div><span>Chassis / VIN</span><strong>{vs.chassisNo || '—'}</strong></div>
+                </div>
+              </div>
+            ) : (
+              <div className="allevs-empty-copy">
+                <div className="allevs-empty-icon"><Car size={24} /></div>
+                <strong>Explore available EVs</strong>
+                <span>See approved vehicles, rental plans, range and pickup options.</span>
+                <button className="allevs-primary-btn" onClick={() => setPage('available-vehicles')}>Browse vehicles <ChevronRight size={16} /></button>
+              </div>
+            )}
+          </div>
+
+          {activeRental && (
+            <div className="allevs-rental-strip">
+              <div className="allevs-rental-progress">
+                <div className="allevs-rental-progress-label"><span>Rental progress</span><strong>{daysLeft != null ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Active'}</strong></div>
+                <div className="allevs-progress-track"><span style={{ width: `${rentalProgress}%` }} /></div>
+              </div>
+              <div className="allevs-rental-location"><MapPin size={15} /><span><small>Pickup location</small><strong>{pickupName}</strong></span></div>
+              <div className="allevs-ride-actions">
+                <button className="allevs-outline-btn" onClick={() => setPage('vehicles')}>View vehicle</button>
+                {isRental && <button className="allevs-primary-btn" onClick={() => setPage('vehicles')}>Extend rental <ChevronRight size={16} /></button>}
+              </div>
+            </div>
+          )}
+          {activeRental && (
+            <div className="allevs-nearest-stations">
+              <button
+                type="button"
+                className="allevs-locate-stations-btn"
+                onClick={locateNearestStations}
+                disabled={locatingStations}
+              >
+                <LocateFixed size={16} />
+                {locatingStations ? 'Finding nearest stations…' : 'Locate nearest charge station'}
+              </button>
+
+              {showNearestStations && (
+                <div className="allevs-nearest-results">
+                  {stationLocationError ? (
+                    <div className="allevs-nearest-error">{stationLocationError}</div>
+                  ) : nearestStations.length === 0 ? (
+                    <div className="allevs-nearest-error">No charging stations with a location were found.</div>
+                  ) : (
+                    nearestStations.map((station, index) => (
+                      <a
+                        key={station._id || station.id || `${station.name}-${index}`}
+                        className="allevs-nearest-card"
+                        href={stationMapsUrl(station)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <span className="allevs-nearest-number">{index + 1}</span>
+                        <span className="allevs-nearest-copy">
+                          <strong>{station.name || 'Charging Station'}</strong>
+                          <small>{[station.area, station.city].filter(Boolean).join(' · ') || station.address || 'Location available'}</small>
+                          <b>{station._distance < 1 ? `${Math.round(station._distance * 1000)} m away` : `${station._distance.toFixed(1)} km away`}</b>
+                        </span>
+                        <MapPin size={15} />
+                      </a>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </article>
+
+
+      </section>
+
+      {/* Quick actions */}
+      <section className="allevs-quick-section">
+        <div className="allevs-section-title"><div><span>QUICK ACCESS</span><h2>Everything you need</h2></div><button onClick={() => setPage('profile')}>Manage account <ChevronRight size={15} /></button></div>
+        <div className="allevs-quick-grid">
           {[
-            { icon: Car, label: 'Buy EV', sub: 'Browse vehicles', page: 'available-vehicles', tone: 'blue' },
-            { icon: Wallet, label: 'Wallet', sub: 'Recharge & pay', page: 'wallet', tone: 'violet' },
-            { icon: MapPin, label: 'Charging', sub: 'Find stations', page: 'charging-stations', tone: 'green' },
-            { icon: ClipboardList, label: 'Purchases', sub: 'Track orders', page: 'purchases', tone: 'orange' },
-            { icon: Car, label: 'My Vehicles', sub: 'Your EVs', page: 'vehicles', tone: 'cyan' },
-            { icon: FileText, label: 'Invoices', sub: 'Bills & receipts', page: 'invoices', tone: 'indigo' },
-            { icon: Bell, label: 'Support', sub: 'Get help', page: 'complaints', tone: 'rose' },
-            { icon: Users, label: 'Profile', sub: 'Account details', page: 'profile', tone: 'slate' },
-          ].map(({ icon: Icon, label, sub, page, tone }) => (
-            <button key={page} className={`cust-app-icon-tile tone-${tone}`} onClick={() => setPage(page)}>
-              <span className="cust-app-icon-wrap"><Icon size={22} strokeWidth={2.2} /></span>
-              <span className="cust-app-icon-copy"><strong>{label}</strong><small>{sub}</small></span>
-              <span className="cust-app-icon-arrow">›</span>
+            { Icon: Car, label: 'Book an EV', sub: 'Browse & rent', page: 'available-vehicles', tone: 'blue' },
+            { Icon: Battery, label: 'My Vehicle', sub: 'Vehicle & due date', page: 'vehicles', tone: 'green' },
+            { Icon: ClipboardList, label: 'My Bookings', sub: 'Track rentals', page: 'purchases', tone: 'violet' },
+            { Icon: Wallet, label: 'Wallet', sub: money(walletBalance), page: 'wallet', tone: 'amber' },
+            { Icon: MapPinned, label: 'Charging', sub: 'Find a station', page: 'charging-stations', tone: 'cyan' },
+            { Icon: FileText, label: 'Invoices', sub: 'Bills & receipts', page: 'invoices', tone: 'indigo' },
+            { Icon: LifeBuoy, label: 'Support', sub: `${openTickets.length} open ticket${openTickets.length === 1 ? '' : 's'}`, page: 'complaints', tone: 'rose' },
+            { Icon: Gift, label: 'Refer & Earn', sub: 'Invite friends', page: 'referral', tone: 'purple' },
+          ].map(({ Icon, label, sub, page, tone }) => (
+            <button key={page} className={`allevs-quick-card tone-${tone}`} onClick={() => setPage(page)}>
+              <span className="allevs-quick-icon"><Icon size={19} /></span>
+              <span><strong>{label}</strong><small>{sub}</small></span>
+              <ChevronRight size={15} className="allevs-quick-arrow" />
             </button>
           ))}
         </div>
       </section>
 
-      <div className="cust-dash-grid">
-        {/* ── Recent Activity ── */}
-        <div className="cust-dash-card">
-          <div className="cust-dash-card-head">
-            <div className="cust-dash-card-title">📋 Recent Purchases</div>
-            <button className="cust-dash-link" onClick={() => setPage('purchases')}>View all →</button>
-          </div>
-          {recent.length === 0 ? (
-            <div className="cust-empty-mini">
-              <span>🛒</span>
-              <p>No purchases yet.<br /><button className="link-btn" onClick={() => setPage('available-vehicles')}>Browse vehicles</button></p>
-            </div>
-          ) : (
-            <div className="cust-activity-list">
-              {recent.map(p => {
-                const vs = p.vehicleSnapshot || {};
-                const cfg = STATUS_CFG[p.status] || { label: p.status, color: '#64748b', bg: '#f1f5f9', icon: '•' };
-                return (
-                  <div key={p._id} className="cust-activity-row">
-                    <div className="cust-activity-icon" style={{background: cfg.bg, color: cfg.color}}>{cfg.icon}</div>
-                    <div className="cust-activity-info">
-                      <div className="cust-activity-name">{vs.make} {vs.model || 'Vehicle'}</div>
-                      <div className="cust-activity-meta">
-                        {new Date(p.createdAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'})}
-                        {' · '}₹{Number(p.totalAmount || 0).toLocaleString('en-IN')}
-                      </div>
-                    </div>
-                    <span className="cust-activity-badge" style={{background: cfg.bg, color: cfg.color}}>{cfg.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+      {/* Lower dashboard */}
+      <section className="allevs-lower-grid">
+        <article className="allevs-panel allevs-wallet-panel">
+          <div className="allevs-panel-head"><div><span className="allevs-card-kicker">PAYMENTS</span><h3>Wallet</h3></div><button onClick={() => setPage('wallet')}>Manage <ChevronRight size={14} /></button></div>
+          <div className="allevs-wallet-balance"><span>Available balance</span><strong>{money(walletBalance)}</strong></div>
+          <div className="allevs-wallet-row"><span><CreditCard size={15} /> Total bookings</span><strong>{purchases.length}</strong></div>
+          <div className="allevs-wallet-row"><span><Clock3 size={15} /> Pending orders</span><strong>{pending.length}</strong></div>
+          <div className="allevs-wallet-row"><span><CheckCircle size={15} /> Completed</span><strong>{completed.length}</strong></div>
+          <button className="allevs-wallet-btn" onClick={() => setPage('wallet')}>Open wallet <Wallet size={15} /></button>
+        </article>
+      </section>
 
-      </div>
-
-      {/* ── Pending Orders Alert ── */}
+      {/* Pending action banner */}
       {pending.length > 0 && (
-        <div className="cust-pending-alert" onClick={() => setPage('purchases')}>
-          <div className="cust-pending-icon">⏳</div>
-          <div className="cust-pending-text">
-            <strong>You have {pending.length} pending order{pending.length !== 1 ? 's' : ''}</strong>
-            <span> — {pending.filter(p => p.status === 'BOOKED').length} awaiting payment, {pending.filter(p => p.status === 'PAYMENT_DONE').length} awaiting handover</span>
-          </div>
-          <span className="cust-pending-arrow">→</span>
-        </div>
+        <button className="allevs-pending-banner" onClick={() => setPage('purchases')}>
+          <span className="allevs-pending-icon"><Clock3 size={19} /></span>
+          <span><strong>{pending.length} booking{pending.length !== 1 ? 's' : ''} need your attention</strong><small>{pending.filter(p => p.status === 'BOOKED').length} awaiting payment · {pending.filter(p => p.status !== 'BOOKED').length} moving toward handover</small></span>
+          <ChevronRight size={18} />
+        </button>
       )}
+
     </div>
   );
 }
@@ -1421,6 +1551,7 @@ function CustVehicles({ call, setPage }) {
   const [extensionPlan, setExtensionPlan] = useState('DAILY');
   const [extensionBusy, setExtensionBusy] = useState(false);
   const [extensionMsg, setExtensionMsg] = useState('');
+  const [extensionSuccess, setExtensionSuccess] = useState(null);
   if (lp && !purchasesRaw) return <Loader />;
 
   // Only show vehicles that have been HANDED_OVER by the franchisee.
@@ -1430,6 +1561,14 @@ function CustVehicles({ call, setPage }) {
   const money = n => `₹${Number(n || 0).toLocaleString('en-IN')}`;
   const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : '—';
   const unitLabel = p => p.rentalPlan === 'DAILY' ? 'day' : p.rentalPlan === 'WEEKLY' ? 'week' : 'month';
+  const getExtensionPlans = rental => {
+    const source = rental?.vehicleSnapshot?.rentalPlans || rental?.rentalPlans || {};
+    return {
+      DAILY: source.daily || source.DAILY || null,
+      WEEKLY: source.weekly || source.WEEKLY || null,
+      MONTHLY: source.monthly || source.MONTHLY || null,
+    };
+  };
   const addUnitsToDate = (d, units, plan) => {
     const base = new Date(d || new Date());
     const multiplier = plan === 'DAILY' ? 1 : plan === 'WEEKLY' ? 7 : 30;
@@ -1438,10 +1577,15 @@ function CustVehicles({ call, setPage }) {
 
   const openExtension = rental => {
     setExtendRental(rental);
-    const available = ['DAILY','WEEKLY','MONTHLY'].filter(key => rental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()]?.enabled && Number(rental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()]?.amount || 0) > 0);
+    const rentalPlans = getExtensionPlans(rental);
+    const available = ['DAILY','WEEKLY','MONTHLY'].filter(key => {
+      const pd = rentalPlans[key];
+      return pd?.enabled && Number(pd.amount || 0) > 0;
+    });
     setExtensionPlan(available.includes(rental.rentalPlan) ? rental.rentalPlan : (available[0] || rental.rentalPlan || 'DAILY'));
     setExtensionUnits(1);
     setExtensionMsg('');
+    setExtensionSuccess(null);
   };
 
   const payExtension = async () => {
@@ -1465,7 +1609,7 @@ function CustVehicles({ call, setPage }) {
         theme: { color: '#2563eb' },
         handler: async response => {
           try {
-            await call(`/customer/purchases/${extendRental._id}/verify-extension`, {
+            const verified = await call(`/customer/purchases/${extendRental._id}/verify-extension`, {
               method: 'POST',
               data: {
                 razorpay_order_id: response.razorpay_order_id,
@@ -1474,8 +1618,14 @@ function CustVehicles({ call, setPage }) {
               },
             });
             setExtensionBusy(false);
-            setExtendRental(null);
             setExtensionMsg('');
+            setExtensionSuccess({
+              amount: Number(order.amount || 0) / 100,
+              plan: extensionPlan,
+              units: Number(extensionUnits || 1),
+              dueDate: verified?.dueDate || null,
+              paymentId: response.razorpay_payment_id,
+            });
             setRefreshTick(v => v + 1);
           } catch (e) {
             setExtensionBusy(false);
@@ -1610,7 +1760,8 @@ function CustVehicles({ call, setPage }) {
       const vs = extendRental.vehicleSnapshot || {};
       const plan = extensionPlan || extendRental.rentalPlan || 'DAILY';
       const label = plan === 'DAILY' ? 'day' : plan === 'WEEKLY' ? 'week' : 'month';
-      const planData = extendRental.vehicleSnapshot?.rentalPlans?.[plan.toLowerCase()];
+      const rentalPlans = getExtensionPlans(extendRental);
+      const planData = rentalPlans[plan];
       const rate = Number(planData?.amount || 0);
       const amount = rate * Number(extensionUnits || 1);
       const newDue = addUnitsToDate(extendRental.dueDate || extendRental.endDate, extensionUnits, plan);
@@ -1630,11 +1781,11 @@ function CustVehicles({ call, setPage }) {
             <div><small>EXTENSION #</small><strong>{nextCount}</strong></div>
             <div><small>RATE</small><strong>{money(rate)} / {label}</strong></div>
           </div>
-          <div className="cust-extension-choice">
+          {!extensionSuccess ? <div className="cust-extension-choice">
             <label>Choose your extension rental plan</label>
             <div className="cust-extension-plan-grid">
               {['DAILY','WEEKLY','MONTHLY'].map(key => {
-                const pd = extendRental.vehicleSnapshot?.rentalPlans?.[key.toLowerCase()];
+                const pd = rentalPlans[key];
                 if (!pd?.enabled || Number(pd.amount || 0) <= 0) return null;
                 const lbl = key === 'DAILY' ? 'Daily' : key === 'WEEKLY' ? 'Weekly' : 'Monthly';
                 const unit = key === 'DAILY' ? 'day' : key === 'WEEKLY' ? 'week' : 'month';
@@ -1653,14 +1804,27 @@ function CustVehicles({ call, setPage }) {
               <button type="button" disabled={extensionUnits >= 365 || extensionBusy} onClick={() => setExtensionUnits(v => Math.min(365, v + 1))}>+</button>
             </div>
             <div className="cust-extension-newdue">New due date after successful payment: <strong>{fmtDate(newDue)}</strong></div>
-          </div>
-          <div className="cust-extension-total"><span>Extension payment</span><strong>{money(amount)}</strong></div>
-          {extensionMsg && <div className="cust-extension-error">⚠️ {extensionMsg}</div>}
-          <div className="cust-extension-actions">
-            <button className="btn-ghost" disabled={extensionBusy} onClick={() => setExtendRental(null)}>Cancel</button>
-            <button className="btn-primary cust-extension-pay" disabled={extensionBusy || amount <= 0} onClick={payExtension}>{extensionBusy ? 'Opening secure payment…' : `Pay ${money(amount)} & Extend`}</button>
-          </div>
-          <div className="cust-extension-secure">🔒 Secure payment powered by Razorpay · Your due date updates only after successful payment verification.</div>
+          </div> : <div className="cust-extension-success-panel">
+            <div className="cust-extension-success-icon">✓</div>
+            <h4>Extension Payment Successful</h4>
+            <p>Your {extensionSuccess.plan} plan extension has been confirmed.</p>
+            <div className="cust-extension-success-grid">
+              <span>Amount Paid<strong>{money(extensionSuccess.amount)}</strong></span>
+              <span>Plan<strong>{extensionSuccess.plan} · {extensionSuccess.units}</strong></span>
+              <span>New Due Date<strong>{fmtDate(extensionSuccess.dueDate)}</strong></span>
+            </div>
+            <small>Payment ID: {extensionSuccess.paymentId || '—'} · A confirmation email has been sent to your registered email.</small>
+          </div>}
+          {!extensionSuccess && <>
+            <div className="cust-extension-total"><span>Extension payment</span><strong>{money(amount)}</strong></div>
+            {extensionMsg && <div className="cust-extension-error">⚠️ {extensionMsg}</div>}
+            <div className="cust-extension-actions">
+              <button className="btn-ghost" disabled={extensionBusy} onClick={() => setExtendRental(null)}>Cancel</button>
+              <button className="btn-primary cust-extension-pay" disabled={extensionBusy || amount <= 0} onClick={payExtension}>{extensionBusy ? 'Opening secure payment…' : `Pay ${money(amount)} & Extend`}</button>
+            </div>
+            <div className="cust-extension-secure">🔒 Secure payment powered by Razorpay · Your due date updates only after successful payment verification.</div>
+          </>} 
+          {extensionSuccess && <div className="cust-extension-actions"><button className="btn-primary" onClick={() => setExtendRental(null)}>Done</button></div>}
         </div>
       </div>;
     })()}
@@ -2509,7 +2673,7 @@ function CustAvailableVehicles({ call, setPage }) {
   const [imgLoaded, setImgLoaded] = useState({});
 
   return <>
-    <PageHeader title="Available Vehicles" sub={location?.pincode ? `Vehicles near your location · ${location.pincode}${location.district ? ` · ${location.district}` : ''}` : 'Vehicles available across the EV CORE network'} />
+    <PageHeader title="Available Vehicles" sub="Choose an available EV from the fleet operator you prefer." />
 
     {/* Loading state — EV logo + skeleton grid */}
     {loading && (
@@ -2538,12 +2702,7 @@ function CustAvailableVehicles({ call, setPage }) {
             })}
           </div>
         )}
-        {selectedFranchisee && (
-          <div style={{width:'100%',marginTop:2,padding:'8px 11px',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:12,color:'#475569',animation:'slide-up .3s ease .1s both'}}>
-            <strong>Selected fleet operator:</strong> {selectedFranchisee.name} · {selectedFranchisee.address?.city || selectedFranchisee.address?.district || ''}{selectedFranchisee.address?.pincode ? ` · PIN ${selectedFranchisee.address.pincode}` : ''}
-            <span style={{marginLeft:6,color:'#64748b'}}>The exact Bike ID will be selected by this fleet operator during handover.</span>
-          </div>
-        )}
+
       </div>
     )}
 
@@ -3520,6 +3679,26 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
   const linesRef        = React.useRef([]);
   const userMarkerRef   = React.useRef(null);
   const [routeData, setRouteData] = React.useState({});
+  const [locatingMe, setLocatingMe] = React.useState(false);
+
+  const locateCustomer = React.useCallback(() => {
+    if (!navigator.geolocation || !leafRef.current) return;
+    setLocatingMe(true);
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        const next = [Number(coords.latitude), Number(coords.longitude)];
+        const map = leafRef.current;
+        // Always recenter and use a close street-level zoom. Using the current
+        // zoom as the floor previously meant a zoomed-out network view could
+        // remain too wide.
+        map.flyTo(next, 17.5, { animate: true, duration: 1.35, easeLinearity: 0.18 });
+        window.setTimeout(() => map.setZoom(17.5, { animate: true }), 1450);
+        setLocatingMe(false);
+      },
+      () => setLocatingMe(false),
+      { enableHighAccuracy: true, timeout: 9000, maximumAge: 30000 }
+    );
+  }, []);
 
   React.useEffect(() => {
     if (leafRef.current || !mapRef.current || !window.L) return;
@@ -3556,22 +3735,27 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     const nearestIds = new Set(nearestFour.map(h => String(h._mapKey)));
     hubList.forEach(hub => {
       const coords = custGetCoords(hub); if (!coords) return;
-      const color = HUB_SC[hub.status] || '#2563eb';
+      const color = HUB_SC[hub.status] || '#48b0e0';
       const pulse = nearestIds.has(String(hub._mapKey)) && currentUserCoords
         ? `<div style="position:absolute;inset:-8px;border:2px solid ${color};border-radius:50%;animation:custHubPulse 1.35s ease-out infinite;opacity:.85;"></div>` : '';
       const icon = window.L.divIcon({ className:'',
-        html:`<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35));cursor:pointer;">${pulse}<span style="position:relative;z-index:2;width:30px;height:30px;border-radius:9px;background:#fff7ed;border:2px solid #f59e0b;display:flex;align-items:center;justify-content:center;color:#f59e0b;font-size:21px;line-height:1;font-weight:900;">⚡</span></div>`,
+        html:`<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35));cursor:pointer;">${pulse}<span style="position:relative;z-index:2;width:30px;height:30px;border-radius:9px;background:linear-gradient(145deg,#ffffff,#eaf8fe);border:2px solid #48b0e0;display:flex;align-items:center;justify-content:center;color:#1680c0;font-size:21px;box-shadow:0 8px 20px rgba(16,128,192,.20);line-height:1;font-weight:900;">⚡</span></div>`,
         iconSize:[36,36],iconAnchor:[18,18] });
       const marker=window.L.marker(coords,{icon}).addTo(map); marker.on('click',()=>onSelectHub(hub));
       markersRef.current.push(marker); allCoords.push(coords);
     });
     if (currentUserCoords) nearestFour.forEach(hub=>{
       const route=routeData[String(hub._mapKey)];
-      if(route?.coordinates?.length>1){ const line=window.L.polyline(route.coordinates,{color:'#2563eb',weight:4,opacity:.78}).addTo(map); linesRef.current.push(line); }
+      if(route?.coordinates?.length>1){ const line=window.L.polyline(route.coordinates,{color:'#48b0e0',weight:4,opacity:.82}).addTo(map); linesRef.current.push(line); }
     });
-    if(currentUserCoords){ allCoords.push(currentUserCoords); map.fitBounds(window.L.latLngBounds(allCoords),{padding:[70,70],maxZoom:15,animate:true}); }
-    else if(allCoords.length===1) map.setView(allCoords[0],14,{animate:false});
-    else if(allCoords.length>1) map.fitBounds(window.L.latLngBounds(allCoords),{padding:[50,50],maxZoom:14,animate:false});
+    // When the customer has shared their location, do NOT fit the entire
+    // network into the viewport. That was overriding the customer-location
+    // flyTo and leaving the map zoomed too far out. The dedicated location
+    // effect below owns the customer-centered camera.
+    if (!currentUserCoords) {
+      if(allCoords.length===1) map.setView(allCoords[0],14,{animate:false});
+      else if(allCoords.length>1) map.fitBounds(window.L.latLngBounds(allCoords),{padding:[50,50],maxZoom:14,animate:false});
+    }
     map.invalidateSize();
   }
 
@@ -3580,7 +3764,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     let alive=true;
     if(!userCoords || !hubs.length){ setRouteData({}); return ()=>{alive=false;}; }
     const candidates=[...hubs].sort((a,b)=>(a._dist??Infinity)-(b._dist??Infinity)).slice(0,4);
-    (async()=>{ const next={}; await Promise.all(candidates.map(async h=>{ const c=custGetCoords(h); if(!c)return; const r=await custRoadRoute(userCoords,c); if(r)next[String(h._mapKey)]=r; })); if(alive){setRouteData(next);onRouteData?.(next);} })();
+    (async()=>{ const next={}; await Promise.all(candidates.map(async h=>{ const c=custGetCoords(h); if(!c)return; const r=await custRoadRoute(userCoords,c); if(r)next[String(h._mapKey)]=r; })); if(alive){setRouteData(next);} })();
     return ()=>{alive=false;};
   },[userCoords,hubs]);
 
@@ -3591,12 +3775,30 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
     const icon = L.divIcon({
       className: '',
-      html: `<div style="position:relative;width:38px;height:38px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 0 0 5px rgba(37,99,235,.18),0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:25px;line-height:1;">🛵</div>`,
+      html: `<div style="position:relative;width:38px;height:38px;border-radius:50%;background:#fff;border:3px solid #48b0e0;box-shadow:0 0 0 6px rgba(72,176,224,.18),0 6px 18px rgba(9,15,16,.22);display:flex;align-items:center;justify-content:center;font-size:25px;line-height:1;">🛵</div>`,
       iconSize: [38, 38], iconAnchor: [19, 19],
     });
     userMarkerRef.current = L.marker(userCoords, { icon, zIndexOffset: 1000 })
       .bindPopup('<b>🛵 Your Location</b>')
       .addTo(map);
+  }, [userCoords]);
+
+  const autoCenteredRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!userCoords || !leafRef.current || autoCenteredRef.current) return;
+    autoCenteredRef.current = true;
+    const map = leafRef.current;
+    const center = [Number(userCoords[0]), Number(userCoords[1])];
+    // After the browser permission is accepted, make the customer's position the
+    // visual focus instead of leaving the map zoomed out over the whole network.
+    window.setTimeout(() => {
+      if (!leafRef.current) return;
+      leafRef.current.flyTo(center, 17.5, { animate: true, duration: 1.5, easeLinearity: 0.18 });
+      window.setTimeout(() => {
+        if (leafRef.current) leafRef.current.setView(center, 17.5, { animate: true });
+      }, 1550);
+    }, 180);
   }, [userCoords]);
 
   React.useEffect(() => {
@@ -3610,8 +3812,14 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
                   border: '1px solid #e4e7ef', boxShadow: '0 2px 12px rgba(0,0,0,.07)' }}>
       <style>{`@keyframes custHubPulse { 0% { transform:scale(.55); opacity:.85; } 70% { transform:scale(1.65); opacity:0; } 100% { transform:scale(1.65); opacity:0; } }`}</style>
       <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+      <div className="alv-map-controls" aria-label="Map controls">
+        <button type="button" className="alv-map-locate" onClick={locateCustomer} aria-label="Center map on my location" title="Use my location" disabled={locatingMe}>
+          <LocateFixed size={18} className={locatingMe ? 'is-spinning' : ''} />
+          <span>{locatingMe ? 'Locating…' : 'My location'}</span>
+        </button>
+      </div>
       {selectedHub && (() => {
-        const sc = HUB_SC[selectedHub.status] || '#2563eb';
+        const sc = HUB_SC[selectedHub.status] || '#1680c0';
         const coords = custGetCoords(selectedHub);
         const mapsUrl = coords
           ? `https://www.google.com/maps?q=${coords[0]},${coords[1]}`
@@ -3691,7 +3899,7 @@ function CustChargingStations({ call }) {
     navigator.geolocation.getCurrentPosition(
       pos => { setUserCoords([pos.coords.latitude, pos.coords.longitude]); setLocStatus('done'); },
       () => setLocStatus('denied'),
-      { timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
@@ -3778,7 +3986,6 @@ function CustChargingStations({ call }) {
         {/* View toggle */}
         <div className="cs-view-toggle">
           <button className={`cs-view-btn${viewMode==='map'?' active':''}`} onClick={()=>setViewMode('map')}><MapPin size={13}/> Map</button>
-          <button className={`cs-view-btn${viewMode==='table'?' active':''}`} onClick={()=>setViewMode('table')}>📋 Table</button>
           <button className={`cs-view-btn${viewMode==='grid'?' active':''}`} onClick={()=>setViewMode('grid')}>▦ Cards</button>
         </div>
       </div>
@@ -3790,35 +3997,6 @@ function CustChargingStations({ call }) {
             onSelectHub={h => setSelectedHub(s => h == null ? null : (s?._id === h._id ? null : h))} />
 
         </div>
-      )}
-
-      {/* ── Table View ── */}
-      {viewMode === 'table' && (
-        <Card title="Charging Hubs" badge={`${hubs.length} locations${userCoords ? ' · nearest first' : ''}`}>
-          <div style={{overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',minWidth:1000}}>
-              <thead><tr>
-                <th style={{textAlign:'left',padding:10}}>Rank</th><th style={{textAlign:'left',padding:10}}>Charging Hub</th>
-                <th style={{textAlign:'left',padding:10}}>City / Area</th><th style={{textAlign:'left',padding:10}}>Distance</th>
-                <th style={{textAlign:'left',padding:10}}>Site Type</th><th style={{textAlign:'left',padding:10}}>Status</th><th style={{textAlign:'left',padding:10}}>Action</th>
-              </tr></thead>
-              <tbody>{hubs.map((hub,i)=>{
-                const sc=STATUS_CFG[hub.status]||STATUS_CFG.OFFLINE;
-                const coords=custGetCoords(hub);
-                const mapsUrl=coords?`https://www.google.com/maps?q=${coords[0]},${coords[1]}`:`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((hub.address||'')+' '+(hub.city||''))}`;
-                return <tr key={hub._id} style={{background:userCoords&&i===0?'#eff6ff':undefined,borderTop:'1px solid #eef0f4'}}>
-                  <td style={{padding:10,fontWeight:700}}>{userCoords?`#${i+1}`:'—'}</td>
-                  <td style={{padding:10}}><strong>{hub.name}</strong><div style={{fontSize:11,color:'#9ca3af'}}>{hub.code||hub.sourceId||''}</div></td>
-                  <td style={{padding:10}}>{hub.city}{hub.area?` · ${hub.area}`:''}<div style={{fontSize:11,color:'#6b7280'}}>{hub.address||''}</div></td>
-                  <td style={{padding:10,fontWeight:700,color:'#2563eb'}}>{hub._dist==null?'—':hub._dist<1?`${(hub._dist*1000).toFixed(0)} m`:`${hub._dist.toFixed(1)} km`}{userCoords&&i===0?' 📍':''}</td>
-                  <td style={{padding:10}}>{hub.siteType||'—'}</td>
-                  <td style={{padding:10}}><span style={{color:sc.color,fontWeight:700}}>● {sc.label}</span></td>
-                  <td style={{padding:10}}><button className="cs-hub-btn-view" onClick={()=>{setSelectedHub(hub);setViewMode('map')}}>View Map</button> <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="cs-hub-btn-maps">Maps</a></td>
-                </tr>;
-              })}</tbody>
-            </table>
-          </div>
-        </Card>
       )}
 
       {/* ── Grid View ── */}
@@ -4094,7 +4272,10 @@ function CustNotifications({ call, setPage }) {
   const read=async n=>{if(!n.read)try{await call(`/customer/notifications/${n._id}/read`,{method:'put'});load()}catch(e){}};
   const submitFeedback=async()=>{if(!feedback)return;setSaving(true);try{await call(`/customer/maintenance-services/${feedback._id}/feedback`,{method:'post',data:form});setFeedback(null);setForm({rating:5,comment:''});await load();}catch(e){alert(e.response?.data?.message||'Could not submit feedback')}finally{setSaving(false)}};
   const maintenanceTypes=['MAINTENANCE','MAINTENANCE_REGISTERED','MAINTENANCE_ASSIGNED','MAINTENANCE_STARTED','MAINTENANCE_PAUSED','MAINTENANCE_RESUMED','MAINTENANCE_STAFF_COMPLETED','MAINTENANCE_COMPLETED'];
-  const generalNotes=notes.filter(n=>!maintenanceTypes.includes(n.type));
+  // Keep the registration alert in Notification Center so it remains visibly
+  // unread until the customer explicitly opens the notification. Other service
+  // lifecycle updates remain in the service area as before.
+  const generalNotes=notes.filter(n=>!maintenanceTypes.includes(n.type) || n.type==='MAINTENANCE_REGISTERED');
   const unread=generalNotes.filter(n=>!n.read).length;
   const categories={ALL:generalNotes.length,UNREAD:unread,READ:generalNotes.length-unread};
   const visible=generalNotes.filter(n=>{const q=query.trim().toLowerCase(); const qok=!q||[n.title,n.message,n.type].filter(Boolean).join(' ').toLowerCase().includes(q); const fok=filter==='ALL'||(filter==='UNREAD'?!n.read:n.read); return qok&&fok;});

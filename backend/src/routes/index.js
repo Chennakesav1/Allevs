@@ -253,12 +253,46 @@ pr.put('/vehicle-documents/:id/issue', Ad.issueVehicleDocument);
 
 pr.get('/complaints', async (req, res) => {
   try {
-    const { Complaint, JobProof } = require('../models');
+    const { Complaint, JobProof, CommandVehicle } = require('../models');
     const list = await Complaint.find()
       .populate('customerId','name email phone')
-      .populate({path:'maintenanceId',populate:{path:'commandAssignedTo',select:'name email role phone'}})
+      .populate('assignedStaffId','name email role phone')
+      .populate('franchiseeId','name email phone')
+      .populate({path:'maintenanceId',populate:[
+        {path:'commandAssignedTo',select:'name email role phone'},
+        {path:'franchiseeId',select:'name email phone'},
+        {path:'customerId',select:'name email phone'},
+      ]})
       .sort('-createdAt').lean();
-    for (const c of list) if (c.maintenanceId?.commandJobId) c.proof = await JobProof.findOne({jobId:c.maintenanceId.commandJobId}).lean();
+
+    // vehicleId on Complaint is intentionally a plain ObjectId, so resolve the
+    // CommandVehicle explicitly and use it as a reliable fallback for details.
+    const vehicleIds=[...new Set(list.map(c=>String(c.vehicleId||'')).filter(Boolean))];
+    const vehicles=vehicleIds.length
+      ? await CommandVehicle.find({_id:{$in:vehicleIds}}).lean()
+      : [];
+    const vehicleMap=new Map(vehicles.map(v=>[String(v._id),v]));
+
+    for (const c of list) {
+      const vehicle=vehicleMap.get(String(c.vehicleId||''));
+      if (vehicle) {
+        c.vehicleSnapshot={
+          ...vehicle,
+          ...(c.vehicleSnapshot||{}),
+          make:c.vehicleSnapshot?.make||vehicle.make,
+          model:c.vehicleSnapshot?.model||vehicle.model,
+          registrationNo:c.vehicleSnapshot?.registrationNo||vehicle.registrationNo,
+          chassisNo:c.vehicleSnapshot?.chassisNo||vehicle.chassisNo,
+          motorNo:c.vehicleSnapshot?.motorNo||vehicle.motorNo,
+          bikeId:c.vehicleSnapshot?.bikeId||vehicle.bikeId,
+          fleetOperatorName:c.vehicleSnapshot?.fleetOperatorName||vehicle.fleetOperatorName,
+          fleetOperatorId:c.vehicleSnapshot?.fleetOperatorId||vehicle.fleetOperatorId,
+        };
+      }
+      if(!c.assignedStaffName) c.assignedStaffName=c.assignedStaffId?.name||c.maintenanceId?.commandAssignedTo?.name||'';
+      if(!c.fleetOperatorName) c.fleetOperatorName=c.franchiseeId?.name||c.maintenanceId?.franchiseeId?.name||c.vehicleSnapshot?.fleetOperatorName||'';
+      if (c.maintenanceId?.commandJobId) c.proof = await JobProof.findOne({jobId:c.maintenanceId.commandJobId}).lean();
+    }
     res.json(list);
   } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -277,7 +311,17 @@ pr.get('/complaints/:id/vehicle-history', async (req, res) => {
     const jobIds=jobs.map(j=>j._id);
     const cards=jobIds.length?await M.JobCard.find({jobId:{$in:jobIds}}).lean():[];
     const cardMap=new Map(cards.map(card=>[String(card.jobId),card]));
-    for(const j of jobs){ const m=j.maintenanceId?mm.get(String(j.maintenanceId)):null; j.solution=m?.staffCompletionSummary||m?.completionSummary||j.remarks||m?.notes||''; j.pauseHistory=j.pauseHistory||m?.staffPauseHistory||[]; j.staffStartedAt=m?.staffStartedAt||j.startedAt; j.staffCompletedAt=m?.staffCompletedAt||j.completedAt; j.staffCompletionSummary=m?.staffCompletionSummary||j.remarks||''; j.jobCard=(j.createdSource==='STAFF_OWN'&&j.selfCreated)?(cardMap.get(String(j._id))||null):null; }
+    for(const j of jobs){
+      const m=j.maintenanceId?mm.get(String(j.maintenanceId)):null;
+      j.solution=m?.staffCompletionSummary||m?.completionSummary||j.remarks||m?.notes||'';
+      j.pauseHistory=j.pauseHistory||m?.staffPauseHistory||[];
+      j.staffStartedAt=m?.staffStartedAt||j.startedAt;
+      j.staffCompletedAt=m?.staffCompletedAt||j.completedAt;
+      j.staffCompletionSummary=m?.staffCompletionSummary||j.remarks||'';
+      // Every service job can have a JobCard. Do not restrict this to STAFF_OWN jobs.
+      // This lets Command Center view the same complete card that the team updates.
+      j.jobCard=cardMap.get(String(j._id))||null;
+    }
     res.json({ jobs, rentals, maintenance });
   } catch(e){ res.status(500).json({message:e.message}); }
 });
@@ -356,7 +400,7 @@ pr.get('/all-staff', async (req, res) => {
     const { User } = require('../models');
     const staff = await User.find({
       role: { $in: ['STAFF', 'TECHNICIAN', 'HUB_MANAGER'] },
-    }).select('_id name role email phone active franchiseeId createdAt').lean();
+    }).select('_id name role email phone active franchiseeId profileImage aadharNumber panNumber otpVerified joiningDate createdAt').lean();
     res.json(staff || []);
   } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -421,6 +465,7 @@ const dr = express.Router();
 dr.use(auth, allow('CENTRAL_ADMIN', 'SUPER_ADMIN'));
 dr.get( '/dashboard',        Ad.dashboard);
 dr.get(   '/hubs',           Ad.hubs);
+dr.post(  '/hubs/sync-sm-infrastructure', Ad.syncSmInfrastructure);
 dr.post(  '/hubs',           Ad.createHub);
 dr.put(   '/hubs/:id',       Ad.updateHub);
 dr.delete('/hubs/:id',       Ad.deleteHub);
@@ -516,6 +561,9 @@ dr.get('/franchisee-stats', async (req, res) => {
 dr.get('/pending-vehicles',            Ap.allVehicles);
 dr.put('/pending-vehicles/:id/approve',Ap.approveVehicle);
 dr.put('/pending-vehicles/:id/reject', Ap.rejectVehicle);
+dr.post('/staff-otp/send',             Ap.sendStaffEmailOtp);
+dr.post('/staff-otp/verify',           Ap.verifyStaffEmailOtp);
+dr.post('/staff',                      Ad.createStaff);
 dr.get('/pending-staff',               Ap.allStaff);
 dr.put('/pending-staff/:id/approve',   Ap.approveStaff);
 dr.put('/pending-staff/:id/reject',    Ap.rejectStaff);

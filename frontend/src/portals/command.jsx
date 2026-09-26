@@ -56,7 +56,6 @@ const NAV_ITEMS = {
 
     // ── Operations ──
     { id: 'complaint-center',    label: 'Complaint Center',    Icon: Bell,            cat: 'Operations' },
-    { id: 'job-management',      label: 'Job Management',      Icon: ClipboardList,   cat: 'Operations' },
     { id: 'staff-own-job-cards', label: 'Staff Own Job Cards', Icon: Briefcase,       cat: 'Operations' },
     { id: 'demand',              label: 'Demand',              Icon: TrendingUp,      cat: 'Operations' },
     { id: 'maintenance-customer-service', label: 'Maintenance Customer Service', Icon: Wrench, cat: 'Operations' },
@@ -66,12 +65,10 @@ const NAV_ITEMS = {
     { id: 'franchisees',         label: 'Fleet Operators',     Icon: Truck,           cat: 'Fleet & Infrastructure' },
     { id: 'vehicle-inventory',   label: 'Vehicle & Inventory', Icon: Layers,          cat: 'Fleet & Infrastructure' },
     { id: 'vehicle-documents',   label: 'Vehicle Documents',   Icon: FileText,        cat: 'Fleet & Infrastructure' },
-    { id: 'vehicle-approvals',   label: 'Vehicle Approvals',   Icon: Car,             cat: 'Fleet & Infrastructure' },
     { id: 'franchise-ratings',   label: 'Fleet Ratings',       Icon: BarChart2,       cat: 'Fleet & Infrastructure' },
 
     // ── People & HR ──
     { id: 'customers',           label: 'Customers',           Icon: Users,           cat: 'People & HR' },
-    { id: 'staff-directory',     label: 'Staff Directory',     Icon: Shield,          cat: 'People & HR' },
     { id: 'staff-management',    label: 'Staff Management',    Icon: UserCheck,       cat: 'People & HR' },
     { id: 'staff-attendance',    label: 'Staff Attendance',    Icon: Clock,           cat: 'People & HR' },
     { id: 'leave-approvals',     label: 'Leave Approvals',     Icon: FileText,        cat: 'People & HR' },
@@ -849,29 +846,135 @@ function FranJobs({ call }) {
 
 // ── Dashboard ────────────────────────────────────────────────────
 function AdminDashboard({ call }) {
-  const { data, loading, error, refresh } = useFetch(call, '/admin/dashboard');
-  if (loading) return <Loader />;
-  if (error)   return <Err msg={error} />;
-  return <>
+  const [state, setState] = useState({ loading: true, error: '', dashboard: null, vehicles: [], jobs: [], revenue: [], franchisees: [], chargers: [], hubs: [] });
+  const [range, setRange] = useState('30D');
+
+  const load = async () => {
+    setState(s => ({ ...s, loading: true, error: '' }));
+    const requests = [
+      ['dashboard', '/admin/dashboard'],
+      ['vehicles', '/admin/vehicles'],
+      ['jobs', '/admin/live-operations'],
+      ['revenue', '/admin/revenue'],
+      ['franchisees', '/admin/franchisees'],
+      ['chargers', '/admin/chargers'],
+      ['hubs', '/admin/hubs'],
+    ];
+    const out = {};
+    const failed = [];
+    await Promise.all(requests.map(async ([key, path]) => {
+      try { out[key] = await call(path); }
+      catch (e) { failed.push(key); out[key] = key === 'dashboard' ? null : []; }
+    }));
+    if (!out.dashboard) {
+      setState({ loading: false, error: 'Dashboard data could not be loaded. Please refresh and try again.', dashboard: null, vehicles: [], jobs: [], revenue: [], franchisees: [], chargers: [], hubs: [] });
+      return;
+    }
+    setState({ loading: false, error: failed.length ? `Some optional analytics could not be loaded: ${failed.join(', ')}` : '', ...out });
+  };
+
+  useEffect(() => { load(); }, []);
+  if (state.loading) return <Loader />;
+  if (state.error && !state.dashboard) return <Err msg={state.error} />;
+
+  const d = state.dashboard || {};
+  const vehicles = Array.isArray(state.vehicles) ? state.vehicles : [];
+  const jobs = Array.isArray(state.jobs) ? state.jobs : [];
+  const franchisees = Array.isArray(state.franchisees) ? state.franchisees : [];
+  const chargers = Array.isArray(state.chargers) ? state.chargers : [];
+  const hubs = Array.isArray(state.hubs) ? state.hubs : [];
+  const paidRows = Array.isArray(state.revenue) ? state.revenue : [];
+  const totalRevenue = Number(d.revenue || paidRows[0]?.total || 0);
+  const activeVehicles = vehicles.filter(v => v.lifecycleStatus === 'AT_CUSTOMER').length;
+  const readyVehicles = vehicles.filter(v => ['AT_FLEET','HANDOVER_READY'].includes(v.lifecycleStatus)).length;
+  const serviceVehicles = vehicles.filter(v => /service|maintenance/i.test(String(v.status || v.lifecycleStatus || ''))).length;
+  const pendingHandover = vehicles.filter(v => v.pendingHandover || v.lifecycleStatus === 'HANDOVER_READY').length;
+  const utilization = vehicles.length ? Math.round((activeVehicles / vehicles.length) * 100) : 0;
+  const openJobs = jobs.filter(j => !['COMPLETED','CANCELLED'].includes(String(j.status || '').toUpperCase())).length;
+  const completedJobs = jobs.filter(j => String(j.status || '').toUpperCase() === 'COMPLETED').length;
+  const chargerAvailable = chargers.filter(c => String(c.status || '').toUpperCase() === 'AVAILABLE').length;
+  const chargerBusy = chargers.filter(c => !['AVAILABLE','OFFLINE','MAINTENANCE'].includes(String(c.status || '').toUpperCase())).length;
+  const chargerOffline = chargers.filter(c => ['OFFLINE','MAINTENANCE'].includes(String(c.status || '').toUpperCase())).length;
+  const franchiseRows = franchisees.map(f => ({ ...f, totalVehicles: Number(f.totalVehicles || 0), assignedVehicles: Number(f.assignedVehicles || 0) }));
+  const maxFranchiseFleet = Math.max(1, ...franchiseRows.map(f => f.totalVehicles));
+  const statusCounts = [
+    ['Active Rental', activeVehicles], ['Ready / Fleet', readyVehicles], ['Handover Pending', pendingHandover], ['Service', serviceVehicles], ['Unassigned', vehicles.filter(v => v.lifecycleStatus === 'UNASSIGNED').length]
+  ];
+  const maxStatus = Math.max(1, ...statusCounts.map(x => x[1]));
+  const avgFleetUtil = franchiseRows.length ? Math.round(franchiseRows.reduce((s, f) => s + (f.totalVehicles ? (f.assignedVehicles / f.totalVehicles) * 100 : 0), 0) / franchiseRows.length) : utilization;
+  const jobStatus = {};
+  jobs.forEach(j => { const k = String(j.status || 'UNKNOWN').replaceAll('_',' '); jobStatus[k] = (jobStatus[k] || 0) + 1; });
+  const alerts = [
+    pendingHandover > 0 && { tone:'warn', icon:'🟠', text:`${pendingHandover} vehicle${pendingHandover > 1 ? 's are' : ' is'} waiting for handover` },
+    openJobs > 0 && { tone:'warn', icon:'🔧', text:`${openJobs} service operation${openJobs > 1 ? 's' : ''} currently open` },
+    chargerOffline > 0 && { tone:'danger', icon:'🔴', text:`${chargerOffline} charger${chargerOffline > 1 ? 's are' : ' is'} offline or under maintenance` },
+    Number(d.lowStock || 0) > 0 && { tone:'warn', icon:'📦', text:`${d.lowStock} inventory item${Number(d.lowStock) > 1 ? 's are' : ' is'} at reorder level` },
+  ].filter(Boolean);
+
+  return <div className="cc-dashboard">
     <PageHeader
       title="Enterprise Command Center"
-      sub="Full network overview — hubs, revenue and live operations."
-      actions={
-        <button className="btn-ghost" onClick={refresh}><RefreshCw size={15} /> Refresh</button>
-      }
+      sub="Live network overview — fleet, revenue, service operations and infrastructure."
+      actions={<div className="cc-dashboard-actions"><div className="cc-range"><button className={range==='7D'?'active':''} onClick={()=>setRange('7D')}>7D</button><button className={range==='30D'?'active':''} onClick={()=>setRange('30D')}>30D</button><button className={range==='90D'?'active':''} onClick={()=>setRange('90D')}>90D</button></div><button className="btn-ghost" onClick={load}><RefreshCw size={15}/> Refresh</button></div>}
     />
-    <MetricGrid metrics={[
-      { label: 'Hubs',      value: data?.hubs ?? 0,                            Icon: Factory,       color: '#2563eb' },
-      { label: 'Chargers',  value: data?.chargers ?? 0,                         Icon: Zap,           color: '#7c3aed' },
-      { label: 'Open Jobs', value: data?.openJobs ?? 0,                         Icon: ClipboardList, color: '#d97706' },
-      { label: 'Revenue',   value: `₹${(data?.revenue ?? 0).toLocaleString()}`, Icon: DollarSign,    color: '#16a34a' },
-    ]} />
-    <AdminPendingBanner call={call} />
-    <InfoBanner Icon={Activity}>
-      Use the sidebar to manage Hubs, Chargers, Fleet Operators and more. All sections have entry forms.
-    </InfoBanner>
-  </>;
+    {state.error && <div className="cc-dashboard-note"><AlertTriangle size={15}/> {state.error}</div>}
+
+    {/* 1. Live command KPIs */}
+    <div className="cc-kpi-grid">
+      {[
+        ['Total Fleet', vehicles.length, Car, 'Registered Command Center vehicles', 'blue'],
+        ['Active Rentals', activeVehicles, Activity, `${utilization}% fleet utilization`, 'green'],
+        ['Available / Fleet', readyVehicles, CheckCircle, 'Ready for operations', 'violet'],
+        ['Open Service Jobs', openJobs, Wrench, 'Live service queue', 'orange'],
+        ['Revenue', `₹${totalRevenue.toLocaleString('en-IN')}`, DollarSign, 'Paid revenue recorded', 'emerald'],
+        ['Customers', d.customers ?? 0, Users, 'Registered customers', 'cyan'],
+        ['Hubs', d.hubs ?? hubs.length, Factory, 'Network locations', 'indigo'],
+        ['Low Stock', d.lowStock ?? 0, Package, 'Items at reorder level', 'red'],
+      ].map(([label,value,Icon,sub,tone])=><div className={`cc-kpi cc-${tone}`} key={label}><div className="cc-kpi-icon"><Icon size={18}/></div><div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div></div>)}
+    </div>
+
+    <div className="cc-section-head"><div><b>Operations intelligence</b><span>12 live analytics upgrades connected to your existing Command Center data.</span></div><span className="cc-live-dot"><i/> Live</span></div>
+
+    {/* 2. Fleet Performance + 3. Vehicle analytics */}
+    <div className="cc-grid cc-grid-2">
+      <section className="cc-panel"><PanelTitle icon={Gauge} title="Fleet Performance" sub="Current vehicle lifecycle distribution"/><div className="cc-bars">{statusCounts.map(([name,count])=><div className="cc-bar-row" key={name}><div><span>{name}</span><b>{count}</b></div><div className="cc-track"><i style={{width:`${Math.max(3,(count/maxStatus)*100)}%`}}/></div></div>)}</div><div className="cc-inline-stats"><MetricMini label="Utilization" value={`${utilization}%`}/><MetricMini label="Handover pending" value={pendingHandover}/><MetricMini label="Service" value={serviceVehicles}/></div></section>
+      <section className="cc-panel"><PanelTitle icon={Car} title="Vehicle Analytics" sub="Lifecycle, customer and fleet assignment signals"/><div className="cc-big-number"><strong>{utilization}%</strong><span>current fleet utilization</span></div><div className="cc-progress"><i style={{width:`${utilization}%`}}/></div><div className="cc-inline-stats"><MetricMini label="At customer" value={activeVehicles}/><MetricMini label="At fleet" value={readyVehicles}/><MetricMini label="Unassigned" value={vehicles.filter(v=>v.lifecycleStatus==='UNASSIGNED').length}/></div><div className="cc-chip-list">{vehicles.slice(0,6).map(v=><span key={v._id}>{v.make||''} {v.model||''} · {String(v.lifecycleStatus||'UNKNOWN').replaceAll('_',' ')}</span>)}</div></section>
+    </div>
+
+    {/* 4. Revenue + 5. Booking/operations */}
+    <div className="cc-grid cc-grid-2">
+      <section className="cc-panel"><PanelTitle icon={DollarSign} title="Revenue Analytics" sub={`Paid revenue · ${range} dashboard view`}/><div className="cc-revenue-hero"><strong>₹{totalRevenue.toLocaleString('en-IN')}</strong><span>Total recorded paid revenue</span></div><div className="cc-revenue-strip"><div><b>{paidRows[0]?.transactions ?? '—'}</b><span>transactions</span></div><div><b>₹{Math.round(totalRevenue / Math.max(1,Number(paidRows[0]?.transactions||1))).toLocaleString('en-IN')}</b><span>avg / transaction</span></div><div><b>{d.customers ?? 0}</b><span>customers</span></div></div></section>
+      <section className="cc-panel"><PanelTitle icon={ClipboardList} title="Booking & Operations Funnel" sub="Current operational flow from active work"/><div className="cc-funnel"><FunnelRow label="Live operations" value={jobs.length} max={Math.max(1,jobs.length)} /><FunnelRow label="Open / active" value={openJobs} max={Math.max(1,jobs.length)} /><FunnelRow label="Completed" value={completedJobs} max={Math.max(1,jobs.length)} /><FunnelRow label="Pending handover" value={pendingHandover} max={Math.max(1,vehicles.length)} /></div></section>
+    </div>
+
+    {/* 6. Franchise + 7. Service */}
+    <div className="cc-grid cc-grid-2">
+      <section className="cc-panel"><PanelTitle icon={Truck} title="Fleet Operator Performance" sub="Assigned fleet by operator"/>{franchiseRows.length ? <div className="cc-franchise-list">{franchiseRows.slice(0,8).map(f=><div className="cc-franchise-row" key={f._id||f.franchiseeId}><div className="cc-franchise-name"><b>{f.name||'Fleet Operator'}</b><span>{f.totalVehicles} vehicles · {f.assignedVehicles} assigned</span></div><div className="cc-franchise-bar"><i style={{width:`${Math.max(3,(f.totalVehicles/maxFranchiseFleet)*100)}%`}}/></div><strong>{f.totalVehicles ? Math.round(f.assignedVehicles/f.totalVehicles*100) : 0}%</strong></div>)}</div>:<EmptyMini text="No fleet operator records available."/>}<div className="cc-inline-stats"><MetricMini label="Operators" value={franchiseRows.length}/><MetricMini label="Avg fleet assignment" value={`${avgFleetUtil}%`}/></div></section>
+      <section className="cc-panel"><PanelTitle icon={Wrench} title="Service & Maintenance" sub="Live service workload from existing jobs"/><div className="cc-service-grid"><MetricMini label="Open" value={openJobs}/><MetricMini label="Completed" value={completedJobs}/><MetricMini label="Total live jobs" value={jobs.length}/><MetricMini label="Vehicle service" value={serviceVehicles}/></div><div className="cc-status-list">{Object.entries(jobStatus).slice(0,6).map(([k,v])=><div key={k}><span>{k}</span><b>{v}</b></div>)}</div></section>
+    </div>
+
+    {/* 8. Charging + 9. Location */}
+    <div className="cc-grid cc-grid-2">
+      <section className="cc-panel"><PanelTitle icon={Zap} title="EV Infrastructure / Charger Health" sub="Current charger availability"/><div className="cc-charger-donut"><div className="cc-donut" style={{'--pct':`${chargers.length ? Math.round(chargerAvailable/chargers.length*100) : 0}%`}}><strong>{chargers.length ? Math.round(chargerAvailable/chargers.length*100) : 0}%</strong><span>available</span></div><div className="cc-legend"><LegendDot label="Available" value={chargerAvailable}/><LegendDot label="Busy / active" value={chargerBusy}/><LegendDot label="Offline / maintenance" value={chargerOffline}/><LegendDot label="Total chargers" value={chargers.length}/></div></div></section>
+      <section className="cc-panel"><PanelTitle icon={MapPin} title="Location Analytics" sub="Network footprint and infrastructure coverage"/><div className="cc-location-number"><strong>{hubs.length}</strong><span>active hub records</span></div><div className="cc-location-list">{Object.entries(hubs.reduce((m,h)=>{const k=h.city||'Unknown';m[k]=(m[k]||0)+1;return m},{})).sort((a,b)=>b[1]-a[1]).slice(0,7).map(([city,count])=><div key={city}><span>📍 {city}</span><b>{count}</b></div>)}</div></section>
+    </div>
+
+    {/* 10. Staff / 11. Alerts / 12. Trend-ready operations */}
+    <div className="cc-grid cc-grid-3">
+      <section className="cc-panel"><PanelTitle icon={Users} title="People & Staff" sub="Network people signals"/><div className="cc-person-card"><Users size={20}/><div><strong>{d.customers ?? 0}</strong><span>customers registered</span></div></div><div className="cc-person-card"><UserCheck size={20}/><div><strong>{franchiseRows.length}</strong><span>fleet operators visible</span></div></div><div className="cc-person-card"><ClipboardList size={20}/><div><strong>{openJobs}</strong><span>jobs needing attention</span></div></div></section>
+      <section className="cc-panel"><PanelTitle icon={AlertTriangle} title="Command Alerts" sub="Actionable live conditions"/>{alerts.length ? <div className="cc-alert-list">{alerts.map((a,i)=><div className={`cc-alert ${a.tone}`} key={i}><span>{a.icon}</span><b>{a.text}</b></div>)}</div>:<div className="cc-clear-alert"><CheckCircle size={22}/><b>No critical operational alerts</b><span>Current monitored metrics are within the available dashboard data.</span></div>}</section>
+      <section className="cc-panel"><PanelTitle icon={TrendingUp} title="Trends & Executive View" sub="Range selector ready for live historical data"/><div className="cc-trend-visual"><div className="cc-trend-line"><i/><i/><i/><i/><i/><i/><i/></div><div className="cc-trend-axis"><span>Start</span><span>{range}</span><span>Now</span></div></div><div className="cc-inline-stats"><MetricMini label="Revenue" value={`₹${totalRevenue.toLocaleString('en-IN')}`}/><MetricMini label="Fleet" value={vehicles.length}/><MetricMini label="Jobs" value={jobs.length}/></div></section>
+    </div>
+
+    <section className="cc-panel cc-ops-table"><PanelTitle icon={Activity} title="Live Operations" sub="Latest jobs requiring Command Center visibility"/><div className="cc-table-wrap"><table><thead><tr><th>Operation</th><th>Status</th><th>Vehicle</th><th>Created</th></tr></thead><tbody>{jobs.slice(0,8).map(j=><tr key={j._id}><td><b>{j.title||j.type||'Service operation'}</b><small>{j.hubId?.name||j.hubId?.city||'Network operation'}</small></td><td><span className="cc-status-pill">{String(j.status||'UNKNOWN').replaceAll('_',' ')}</span></td><td>{j.vehicleId?.registrationNo||j.vehicleId?.chassisNo||j.vehicleId?.bikeId||'—'}</td><td>{j.createdAt?new Date(j.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'—'}</td></tr>)}{!jobs.length&&<tr><td colSpan="4"><EmptyMini text="No live operations available."/></td></tr>}</tbody></table></div></section>
+  </div>;
 }
+
+function PanelTitle({ icon: Icon, title, sub }) { return <div className="cc-panel-title"><div className="cc-panel-title-icon"><Icon size={16}/></div><div><b>{title}</b><span>{sub}</span></div></div>; }
+function MetricMini({ label, value }) { return <div className="cc-mini"><span>{label}</span><b>{value}</b></div>; }
+function FunnelRow({ label, value, max }) { return <div className="cc-funnel-row"><div><span>{label}</span><b>{value}</b></div><div className="cc-track"><i style={{width:`${Math.max(4,Math.min(100,(value/max)*100))}%`}}/></div></div>; }
+function LegendDot({ label, value }) { return <div className="cc-legend-row"><i/><span>{label}</span><b>{value}</b></div>; }
+function EmptyMini({ text }) { return <div className="cc-empty-mini">{text}</div>; }
 
 // ── Hubs ─────────────────────────────────────────────────────────
 const EMPTY_HUB = { name: '', code: '', city: '', address: '', lat: '', lng: '', status: 'ONLINE', swaps: '', siteType: '', area: '' };
@@ -973,7 +1076,8 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
   };
 
   React.useEffect(() => {
-    if (leafRef.current || !mapRef.current || !window.L) return;
+    if (leafRef.current || !mapRef.current) return;
+    if (!window.L) return;
     const L = window.L;
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true })
       .setView([20.5937, 78.9629], 5);
@@ -999,6 +1103,7 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
   return (
     <div className="hub-map-container" style={{ position: 'relative' }}>
       <div ref={mapRef} id="india-hub-map" />
+      {!window.L && <div style={{padding:24,textAlign:'center',color:'#64748b',fontSize:13}}>Map service is unavailable. Hub data is still available in Table view.</div>}
       {tooltip && (
         <div className="map-tooltip" style={{ left: tooltip.x, top: tooltip.y, pointerEvents: 'none' }}>
           <div className="map-tooltip-name">{tooltip.hub.name}</div>
@@ -1063,7 +1168,16 @@ const __PREMIUM_HUBS_UI = (() => {
 
 function AdminHubs({ call }) {
   const { data: initial, loading, error, refresh } = useFetch(call, '/admin/hubs');
-  useEffect(() => { const timer = setInterval(() => refresh(), 10 * 60 * 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    let mounted = true;
+    const silentSync = async () => {
+      try { const r = await call('/admin/hubs/sync-sm-infrastructure', { method:'post' }); if (mounted) setSyncState(`Auto-synced ${r?.count || r?.stats?.sourceCount || ''} hubs · ${new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}`); } catch (_) { if (mounted) setSyncState('Automatic sync active · using current hub data'); }
+      if (mounted) refresh();
+    };
+    silentSync();
+    const timer = setInterval(silentSync, 10 * 60 * 1000);
+    return () => { mounted = false; clearInterval(timer); };
+  }, []);
   const [hubs, setHubs] = useState([]);
   const [open, setOpen] = useState(false);
   const [editHub, setEditHub] = useState(null);
@@ -1071,10 +1185,13 @@ function AdminHubs({ call }) {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_HUB);
   const [selectedHub, setSelectedHub] = useState(null);
-  const [view, setView] = useState('map');
+  const [view, setView] = useState(() => (typeof window !== 'undefined' && window.L) ? 'map' : 'table');
   const [search, setSearch] = useState('');
   const [cityFilter, setCityFilter] = useState('ALL');
   const [areaFilter, setAreaFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [siteFilter, setSiteFilter] = useState('ALL');
+  const [syncState, setSyncState] = useState('Starting automatic sync…');
   const { toast, show } = useToast();
 
   useEffect(() => { if (initial) setHubs(initial); }, [initial]);
@@ -1108,22 +1225,17 @@ function AdminHubs({ call }) {
     try { await call(`/admin/hubs/${delHub._id}`, { method: 'delete' }); setHubs(h => h.filter(x => x._id !== delHub._id)); setDelHub(null); show('Hub deleted'); }
     catch (e) { show('Failed to delete hub', 'error'); }
   };
-  const syncAll = async () => {
-    try {
-      await call('/admin/hubs/sync-sm-infrastructure', { method: 'post' });
-      const fresh = await call('/admin/hubs'); setHubs(fresh); show(`✓ ${fresh.length} hub records loaded`);
-    } catch (e) { show(e.response?.data?.message || 'Hub sync failed', 'error'); }
-  };
-
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
 
   const cities = [...new Set(hubs.map(h => h.city).filter(Boolean))].sort();
   const areas = [...new Set(hubs.filter(h => cityFilter === 'ALL' || h.city === cityFilter).map(h => h.area || h.region).filter(Boolean))].sort();
+  const statuses = [...new Set(hubs.map(h => String(h.status||'').toUpperCase()).filter(Boolean))].sort();
+  const siteTypes = [...new Set(hubs.map(h => String(h.siteType||'').trim()).filter(Boolean))].sort();
   const filtered = hubs.filter(h => {
     const q = search.trim().toLowerCase();
     const hay = [h.name,h.code,h.city,h.address,h.sourceId,h.siteType,h.area,h.qisName].join(' ').toLowerCase();
-    return (!q || hay.includes(q)) && (cityFilter === 'ALL' || h.city === cityFilter) && (areaFilter === 'ALL' || (h.area || h.region) === areaFilter);
+    return (!q || hay.includes(q)) && (cityFilter === 'ALL' || h.city === cityFilter) && (areaFilter === 'ALL' || (h.area || h.region) === areaFilter) && (statusFilter === 'ALL' || String(h.status||'').toUpperCase() === statusFilter) && (siteFilter === 'ALL' || String(h.siteType||'').toUpperCase() === siteFilter);
   });
 
   const HubFields = () => <>
@@ -1156,7 +1268,9 @@ function AdminHubs({ call }) {
         <div style={{minWidth:260,flex:'1 1 280px'}}><Inp value={search} onChange={setSearch} placeholder="Search hub, ID, city, address, area…" /></div>
         <Sel value={cityFilter} onChange={v=>{setCityFilter(v);setAreaFilter('ALL')}} opts={[{v:'ALL',l:`All cities (${hubs.length})`},...cities.map(c=>({v:c,l:c}))]} />
         <Sel value={areaFilter} onChange={v=>{setAreaFilter(v);if(v!=='ALL')setView('map')}} opts={[{v:'ALL',l:`All areas (${areas.length})`},...areas.map(a=>({v:a,l:a}))]} />
-        <button className="btn-ghost" onClick={syncAll}><RefreshCw size={13}/> Sync</button>
+        <Sel value={statusFilter} onChange={setStatusFilter} opts={[{v:'ALL',l:'All statuses'},...statuses.map(x=>({v:x,l:x}))]} />
+        <Sel value={siteFilter} onChange={setSiteFilter} opts={[{v:'ALL',l:'All site types'},...siteTypes.map(x=>({v:x,l:x}))]} />
+        <span style={{fontSize:10,fontWeight:800,color:'#16a34a',padding:'7px 9px',background:'#f0fdf4',borderRadius:8}}>{syncState}</span>
         <button className={isMapView?'btn-primary':'btn-ghost'} onClick={()=>setView('map')}>Map</button>
         <button className={!isMapView?'btn-primary':'btn-ghost'} onClick={()=>setView('table')}>Table</button>
         <button className="btn-primary" onClick={()=>{setOpen(true);setForm(EMPTY_HUB);}}><Plus size={14}/> Add Hub</button>
@@ -1195,6 +1309,8 @@ function AdminHubs({ call }) {
         <div style={{minWidth:280,flex:1}}><Inp value={search} onChange={setSearch} placeholder="Search hub, ID, city, address, site type…" /></div>
         <Sel value={cityFilter} onChange={v=>{setCityFilter(v);setAreaFilter('ALL')}} opts={[{v:'ALL',l:`All cities (${hubs.length})`},...cities.map(c=>({v:c,l:c}))]} />
         <Sel value={areaFilter} onChange={v=>{setAreaFilter(v);if(v!=='ALL')setView('map')}} opts={[{v:'ALL',l:`All areas (${areas.length})`},...areas.map(a=>({v:a,l:a}))]} />
+        <Sel value={statusFilter} onChange={setStatusFilter} opts={[{v:'ALL',l:'All statuses'},...statuses.map(x=>({v:x,l:x}))]} />
+        <Sel value={siteFilter} onChange={setSiteFilter} opts={[{v:'ALL',l:'All site types'},...siteTypes.map(x=>({v:x,l:x}))]} />
       </div>
       <div className="table-scroll">
         <table><thead><tr><th>#</th><th>Hub / Location</th><th>Source ID</th><th>Site Type</th><th>City</th><th>Area</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Swaps</th><th>Energization</th><th>Status</th><th>Actions</th></tr></thead>
@@ -2158,12 +2274,22 @@ function AdminVehicleDocuments({ call }) {
   const [preview,setPreview]=useState(null);
   const [issueDoc,setIssueDoc]=useState(null);
   const [issuing,setIssuing]=useState(false);
+  const [docSearch,setDocSearch]=useState('');
+  const [docType,setDocType]=useState('ALL');
+  const [docStatus,setDocStatus]=useState('ALL');
+  const [docExpiry,setDocExpiry]=useState('ALL');
   const {toast,show}=useToast();
   const fileUrl=u=>u?(u.startsWith('http')?u:`${API}${u}`):'';
   const vehicles=Array.isArray(vehiclesData)?vehiclesData:[];
   const assignedVehicles=vehicles.filter(v=>v.franchiseeId);
   const uploadDocument=async file=>{if(!file)return;setUploading(true);try{const fd=new FormData();fd.append('files',file);const result=await call('/uploads',{method:'post',data:fd});const uploaded=result?.files?.[0];if(!uploaded)throw new Error('Upload failed');setForm(f=>({...f,url:uploaded.url,fileName:uploaded.name}));show('Document uploaded.')}catch(e){show(e.response?.data?.message||e.message||'Document upload failed','error')}finally{setUploading(false)}};
   const submit=async e=>{e.preventDefault();if(!form.vehicleId||!form.title||!form.url){show('Vehicle, document title and uploaded document are required','error');return;}setSaving(true);try{await call('/platform/vehicle-documents',{method:'post',data:form});show('Vehicle document registered in Command Center.');setForm({vehicleId:'',type:'RC',title:'',number:'',issuedAt:'',expiresAt:'',url:'',fileName:'',notes:''});refresh()}catch(e){show(e.response?.data?.message||'Could not save document','error')}finally{setSaving(false)}};
+  const filteredDocs=(docs||[]).filter(d=>{
+    const q=docSearch.trim().toLowerCase();
+    const text=[d.title,d.type,d.number,d.bikeId,d.vehicle?.bikeId,d.vehicle?.make,d.vehicle?.model,d.vehicle?.registrationNo].filter(Boolean).join(' ').toLowerCase();
+    const exp=d.expiresAt?new Date(d.expiresAt):null; const now=new Date(); const derivedStatus=exp&&exp<now?'EXPIRED':String(d.status||'ACTIVE').toUpperCase(); const soon=exp&&exp>=now&&exp<=new Date(now.getTime()+30*86400000);
+    return (!q||text.includes(q)) && (docType==='ALL'||String(d.type||'').toUpperCase()===docType) && (docStatus==='ALL'||derivedStatus===docStatus) && (docExpiry==='ALL'||(docExpiry==='EXPIRED'&&derivedStatus==='EXPIRED')||(docExpiry==='30_DAYS'&&soon));
+  });
   if(vehiclesLoading||docsLoading)return <Loader/>; if(error)return <Err msg={error}/>;
   return <><Toast toast={toast}/><PageHeader title="Vehicle Documents" sub="Command Center owns the vehicle documents and shares each bike's records with its assigned fleet operator."/>
     <MetricGrid metrics={[
@@ -2187,8 +2313,9 @@ function AdminVehicleDocuments({ call }) {
           <button className="btn-primary" disabled={saving||uploading}><Send size={15}/>{saving?'Sending…':'Save & Share Document'}</button>
         </form>
       </Card>
-      <Card title="Document Register" badge={`${(docs||[]).length}`}>
-        <div className="command-doc-list">{(docs||[]).length===0?<div className="empty-state"><FileText size={36} style={{opacity:.2}}/><p>No vehicle documents yet.</p></div>:(docs||[]).map(d=><div className="command-doc-row" key={d._id}>
+      <Card title="Document Register" badge={`${filteredDocs.length} / ${(docs||[]).length}`}>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',padding:'12px 0'}}><input value={docSearch} onChange={e=>setDocSearch(e.target.value)} placeholder="Search document / vehicle…" style={{flex:'1 1 220px',padding:'9px 11px',border:'1px solid #dbe3ef',borderRadius:9}}/><select value={docType} onChange={e=>setDocType(e.target.value)} style={{padding:'9px 11px',border:'1px solid #dbe3ef',borderRadius:9}}><option value="ALL">All types</option>{['RC','INSURANCE','PUC','FITNESS','PERMIT','SERVICE','OTHER'].map(x=><option key={x}>{x}</option>)}</select><select value={docStatus} onChange={e=>setDocStatus(e.target.value)} style={{padding:'9px 11px',border:'1px solid #dbe3ef',borderRadius:9}}><option value="ALL">All status</option><option value="ACTIVE">Active</option><option value="EXPIRED">Expired</option></select><select value={docExpiry} onChange={e=>setDocExpiry(e.target.value)} style={{padding:'9px 11px',border:'1px solid #dbe3ef',borderRadius:9}}><option value="ALL">Any expiry</option><option value="30_DAYS">Expiring in 30 days</option><option value="EXPIRED">Expired</option></select></div>
+        <div className="command-doc-list">{filteredDocs.length===0?<div className="empty-state"><FileText size={36} style={{opacity:.2}}/><p>No vehicle documents yet.</p></div>:filteredDocs.map(d=><div className="command-doc-row" key={d._id}>
           <div className="command-doc-icon"><FileText size={17}/></div><div className="command-doc-main"><strong>{d.title||'Vehicle document'}</strong><span>{d.type} · {d.bikeId||d.vehicle?.bikeId||'No Bike ID'} · {d.vehicle?.make||d.vehicleSnapshot?.make||''} {d.vehicle?.model||d.vehicleSnapshot?.model||''}</span><small>{d.franchiseeId||d.shareStatus==='SHARED' ? `Issued to ${d.issuedToSnapshot?.name||d.fleetOperatorName||'fleet operator'}` : (d.vehicle?.fleetOperatorName ? 'Ready to issue to assigned fleet operator' : 'Assign this bike before issuing')}</small></div><div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}><button className="btn-ghost btn-sm" onClick={()=>setPreview({name:d.fileName||d.title,url:fileUrl(d.url)})}><Eye size={13}/> View</button>{!(d.franchiseeId||d.shareStatus==='SHARED') && <button className="btn-primary btn-sm" disabled={!d.vehicle?.fleetOperatorId || issuing} onClick={()=>setIssueDoc(d)}><Send size={13}/> Issue to Fleet</button>}</div>
         </div>)}</div>
       </Card>
@@ -2214,6 +2341,8 @@ function AdminVehicleInventory({ call }) {
   const [assignToId,   setAssignToId]   = useState('');
   const [assigning,    setAssigning]    = useState(false);
   const [selectedVeh,  setSelectedVeh]  = useState(null);
+  const [editVeh, setEditVeh] = useState(null);
+  const [savingEditVeh, setSavingEditVeh] = useState(false);
   const [selectedPart, setSelectedPart] = useState(null);
   const { toast, show } = useToast();
 
@@ -2279,6 +2408,19 @@ function AdminVehicleInventory({ call }) {
       show(`✓ ${list.length} bike${list.length!==1?'s':''} added with individual Bike IDs.`);
     } catch (e) { show(e.response?.data?.message || 'Failed to add vehicle', 'error'); }
     finally { setSavingVeh(false); }
+  };
+
+  const saveEditedVehicle = async () => {
+    if (!editVeh?._id) return;
+    setSavingEditVeh(true);
+    try {
+      const payload = {...editVeh};
+      delete payload._id; delete payload.createdAt; delete payload.updatedAt; delete payload.franchiseeId; delete payload.franchiseeName; delete payload.franchiseeEmail; delete payload.lifecycleStatus; delete payload.currentCustomer;
+      const updated = await call(`/admin/vehicles/${editVeh._id}`, {method:'put', data:payload});
+      setVehicles(prev=>prev.map(v=>String(v._id)===String(updated._id)?updated:v));
+      setSelectedVeh(updated); setEditVeh(null); show('✓ Vehicle details updated across the shared vehicle record.');
+    } catch(e) { show(e.response?.data?.message||'Vehicle update failed','error'); }
+    finally { setSavingEditVeh(false); }
   };
 
   const savePart = async () => {
@@ -2793,11 +2935,25 @@ function AdminVehicleInventory({ call }) {
             )}
           </div>
           <div className="modal-footer">
+            <button className="btn-ghost" onClick={() => setEditVeh({...selectedVeh})}>✎ Edit Details</button>
             <button className="btn-ghost" onClick={() => setSelectedVeh(null)}>Close</button>
             <button className="btn-primary" onClick={() => { setSelectedVeh(null); setAssignVeh(selectedVeh); setAssignToId(selectedVeh.franchiseeId ? String(selectedVeh.franchiseeId) : ''); }}>
               → {selectedVeh.franchiseeId ? 'Reassign to Fleet Operator' : 'Assign to Fleet Operator'}
             </button>
           </div>
+        </div>
+      </div>
+    )}
+
+    {editVeh && (
+      <div className="modal-overlay" onClick={()=>!savingEditVeh&&setEditVeh(null)}>
+        <div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(720px,100%)'}}>
+          <div className="modal-head"><div><div className="modal-title">Edit Vehicle Details</div><div className="modal-subtitle">Changes are saved to the shared Command Vehicle record used by other portals.</div></div><button className="icon-btn" onClick={()=>setEditVeh(null)} disabled={savingEditVeh}><X size={20}/></button></div>
+          <div className="modal-body"><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            {['make','model','category','year','color','registrationNo','chassisNo','motorNo','insuranceExpiry','odometerKm','seatingCapacity','topSpeedKph','batteryCapacityKwh','rangeKm','chargingType','pricePerDay','quantity'].map(k=><label key={k} className="fld"><span className="fld-label">{k.replace(/([A-Z])/g,' $1')}</span><input className="fld-input" type={['year','odometerKm','seatingCapacity','topSpeedKph','batteryCapacityKwh','rangeKm','pricePerDay','quantity'].includes(k)?'number':k==='insuranceExpiry'?'date':'text'} value={editVeh[k]??''} onChange={e=>setEditVeh(v=>({...v,[k]:e.target.value}))}/></label>)}
+            <label className="fld" style={{gridColumn:'1/-1'}}><span className="fld-label">Description</span><textarea className="fld-input" rows={4} value={editVeh.description||''} onChange={e=>setEditVeh(v=>({...v,description:e.target.value}))}/></label>
+          </div></div>
+          <div className="modal-footer"><button className="btn-ghost" onClick={()=>setEditVeh(null)} disabled={savingEditVeh}>Cancel</button><button className="btn-primary" onClick={saveEditedVehicle} disabled={savingEditVeh}><Save size={14}/>{savingEditVeh?'Saving…':'Save Vehicle Details'}</button></div>
         </div>
       </div>
     )}
@@ -4385,21 +4541,12 @@ function AdminComplaintCenter({ call }) {
   if (loading) return <Loader />;
   if (error) return <Err msg={error} />;
 
-  const stats = [
-    { label:'Total', value: complaints.length, color:'#2563eb', Icon: Bell },
-    { label:'Open', value: complaints.filter(c=>c.status==='OPEN').length, color:'#d97706', Icon: AlertTriangle },
-    { label:'In Progress', value: complaints.filter(c=>['IN_PROGRESS','STAFF_COMPLETED'].includes(c.status)).length, color:'#2563eb', Icon: Activity },
-    { label:'Paused', value: complaints.filter(c=>c.status==='PAUSED').length, color:'#7c3aed', Icon: Clock },
-    { label:'Resolved', value: complaints.filter(c=>['SOLVED','CLOSED'].includes(c.status)).length, color:'#16a34a', Icon: CheckCircle },
-  ];
-
   return (
     <>
       <Toast toast={toast} />
       <PageHeader title="Complaint Center" sub="End-to-end complaint lifecycle — from customer to resolution and review." />
 
       {/* Metrics */}
-      <MetricGrid metrics={stats} />
 
       {/* Filter Tabs */}
       <div style={{ display:'flex', gap:0, marginBottom:20, borderBottom:'2px solid #f1f5f9', flexWrap:'wrap' }}>
@@ -4528,7 +4675,7 @@ function AdminComplaintCenter({ call }) {
                   👤 {selected.customerId?.name||'Customer'} &nbsp;·&nbsp;
                   🚗 {selected.vehicleSnapshot?.make||''} {selected.vehicleSnapshot?.model||''} · {selected.vehicleSnapshot?.registrationNo||'—'} &nbsp;·&nbsp;
                   📅 {daysSince(selected.createdAt)} days open
-                  {selected.assignedStaffName && <span> &nbsp;·&nbsp; 🔧 {selected.assignedStaffName}</span>}
+                  {(selected.assignedStaffName || selected.maintenanceId?.commandAssignedTo?.name) && <span> &nbsp;·&nbsp; 🔧 {selected.assignedStaffName || selected.maintenanceId?.commandAssignedTo?.name}</span>}
                 </div>
               </div>
               <button className="icon-btn" onClick={() => setSelected(null)}>✕</button>
@@ -4538,7 +4685,6 @@ function AdminComplaintCenter({ call }) {
             <div style={{ display:'flex', gap:4, padding:'12px 20px 0', borderBottom:'1px solid #f1f5f9', background:'#fff', flexShrink:0, flexWrap:'wrap' }}>
               {[
                 ['details','📋 Details'],
-                ['timeline','📍 Timeline'],
                 ['workflow','⚙️ Workflow'],
                 ['history','🔧 History'],
               ].map(([key, label]) => (
@@ -4576,8 +4722,8 @@ function AdminComplaintCenter({ call }) {
                       ['Registration', selected.vehicleSnapshot?.registrationNo || '—'],
                       ['Customer', selected.customerId?.name || '—'],
                       ['Phone', selected.customerId?.phone || '—'],
-                      ['Assigned Staff', selected.assignedStaffName || 'Not assigned'],
-                      ['Fleet Operator', selected.fleetOperatorName || '—'],
+                      ['Assigned Staff', selected.assignedStaffName || selected.maintenanceId?.commandAssignedTo?.name || 'Not assigned'],
+                      ['Fleet Operator', selected.fleetOperatorName || selected.vehicleSnapshot?.fleetOperatorName || selected.maintenanceId?.franchiseeId?.name || '—'],
                     ].map(([k,v]) => (
                       <div key={k} style={{ background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
                         <div style={{ color:'#64748b', marginBottom:2 }}>{k}</div>
@@ -4604,73 +4750,10 @@ function AdminComplaintCenter({ call }) {
                 </div>
               )}
 
-              {/* ── TIMELINE TAB ── */}
-              {modalTab === 'timeline' && (
-                <div>
-                  <div style={{ fontWeight:700, fontSize:14, marginBottom:16, color:'#374151' }}>📍 Complaint Timeline</div>
-                  <div style={{ position:'relative' }}>
-                    <div style={{ position:'absolute', left:19, top:0, bottom:0, width:2, background:'#e2e8f0' }} />
-                    {[
-                      { label:'Complaint Registered', time: selected.createdAt, color:'#d97706', icon:'📩', note: `By ${selected.customerId?.name||'Customer'}` },
-                      { label:'Sent to Fleet Operator', time: selected.createdAt, color:'#d97706', icon:'📤', note: `Fleet: ${selected.fleetOperatorName||'—'}` },
-                      { label:'Received by Command Center', time: selected.createdAt, color:'#2563eb', icon:'🏢', note:'Auto-escalated to Command Center' },
-                      selected.handoverDate && { label:'Vehicle Handover Date', time: selected.handoverDate, color:'#0891b2', icon:'🤝', note:`${daysSince(selected.handoverDate)} days ago` },
-                      selected.assignedAt && { label:'Staff Assigned', time: selected.assignedAt, color:'#7c3aed', icon:'👷', note: `Assigned to ${selected.assignedStaffName||'Staff'}` },
-                      selected.startedAt && { label:'Work Started', time: selected.startedAt, color:'#2563eb', icon:'▶', note:'Technician started working' },
-                      selected.pausedAt && { label:'Work Paused', time: selected.pausedAt, color:'#d97706', icon:'⏸', note: selected.pauseReason||'Paused' },
-                      selected.resumedAt && { label:'Work Resumed', time: selected.resumedAt, color:'#2563eb', icon:'▶', note:'Work resumed after pause' },
-                      selected.solvedAt && { label:'Marked Resolved', time: selected.solvedAt, color:'#16a34a', icon:'✅', note: selected.resolution||'Resolved by Command Center' },
-                      selected.closedAt && { label:'Customer Reviewed', time: selected.closedAt, color:'#16a34a', icon:'⭐', note: `Rating: ${selected.franchiseeRating||'—'}/5` },
-                    ].filter(Boolean).map((event, i) => (
-                      <div key={i} style={{ display:'flex', gap:14, marginBottom:18, position:'relative' }}>
-                        <div style={{
-                          width:40, height:40, borderRadius:'50%', background: event.color+'18',
-                          border:`2px solid ${event.color}`, display:'flex', alignItems:'center', justifyContent:'center',
-                          fontSize:16, flexShrink:0, zIndex:1, background:'#fff',
-                        }}>{event.icon}</div>
-                        <div style={{ paddingTop:8 }}>
-                          <div style={{ fontWeight:700, fontSize:13, color:'#111827' }}>{event.label}</div>
-                          <div style={{ fontSize:11, color:'#64748b', marginTop:2 }}>{fmtDt(event.time)}</div>
-                          {event.note && <div style={{ fontSize:12, color:'#374151', marginTop:2 }}>{event.note}</div>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
               {/* ── WORKFLOW TAB ── */}
               {modalTab === 'workflow' && (
                 <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
                   <div style={{ fontWeight:700, fontSize:14, color:'#374151' }}>⚙️ Manage Complaint Workflow</div>
-
-                  {/* Step 1: Assign Staff */}
-                  <div style={{ border:'1.5px solid #ddd6fe', borderRadius:12, padding:16, background: selected.assignedStaffName ? '#f5f3ff' : '#fff' }}>
-                    <div style={{ fontWeight:700, fontSize:13, color:'#5b21b6', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ width:22, height:22, borderRadius:'50%', background:'#7c3aed', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>1</span>
-                      Assign Staff Member
-                    </div>
-                    {selected.assignedStaffName && (
-                      <div style={{ marginBottom:10, fontSize:12, color:'#166534', background:'#f0fdf4', padding:'6px 10px', borderRadius:8 }}>
-                        ✅ Currently assigned to: <b>{selected.assignedStaffName}</b>
-                      </div>
-                    )}
-                    <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-                      <select value={assignStaffId} onChange={e => setAssignStaffId(e.target.value)}
-                        style={{ flex:1, minWidth:180, padding:'8px 10px', border:'1.5px solid #ddd6fe', borderRadius:8, fontSize:13 }}>
-                        <option value="">Select staff member…</option>
-                        {(staffList||[]).map(s => (
-                          <option key={s._id} value={s._id}>{s.name} · {s.role}</option>
-                        ))}
-                      </select>
-                      <button onClick={handleAssign} disabled={busy || !assignStaffId}
-                        style={{ background:'#7c3aed', color:'#fff', border:'none', borderRadius:8,
-                          padding:'9px 18px', cursor:'pointer', fontWeight:700, fontSize:13,
-                          opacity: busy||!assignStaffId ? 0.6 : 1 }}>
-                        {busy ? 'Assigning…' : '👷 Assign'}
-                      </button>
-                    </div>
-                  </div>
 
                   {!selected.chatClosed && <div style={{border:'1.5px solid #cbd5e1',borderRadius:12,padding:16,background:'#fff'}}>
                     <div style={{fontWeight:700,fontSize:13,color:'#334155',marginBottom:8}}>💬 Command Center Chat</div>
@@ -4678,10 +4761,10 @@ function AdminComplaintCenter({ call }) {
                     <div style={{display:'flex',gap:8}}><input value={chatDraft} onChange={e=>setChatDraft(e.target.value)} placeholder="Reply to customer…" style={{flex:1,padding:'9px 11px',border:'1px solid #cbd5e1',borderRadius:8}}/><button className="btn-primary" onClick={handleChatReply} disabled={busy||!chatDraft.trim()}>Send</button></div>
                   </div>}
 
-                  {/* Step 2: Service center handoff */}
+                  {/* Step 1: Service center handoff */}
                   {!selected.chatClosed && (
                     <div style={{border:'1.5px solid #bfdbfe',borderRadius:12,padding:16,background:'#fff'}}>
-                      <div style={{fontWeight:700,fontSize:13,color:'#1d4ed8',marginBottom:8}}>2 · Send Service Center Location</div>
+                      <div style={{fontWeight:700,fontSize:13,color:'#1d4ed8',marginBottom:8}}>1 · Send Service Center Location</div>
                       <div style={{fontSize:12,color:'#64748b',marginBottom:10}}>This closes the customer chat. After this point the customer can only view progress.</div>
                       <button onClick={handleServiceCenter} disabled={busy} style={{background:'#2563eb',color:'#fff',border:'none',borderRadius:8,padding:'9px 18px',cursor:'pointer',fontWeight:700,fontSize:13}}>{busy?'Sending…':'📍 Send Service Center Location'}</button>
                     </div>
@@ -4695,25 +4778,11 @@ function AdminComplaintCenter({ call }) {
                     </div>
                   )}
 
-                  {/* Step 3: Assign staff — staff owns Start / Pause / Resume / Complete */}
-                  <div style={{border:'1.5px solid #ddd6fe',borderRadius:12,padding:16,background:selected.assignedStaffName?'#f5f3ff':'#fff'}}>
-                    <div style={{fontWeight:700,fontSize:13,color:'#5b21b6',marginBottom:8}}>3 · Assign Service Staff</div>
-                    {selected.assignedStaffName&&<div style={{fontSize:12,color:'#166534',background:'#f0fdf4',padding:'6px 10px',borderRadius:8,marginBottom:10}}>👷 <b>{selected.assignedStaffName}</b> is assigned. Staff controls Start, Pause/Resume and Complete.</div>}
-                    <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
-                      <select value={assignStaffId} onChange={e=>setAssignStaffId(e.target.value)} disabled={!selected.chatClosed||!!selected.assignedStaffName} style={{flex:1,minWidth:180,padding:'8px 10px',border:'1.5px solid #ddd6fe',borderRadius:8,fontSize:13}}>
-                        <option value="">Select staff member…</option>{(staffList||[]).map(st=><option key={st._id} value={st._id}>{st.name} · {st.role}</option>)}
-                      </select>
-                      <button onClick={handleAssign} disabled={busy||!assignStaffId||!selected.chatClosed||!!selected.assignedStaffName} style={{background:'#7c3aed',color:'#fff',border:'none',borderRadius:8,padding:'9px 18px',cursor:'pointer',fontWeight:700,fontSize:13,opacity:(busy||!assignStaffId||!selected.chatClosed||!!selected.assignedStaffName)?0.6:1}}>👷 Assign Staff</button>
-                    </div>
-                    {selected.maintenanceId?.staffStatus&&<div style={{marginTop:10,fontSize:12,color:'#475569'}}>Current staff progress: <b>{String(selected.maintenanceId.staffStatus).replaceAll('_',' ')}</b></div>}
-                    {selected.proof&&<div style={{marginTop:10,fontSize:12,color:'#166534',background:'#f0fdf4',padding:8,borderRadius:8}}>✅ Staff completion proof is available. Command Center can resolve only after staff completion + proof.</div>}
-                  </div>
-
-                  {/* Step 4: Mark Resolved */}
+                  {/* Step 2: Mark Resolved */}
                   {!['SOLVED','CLOSED'].includes(selected.status) && (
                     <div style={{ border:'1.5px solid #bbf7d0', borderRadius:12, padding:16 }}>
                       <div style={{ fontWeight:700, fontSize:13, color:'#166534', marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ width:22, height:22, borderRadius:'50%', background:'#16a34a', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>4</span>
+                        <span style={{ width:22, height:22, borderRadius:'50%', background:'#16a34a', color:'#fff', display:'inline-flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:800 }}>2</span>
                         Mark Resolved & Request Customer Review
                       </div>
                       <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -4797,7 +4866,7 @@ function AdminComplaintCenter({ call }) {
                         {j.solution&&<span style={{gridColumn:'1/-1',color:'#166534',fontWeight:600}}>🛠️ Solution: {j.solution}</span>}
                       </div>
                       {pauses.length>0&&<div style={{marginTop:9,padding:9,borderRadius:8,background:'#fffbeb',border:'1px solid #fde68a'}}><b style={{color:'#92400e'}}>Pause details</b>{pauses.map((pa,pi)=><div key={pi} style={{marginTop:5,color:'#78350f'}}>#{pi+1} · {fmtDt(pa.pausedAt)} → {pa.resumedAt?fmtDt(pa.resumedAt):'Still paused'} · {pa.durationSeconds!=null?`${Math.floor(pa.durationSeconds/60)} min`: '—'} · {pa.reason||'No reason recorded'}</div>)}</div>}
-                      {j.jobCard&&<div style={{marginTop:10,display:'flex',justifyContent:'flex-end'}}><button type="button" className="btn-primary btn-sm" onClick={()=>setViewCard({...j,jobCard:j.jobCard,customerId:selected.customerId,commandVehicleId:selected.vehicleSnapshot,technicianId:{name:selected.assignedStaffName||'Staff'}})}><Eye size={13}/> View Complete Job Card</button></div>}
+                      {j.jobCard&&<div style={{marginTop:10,display:'flex',justifyContent:'flex-end'}}><button type="button" className="btn-primary btn-sm" onClick={()=>setViewCard({...j,jobCard:j.jobCard,customerId:selected.customerId,commandVehicleId:selected.vehicleSnapshot,technicianId:selected.maintenanceId?.commandAssignedTo||{name:selected.assignedStaffName||'Staff'}})}><Eye size={13}/> View Complete Job Card</button></div>}
                     </div>})}
                   </div>}
                 </div>
@@ -4821,118 +4890,34 @@ function AdminComplaintCenter({ call }) {
 // ══════════════════════════════════════════════════════════════════
 function AdminStaffManagement({ call }) {
   const { data: apiStaff, loading, error, refresh } = useFetch(call, '/platform/all-staff');
-  const { data: pendingStaff, loading: psLoading } = useFetch(call, '/platform/pending-staff');
-  const [tab, setTab] = useState('active');
-  const [imageModal, setImageModal] = useState(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [generatedPassword, setGeneratedPassword] = useState(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [search, setSearch] = useState('');
   const { toast, show } = useToast();
-
-  const allPending    = pendingStaff || [];
-  const activeStaff   = allPending.filter(s => !s.removedFromFranchisee && s.status === 'APPROVED');
-  const removedStaff  = allPending.filter(s => s.removedFromFranchisee);
-  const pendingList   = allPending.filter(s => s.status === 'PENDING_APPROVAL' && !s.removedFromFranchisee);
-
-  const handleApprove = async (staffId, name) => {
-    if (!window.confirm(`Approve ${name}?`)) return;
-    try {
-      await call(`/platform/pending-staff/${staffId}/approve`, { method: 'put' });
-      show(`${name} approved successfully.`);
-      refresh();
-    } catch(e) { show(e.response?.data?.message || 'Approval failed','error'); }
-  };
-
-  if (loading || psLoading) return <Loader />;
-  if (error) return <Err msg={error} />;
-
-  const TABS = [
-    { id:'active',  label:'Active Staff',     count: activeStaff.length,  Icon: UserCheck },
-    { id:'pending', label:'Pending Approval', count: pendingList.length,  Icon: Clock },
-    { id:'removed', label:'Removed Staff',    count: removedStaff.length, Icon: UserX },
-  ];
-
-  return (
-    <>
-      <Toast toast={toast} />
-      {imageModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.85)', zIndex:9999, display:'flex', alignItems:'center', justifyContent:'center' }}
-          onClick={() => setImageModal(null)}>
-          <img src={imageModal.url} alt={imageModal.title}
-            style={{ maxWidth:'88vw', maxHeight:'85vh', borderRadius:8, objectFit:'contain' }} />
-        </div>
-      )}
-      <PageHeader title="Staff Management" sub="Manage all staff across fleet operators. Approve new staff, view removals, and monitor the directory." />
-      <MetricGrid metrics={[
-        { label:'Active Staff',     value: activeStaff.length,  Icon: UserCheck, color:'#16a34a' },
-        { label:'Pending Approval', value: pendingList.length,  Icon: Clock,     color:'#d97706' },
-        { label:'Removed Staff',    value: removedStaff.length, Icon: UserX,     color:'#dc2626' },
-        { label:'Total (all time)', value: allPending.length,   Icon: Users,     color:'#2563eb' },
-      ]} />
-
-      {pendingList.length > 0 && (
-        <InfoBanner Icon={Clock}>
-          {pendingList.length} staff entry(s) awaiting approval.
-        </InfoBanner>
-      )}
-
-      {/* Tab bar */}
-      <div style={{ display:'flex', gap:8, marginBottom:16, borderBottom:'2px solid #e5e7eb', paddingBottom:0 }}>
-        {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            display:'flex', alignItems:'center', gap:6, padding:'8px 18px',
-            border:'none', background:'none', cursor:'pointer',
-            borderBottom: tab===t.id ? '2px solid #2563eb' : '2px solid transparent',
-            color: tab===t.id ? '#2563eb' : '#6b7280',
-            fontWeight: tab===t.id ? 700 : 500, fontSize:14, marginBottom:'-2px',
-          }}>
-            <t.Icon size={15} />
-            {t.label}
-            <span style={{
-              background: tab===t.id ? '#2563eb' : '#e5e7eb',
-              color: tab===t.id ? '#fff' : '#374151',
-              borderRadius:99, padding:'1px 8px', fontSize:11, fontWeight:700,
-            }}>{t.count}</span>
-          </button>
-        ))}
-      </div>
-
-      {tab === 'active' && (
-        <Card title="Active Staff Directory" badge={`${activeStaff.length} active`}>
-          {!activeStaff.length
-            ? <div className="empty-state"><UserCheck size={36} style={{ opacity:.2 }} /><p>No active staff yet.</p></div>
-            : <AdminStaffFullTable rows={activeStaff} setImageModal={setImageModal} showFranchisee />
-          }
-        </Card>
-      )}
-      {tab === 'pending' && (
-        <Card title="Pending Approval" badge={`${pendingList.length} pending`}>
-          {!pendingList.length
-            ? <div className="empty-state"><Clock size={36} style={{ opacity:.2 }} /><p>No pending approvals.</p></div>
-            : <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                {pendingList.map(s => (
-                  <div key={s._id} style={{ border:'1px solid #fde68a', background:'#fffbeb', borderRadius:10, padding:14, display:'flex', justifyContent:'space-between', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-                    <div>
-                      <div style={{ fontWeight:700, fontSize:14 }}>{s.name}</div>
-                      <div style={{ fontSize:12, color:'#64748b' }}>{s.role} · {s.phone} · {s.franchiseeId?.name||'Unknown Fleet'}</div>
-                    </div>
-                    <button onClick={() => handleApprove(s._id, s.name)}
-                      style={{ background:'#16a34a', color:'#fff', border:'none', borderRadius:8, padding:'7px 16px', cursor:'pointer', fontWeight:700, fontSize:12 }}>
-                      ✅ Approve
-                    </button>
-                  </div>
-                ))}
-              </div>
-          }
-        </Card>
-      )}
-      {tab === 'removed' && (
-        <Card title="Removed Staff" badge={`${removedStaff.length}`}>
-          {!removedStaff.length
-            ? <div className="empty-state"><UserX size={36} style={{ opacity:.2 }} /><p>No removed staff.</p></div>
-            : <AdminStaffFullTable rows={removedStaff} setImageModal={setImageModal} showFranchisee showRemovedBadge />
-          }
-        </Card>
-      )}
-    </>
-  );
+  const empty = {name:'',email:'',phone:'',aadharNumber:'',panNumber:'',profileImage:'',role:'STAFF',joiningDate:''};
+  const [form,setForm]=useState(empty);
+  const staff=Array.isArray(apiStaff)?apiStaff:[];
+  const filtered=staff.filter(s=>{const q=search.toLowerCase();return !q||[s.name,s.email,s.phone,s.role,s.aadharNumber,s.panNumber].filter(Boolean).join(' ').toLowerCase().includes(q)});
+  const sendOtp=async()=>{if(!form.email){show('Enter email first','error');return;}try{await call('/admin/staff-otp/send',{method:'post',data:{email:form.email}});setOtpSent(true);show('OTP sent to the staff email.');}catch(e){show(e.response?.data?.message||'Could not send OTP','error')}};
+  const verifyOtp=async()=>{try{await call('/admin/staff-otp/verify',{method:'post',data:{email:form.email,otp}});setEmailVerified(true);show('Email verified successfully.');}catch(e){show(e.response?.data?.message||'Invalid OTP','error')}};
+  const uploadPhoto=async(file)=>{if(!file)return;setPhotoUploading(true);try{const fd=new FormData();fd.append('files',file);const r=await call('/uploads',{method:'post',data:fd});const f=r?.files?.[0];if(!f)throw new Error('Upload failed');setForm(x=>({...x,profileImage:f.url}));show('Photo uploaded.');}catch(e){show(e.response?.data?.message||e.message||'Photo upload failed','error')}finally{setPhotoUploading(false)}};
+  const submit=async e=>{e.preventDefault();if(!emailVerified){show('Verify the email with OTP before submitting.','error');return;}setSaving(true);try{const r=await call('/admin/staff',{method:'post',data:form});setGeneratedPassword(r.generatedPassword);setForm(empty);setOtp('');setOtpSent(false);setEmailVerified(false);refresh();show('✓ Staff member created successfully.');}catch(e){show(e.response?.data?.message||'Could not create staff member','error')}finally{setSaving(false)}};
+  if(loading)return <Loader/>; if(error)return <Err msg={error}/>;
+  return <>
+    <Toast toast={toast}/>
+    <PageHeader title="Staff Management" sub="Create and manage staff accounts with verified email, identity details, role and profile photo." actions={<button className="btn-primary" onClick={()=>{setShowAdd(true);setGeneratedPassword(null)}}><UserPlus size={15}/> Add Staff Member</button>}/>
+    <MetricGrid metrics={[{label:'Total Staff',value:staff.length,Icon:Users,color:'#2563eb'},{label:'Active',value:staff.filter(s=>s.active!==false).length,Icon:UserCheck,color:'#16a34a'},{label:'Technicians',value:staff.filter(s=>s.role==='TECHNICIAN').length,Icon:Wrench,color:'#7c3aed'},{label:'Hub Managers',value:staff.filter(s=>s.role==='HUB_MANAGER').length,Icon:Factory,color:'#d97706'}]}/>
+    <Card title="All Staff Members" badge={`${filtered.length} / ${staff.length}`} action={<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search staff…" style={{padding:'8px 10px',border:'1px solid #dbe3ef',borderRadius:9}}/>}>
+      {!filtered.length?<div className="empty-state"><Users size={38}/><p>No staff members found.</p></div>:<div className="table-scroll"><table><thead><tr><th>Photo</th><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Aadhaar</th><th>PAN</th><th>Email Status</th><th>Joined</th><th>Status</th></tr></thead><tbody>{filtered.map(s=><tr key={s._id}><td>{s.profileImage?<img src={s.profileImage} alt={s.name} style={{width:38,height:38,borderRadius:'50%',objectFit:'cover'}}/>:<div className="avatar" style={{width:38,height:38}}>{s.name?.[0]||'?'}</div>}</td><td><strong>{s.name}</strong></td><td>{s.email||'—'}</td><td>{s.phone||'—'}</td><td><span className="status-pill">{s.role}</span></td><td>{s.aadharNumber||'—'}</td><td>{s.panNumber||'—'}</td><td>{s.otpVerified?'✓ Verified':'—'}</td><td>{s.joiningDate?new Date(s.joiningDate).toLocaleDateString('en-IN'):'—'}</td><td><span className="status-pill" style={{background:s.active!==false?'#dcfce7':'#fee2e2',color:s.active!==false?'#166534':'#991b1b'}}>{s.active!==false?'ACTIVE':'INACTIVE'}</span></td></tr>)}</tbody></table></div>}
+    </Card>
+    {showAdd&&<div className="modal-overlay" onClick={()=>!saving&&setShowAdd(false)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(720px,100%)'}}><div className="modal-head"><div><div className="modal-title">Add Staff Member</div><div className="modal-subtitle">Verify the email by OTP, then create the staff account.</div></div><button className="icon-btn" onClick={()=>setShowAdd(false)} disabled={saving}><X size={20}/></button></div><form onSubmit={submit}><div className="modal-body"><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}><label className="fld"><span className="fld-label">Name *</span><input className="fld-input" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label className="fld"><span className="fld-label">Phone *</span><input className="fld-input" required value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})}/></label><div className="fld" style={{gridColumn:'1/-1'}}><span className="fld-label">Email *</span><div style={{display:'flex',gap:8}}><input className="fld-input" required type="email" value={form.email} onChange={e=>{setForm({...form,email:e.target.value});setEmailVerified(false)}}/><button type="button" className="btn-ghost" onClick={sendOtp} disabled={!form.email}>Send OTP</button></div>{otpSent&&!emailVerified&&<div style={{display:'flex',gap:8,marginTop:8}}><input className="fld-input" placeholder="6-digit OTP" value={otp} onChange={e=>setOtp(e.target.value)}/><button type="button" className="btn-primary" onClick={verifyOtp}>Verify</button></div>}{emailVerified&&<div style={{color:'#166534',fontSize:12,fontWeight:700,marginTop:6}}>✓ Email verified</div>}</div><label className="fld"><span className="fld-label">Aadhaar Number *</span><input className="fld-input" required value={form.aadharNumber} onChange={e=>setForm({...form,aadharNumber:e.target.value})}/></label><label className="fld"><span className="fld-label">PAN Number *</span><input className="fld-input" required value={form.panNumber} onChange={e=>setForm({...form,panNumber:e.target.value.toUpperCase()})}/></label><label className="fld"><span className="fld-label">Role *</span><select className="fld-input" value={form.role} onChange={e=>setForm({...form,role:e.target.value})}><option>STAFF</option><option>TECHNICIAN</option><option>HUB_MANAGER</option></select></label><label className="fld"><span className="fld-label">Joining Date</span><input className="fld-input" type="date" value={form.joiningDate} onChange={e=>setForm({...form,joiningDate:e.target.value})}/></label><div className="fld" style={{gridColumn:'1/-1'}}><span className="fld-label">Profile Photo</span><div style={{display:'flex',alignItems:'center',gap:12}}>{form.profileImage&&<img src={form.profileImage} alt="Profile" style={{width:60,height:60,borderRadius:'50%',objectFit:'cover'}}/>}<label className="btn-ghost" style={{cursor:'pointer'}}><UploadCloud size={14}/> {photoUploading?'Uploading…':'Upload Photo'}<input type="file" accept="image/*" hidden disabled={photoUploading} onChange={e=>uploadPhoto(e.target.files?.[0])}/></label></div></div></div></div><div className="modal-footer"><button type="button" className="btn-ghost" onClick={()=>setShowAdd(false)}>Cancel</button><button className="btn-primary" disabled={saving||photoUploading||!emailVerified}>{saving?'Creating…':'Create Staff & Generate Password'}</button></div></form></div></div>}
+    {generatedPassword&&<div className="modal-overlay"><div className="modal-drawer" style={{width:'min(520px,100%)'}}><div className="modal-head"><div><div className="modal-title">Staff Account Created</div><div className="modal-subtitle">Give this temporary password to the staff member. They can change it or use Forgot Password later.</div></div></div><div className="modal-body"><div style={{padding:18,borderRadius:14,background:'#eff6ff',border:'1px solid #bfdbfe',textAlign:'center'}}><div style={{fontSize:11,color:'#1d4ed8',fontWeight:800,textTransform:'uppercase'}}>Generated Password</div><div style={{fontSize:25,fontWeight:900,fontFamily:'monospace',marginTop:8,letterSpacing:1}}>{generatedPassword}</div></div><p style={{fontSize:12,color:'#64748b',marginTop:14}}>This password is shown only now. The staff member should sign in and change it.</p></div><div className="modal-footer"><button className="btn-primary" onClick={()=>{setGeneratedPassword(null);setShowAdd(false)}}>Done</button></div></div></div>}
+  </>;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -4996,6 +4981,16 @@ function CommandJobCardViewer({ job, onClose }) {
           <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Completion</div><ObjectFields obj={{Customer_Approval:card.customerApproval,QC_Approved:card.qcApproved,Submitted_At:fmt(card.submittedAt),Completed_At:fmt(card.completedAt),Customer_Signature_At:fmt(card.customerSignatureAt)}}/>{card.customerSignature&&<div style={{marginTop:10}}><div style={{fontSize:10,color:'#64748b',fontWeight:700,textTransform:'uppercase'}}>Customer Signature</div><img src={card.customerSignature} alt="Customer signature" style={{marginTop:6,maxWidth:300,maxHeight:110,objectFit:'contain',background:'#fff',border:'1px solid #e2e8f0',borderRadius:8,padding:6}}/></div>}</section>
           {parts.length>0&&<section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:8}}>Parts Used</div>{parts.map((p,i)=><div key={i} style={{padding:'7px 0',borderTop:i?'1px solid #f1f5f9':'none',fontSize:12}}>{p.partId?.name||p.partName||p.name||`Part ${i+1}`} × {p.qty||0} · ₹{(Number(p.unitPrice||0)*Number(p.qty||0)).toLocaleString('en-IN')}</div>)}</section>}
           {(card.photos||[]).length>0&&<section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:8}}>Job Photos</div><div style={{display:'flex',gap:10,flexWrap:'wrap'}}>{card.photos.map((src,i)=><img key={i} src={src} alt={`Job proof ${i+1}`} style={{width:110,height:90,objectFit:'cover',borderRadius:9,border:'1px solid #e2e8f0'}} />)}</div></section>}
+          {(card.beforeAfter||[]).length>0&&<section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:8}}>Before / After</div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:10}}>{card.beforeAfter.map((x,i)=><div key={i} style={{border:'1px solid #e2e8f0',borderRadius:10,padding:10}}><div style={{fontSize:11,fontWeight:800,color:'#64748b',marginBottom:7}}>Record {i+1}</div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>{x.before&&<img src={x.before} alt={`Before ${i+1}`} style={{width:'100%',height:150,objectFit:'cover',borderRadius:8,border:'1px solid #e2e8f0'}}/>}{x.after&&<img src={x.after} alt={`After ${i+1}`} style={{width:'100%',height:150,objectFit:'cover',borderRadius:8,border:'1px solid #e2e8f0'}}/>}</div></div>)}</div></section>}
+          <section style={{padding:14,border:'1px solid #e2e8f0',borderRadius:14}}><div style={{fontWeight:850,fontSize:13,marginBottom:9}}>Complete Work Record</div><ObjectFields obj={{
+            Service_Type:job.serviceType, Priority:job.priority, Tracking_Status:job.trackingStatus, Root_Cause:job.rootCause,
+            Test_Result:job.testResult, Final_Condition:job.finalCondition, Recommendations:job.recommendations,
+            Parts_Replaced:job.partsReplaced, Labour_Hours:job.labourHours, Odometer_Reading:job.odometerReading,
+            Battery_Percent:job.batteryPercent, Labour_Amount:job.labourAmount, Total_Amount:job.totalAmount,
+            Completion_Notes:job.completionNotes, Staff_Completion_Summary:job.staffCompletionSummary,
+            Created_At:fmt(job.createdAt), Started_At:fmt(job.startedAt||job.staffStartedAt),
+            Paused_At:fmt(job.pausedAt||job.staffPausedAt), Completed_At:fmt(job.completedAt||job.staffCompletedAt),
+          }}/></section>
         </div>
       </div><div className="modal-footer"><button className="btn-ghost" onClick={onClose}>Close</button></div>
     </div>
@@ -5438,17 +5433,17 @@ function AdminStaffCommunications({call}) {
 function AdminStaffSupport({call}) { const {data,loading,refresh}=useFetch(call,'/platform/support-tickets'); const [reply,setReply]=useState({}); const update=async(id,status)=>{try{await call(`/platform/support-tickets/${id}`,{method:'put',data:{status,message:reply[id]||''}});setReply(r=>({...r,[id]:''}));refresh()}catch(e){alert(e.response?.data?.message||e.message)}}; return <><PageHeader title="Staff Support" sub="Manage staff requests and continue the conversation."/><div className="feature-stack">{loading?<Loader/>:!(data||[]).length?<div className="empty-state"><MessageSquare size={40}/><p>No staff support tickets.</p></div>:(data||[]).map(t=><div className="card support-admin-card" key={t._id}><div className="card-head"><div><div className="card-title">#{t.ticketNo} · {t.subject}</div><div className="page-sub">{t.userId?.name||'Staff'} · {t.category} · {t.priority}</div></div><span className="status-pill">{t.status}</span></div><p className="support-admin-desc">{t.description}</p><div className="admin-thread">{(t.messages||[]).slice(-5).map((m,i)=><div key={i}><b>{m.senderRole}</b><span>{m.message}</span></div>)}</div><div className="admin-reply"><input placeholder="Reply to staff…" value={reply[t._id]||''} onChange={e=>setReply(r=>({...r,[t._id]:e.target.value}))}/><button onClick={()=>update(t._id,'IN_PROGRESS')}><Send size={15}/></button><button onClick={()=>update(t._id,'RESOLVED')}><CheckCircle size={15}/> Resolve</button></div></div>)}</div></>}
 
 function MaintenanceCustomerService({call}) {
-  const [rows,setRows]=useState([]),[loading,setLoading]=useState(true),[filter,setFilter]=useState('ALL'),[selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[notes,setNotes]=useState('');
+  const [rows,setRows]=useState([]),[loading,setLoading]=useState(true),[filter,setFilter]=useState('SCHEDULED'),[selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[notes,setNotes]=useState('');
   const [staff,setStaff]=useState([]),[staffId,setStaffId]=useState(''),[assigning,setAssigning]=useState(false),[detailView,setDetailView]=useState(null);
   const load=async()=>{setLoading(true);try{const [items,people]=await Promise.all([call('/platform/maintenance-customer-service'),call('/platform/all-staff')]);setRows(items||[]);setStaff((people||[]).filter(x=>x.active!==false));}catch(e){}finally{setLoading(false)}};
   useEffect(()=>{load()},[]);
   const openService=m=>{setSelected(m);setDetailView(null);setNotes(m.notes||m.completionSummary||'');setStaffId(m.commandAssignedTo?._id||m.commandAssignedTo||'');};
   const assignStaff=async()=>{if(!selected||!staffId)return;setAssigning(true);try{const m=await call(`/platform/maintenance-customer-service/${selected._id}/assign`,{method:'put',data:{staffId}});setRows(x=>x.map(r=>r._id===m._id?m:r));setSelected(m);setStaffId(m.commandAssignedTo?._id||m.commandAssignedTo||staffId);alert('Maintenance job card assigned to staff.')}catch(e){alert(e.response?.data?.message||'Could not assign staff')}finally{setAssigning(false)}};
   const update=async status=>{if(!selected)return;setBusy(true);try{const m=await call(`/platform/maintenance-customer-service/${selected._id}/status`,{method:'put',data:{status,notes,completionSummary:notes}});setRows(x=>x.map(r=>r._id===m._id?m:r));setSelected(m);if(status==='COMPLETED')alert('Service completed. Customer and fleet operator were notified.')}catch(e){alert(e.response?.data?.message||'Could not update service')}finally{setBusy(false)}};
-  const shown=filter==='ALL'?rows:rows.filter(x=>x.status===filter); const counts={ALL:rows.length,SCHEDULED:rows.filter(x=>x.status==='SCHEDULED').length,IN_PROGRESS:rows.filter(x=>x.status==='IN_PROGRESS').length,COMPLETED:rows.filter(x=>x.status==='COMPLETED').length};
-  return <div className="maintenance-command-page"><div className="page-header"><div><div className="eyebrow">SERVICE OPERATIONS</div><h1>Maintenance Customer Service</h1><p>Receive fleet maintenance registrations, assign the right staff member, monitor the job card and close the service.</p></div><button className="btn-ghost" onClick={load}>↻ Refresh</button></div>
+  const shown=rows.filter(x=>filter==='STAFF_COMPLETED' ? x.staffStatus==='COMPLETED' && x.status!=='COMPLETED' : x.status===filter); const counts={SCHEDULED:rows.filter(x=>x.status==='SCHEDULED').length,IN_PROGRESS:rows.filter(x=>x.status==='IN_PROGRESS').length,COMPLETED:rows.filter(x=>x.status==='COMPLETED').length,STAFF_COMPLETED:rows.filter(x=>x.staffStatus==='COMPLETED'&&x.status!=='COMPLETED').length};
+  return <div className="maintenance-command-page"><PageHeader title="Maintenance Customer Service" actions={<button className="btn-ghost" onClick={load}>↻ Refresh</button>} />
   <div className="maintenance-command-hero"><div><span>Live service queue</span><strong>{rows.filter(x=>!['COMPLETED','CANCELLED'].includes(x.status)).length}</strong><small>services requiring Command Center attention</small></div><div className="maintenance-command-hero-icon">🛠️</div></div>
-  <div className="maintenance-filter-row">{[['ALL','All'],['SCHEDULED','New'],['IN_PROGRESS','In Service'],['COMPLETED','Completed']].map(([k,l])=><button key={k} className={filter===k?'active':''} onClick={()=>setFilter(k)}>{l}<span>{counts[k]||0}</span></button>)}</div>
+  <div className="maintenance-filter-row">{[['SCHEDULED','New'],['IN_PROGRESS','In Service'],['STAFF_COMPLETED','Staff Completed'],['COMPLETED','Completed']].map(([k,l])=><button key={k} className={filter===k?'active':''} onClick={()=>setFilter(k)}>{l}<span>{counts[k]||0}</span></button>)}</div>
   {loading?<div className="command-empty-state">Loading maintenance services…</div>:!shown.length?<div className="command-empty-state"><div>🛠️</div><b>No maintenance requests</b><span>New fleet maintenance registrations will appear here.</span></div>:<div className="maintenance-command-grid">{shown.map(m=>{const v=m.vehicleId||{},c=m.customerId||{},f=m.franchiseeId||{};const displayStatus=m.status==='COMPLETED'?'COMPLETED':m.staffStatus==='COMPLETED'?'STAFF_COMPLETED':m.staffStatus==='PAUSED'?'PAUSED':m.status;return <article className="command-maint-card" key={m._id} onClick={()=>openService(m)}><div className="command-maint-head"><div><span>{m.priority||'NORMAL'} PRIORITY</span><h3>{m.title||m.type||'Maintenance Service'}</h3></div><b className={`command-status status-${String(displayStatus||'').toLowerCase()}`}>{String(displayStatus||'').replace('_',' ')}</b></div><div className="command-vehicle-strip">🚗 <b>{m.bikeId||v.bikeId||'Bike ID —'}</b> <span>{v.make||''} {v.model||''} · {v.registrationNo||'No registration'}</span></div><div className="command-customer"><div className="customer-avatar">{(c.name||'?')[0]}</div><div><b>{c.name||'Customer not linked'}</b><span>{c.phone||c.email||'—'}</span></div><div className="operator-chip">Fleet · {f.name||'—'}</div></div><div className="command-maint-details"><span>📅 {new Date(m.createdAt).toLocaleDateString('en-IN')}</span><span>🔧 {m.vendor||'Vendor pending'}</span><span>👨‍🔧 {m.commandAssignedTo?.name||'Staff not assigned'}</span></div>{m.customerFeedback?.rating&&<div className="command-feedback-mini">⭐ {m.customerFeedback.rating}/5 · {m.customerFeedback.comment||'Customer feedback received'}</div>}<div className="command-maint-footer"><span>{m.staffStatus==='COMPLETED'&&m.status!=='COMPLETED'?'Staff completed · Awaiting Command Center':m.commandJobId?'Job card created':'Assign staff to create job card'}</span><span>›</span></div></article>})}</div>}
   {selected&&<div className="modal-overlay" onClick={()=>{setSelected(null);setDetailView(null)}}><div className="modal-drawer maintenance-command-drawer" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="modal-title">Maintenance Service</div><div className="modal-subtitle">{selected.bikeId||selected.vehicleId?.bikeId||'Bike'} · {selected.title||selected.type}</div></div><button className="icon-btn" onClick={()=>setSelected(null)}>✕</button></div><div className="modal-body"><div className="command-detail-grid"><div><small>Bike ID</small><strong>{selected.bikeId||selected.vehicleId?.bikeId||'—'}</strong><span>{selected.vehicleId?.registrationNo||'No registration'}</span></div><div><small>Customer</small><strong>{selected.customerId?.name||'—'}</strong><span>{selected.customerId?.phone||selected.customerId?.email||'—'}</span></div><div><small>Fleet Operator</small><strong>{selected.franchiseeId?.name||'—'}</strong><span>{selected.franchiseeId?.email||'—'}</span></div><div><small>Vehicle</small><strong>{selected.vehicleId?.make} {selected.vehicleId?.model}</strong><span>{selected.vehicleId?.registrationNo||'—'}</span></div><div><small>Vendor</small><strong>{selected.vendor||'—'}</strong><span>{selected.vendorLocation||'—'}</span></div><div><small>Job Card</small><strong>{selected.commandJobId?'Created':'Not created'}</strong><span>{selected.commandAssignedTo?.name||'Staff not assigned'}</span>{selected.staffStatus&&<em style={{display:'block',marginTop:4,fontSize:11,color:'#64748b'}}>Staff: {String(selected.staffStatus).replace('_',' ')}</em>}</div></div>
   <div className="maintenance-assignment-panel"><div><b>Assign staff / create job card</b><small>Select a staff member. A connected job + job card will be created in Staff Portal automatically.</small></div><div className="maintenance-assignment-row"><select value={staffId} onChange={e=>setStaffId(e.target.value)}><option value="">Select staff member</option>{staff.map(x=><option key={x._id} value={x._id}>{x.name} · {x.role}{x.phone?` · ${x.phone}`:''}</option>)}</select><button className="btn-primary" disabled={!staffId||assigning} onClick={assignStaff}>{assigning?'Assigning…':selected.commandJobId?'Reassign Job':'Assign & Create Job Card'}</button></div>{selected.commandAssignedTo?.name&&<div className="assigned-staff-chip">👨‍🔧 Assigned to <b>{selected.commandAssignedTo.name}</b> · {selected.commandAssignedTo.role||'Staff'}</div>}</div>

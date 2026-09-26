@@ -115,7 +115,16 @@ exports.start = async (req,res) => {
     j.trackingStatus = 'Work in Progress';
     j.elapsedSeconds = Number(j.elapsedSeconds || 0);
     await j.save();
-    if(j.maintenanceId){ const m=await M.FleetMaintenance.findById(j.maintenanceId); if(m){m.status='IN_PROGRESS';m.staffStatus='IN_PROGRESS';if(!m.staffStartedAt)m.staffStartedAt=now;if(isResume)m.staffResumedAt=now;await m.save();} }
+    if(j.maintenanceId){
+      const m=await M.FleetMaintenance.findById(j.maintenanceId);
+      if(m){
+        m.status='IN_PROGRESS';m.staffStatus='IN_PROGRESS';if(!m.staffStartedAt)m.staffStartedAt=now;if(isResume)m.staffResumedAt=now;await m.save();
+        const data={maintenanceId:m._id,jobId:j._id,vehicleId:m.vehicleId,bikeId:m.bikeId,staffId:req.user._id,staffName:req.user.name||req.user.email||'Staff',startedAt:now,staffStatus:'IN_PROGRESS'};
+        if(m.customerId) await notify(m.customerId,'MAINTENANCE_PROGRESS','Staff Working','Staff is now working on your vehicle.',data);
+        if(m.franchiseeId) await notify(m.franchiseeId,'MAINTENANCE_PROGRESS','Staff Working',`Staff is working on ${m.bikeId||'the assigned vehicle'} maintenance.`,data);
+        const admins=await User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean(); for(const a of admins) await notify(a._id,'MAINTENANCE_PROGRESS','Staff Working',`Staff started work on ${m.bikeId||'a vehicle'} maintenance.`,data);
+      }
+    }
     if(j.complaintId){ const c=await M.Complaint.findById(j.complaintId); if(c){c.status='IN_PROGRESS';c.staffStatus='IN_PROGRESS';if(!c.staffStartedAt)c.staffStartedAt=now;c.staffResumedAt=isResume?now:c.staffResumedAt;await c.save(); const data={complaintId:c._id,jobId:j._id,staffStatus:'IN_PROGRESS'}; await notify(c.customerId,'COMPLAINT_PROGRESS','Staff Working','Staff is working on your vehicle.',data); await notify(c.franchiseeId,'COMPLAINT_PROGRESS','Staff Working','Staff resumed/started work on the assigned vehicle.',data); } }
     await audit(req.user._id,'UPDATE','Job',j._id,{status:j.status,startedAt:j.startedAt,elapsedSeconds:j.elapsedSeconds});
     return res.json(j);

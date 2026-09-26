@@ -501,8 +501,13 @@ exports.commandMaintenanceAssign = async (req,res) => {
     }else{
       job.technicianId=staff._id; job.status=job.status==='COMPLETED'?'COMPLETED':'ASSIGNED'; job.trackingStatus='Maintenance job assigned'; await job.save();
     }
-    m.commandAssignedTo=staff._id; m.commandJobId=job._id; await m.save();
-    await M.Notification.create({userId:staff._id,type:'MAINTENANCE_JOB_ASSIGNED',title:'New maintenance job card',message:`${m.title||m.type||'Maintenance service'} assigned for ${m.bikeId||'vehicle'}.`,data:{maintenanceId:m._id,jobId:job._id,vehicleId:m.vehicleId,bikeId:m.bikeId,priority:m.priority||'NORMAL'}});
+    m.commandAssignedTo=staff._id; m.commandJobId=job._id; m.staffStatus='PENDING'; await m.save();
+    const assignmentData={maintenanceId:m._id,jobId:job._id,vehicleId:m.vehicleId,bikeId:m.bikeId,priority:m.priority||'NORMAL',staffId:staff._id,staffName:staff.name};
+    await M.Notification.create({userId:staff._id,type:'MAINTENANCE_JOB_ASSIGNED',title:'New maintenance job card',message:`${m.title||m.type||'Maintenance service'} assigned for ${m.bikeId||'vehicle'}.`,data:assignmentData});
+    if(m.customerId) await M.Notification.create({userId:m.customerId,type:'MAINTENANCE_STAFF_ASSIGNED',title:'Staff Assigned',message:`${staff.name} has been assigned to your ${m.title||m.type||'vehicle maintenance'} service.`,data:assignmentData});
+    if(m.franchiseeId) await M.Notification.create({userId:m.franchiseeId,type:'MAINTENANCE_STAFF_ASSIGNED',title:'Staff Assigned',message:`${staff.name} has been assigned to ${m.title||m.type||'maintenance service'} for ${m.bikeId||'the vehicle'}.`,data:assignmentData});
+    const admins=await M.User.find({role:{$in:['CENTRAL_ADMIN','SUPER_ADMIN']},active:{$ne:false}}).select('_id').lean();
+    if(admins.length) await M.Notification.insertMany(admins.map(u=>({userId:u._id,type:'MAINTENANCE_STAFF_ASSIGNED',title:'Staff Assigned',message:`${staff.name} has been assigned to ${m.bikeId||'a vehicle'} maintenance.`,data:assignmentData})));
     const out=await M.FleetMaintenance.findById(m._id).populate('commandAssignedTo','name email role').populate('commandJobId');
     res.json(out);
   }catch(e){res.status(400).json({message:e.message});}
