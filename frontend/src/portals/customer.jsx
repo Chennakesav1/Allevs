@@ -1524,7 +1524,7 @@ function CustVehicles({ call, setPage }) {
                 <div className="cust-vc-header-info">
                   <div className="cust-vc-name">{vs.make} {vs.model}</div>
                   <div className="cust-vc-year">{vs.year} · {vs.color}</div>
-                  <div className="cust-vc-bike-id">🏷️ Bike ID: <strong>{p.bikeId || vs.bikeId || '—'}</strong></div>
+                  <div className="cust-vc-bike-id">🏷️ Bike ID: <strong>{p.bikeId || vs.bikeId || '—'}</strong> · Chassis / VIN: <strong>{vs.chassisNo || '—'}</strong></div>
                 </div>
                 <span className="cust-vc-owned-badge">✓ Handed Over</span>
               </div>
@@ -1568,6 +1568,7 @@ function CustVehicles({ call, setPage }) {
               <div className="cust-vc-details">
                 {[
                   ['Bike ID', p.bikeId || vs.bikeId || '—'],
+                   ['Chassis / VIN', vs.chassisNo || '—'],
                   ['Registration No.', vs.registrationNo || '—'],
                   ['Total Paid', money(p.totalAmount)],
                   ['Purchase Date', p.purchaseDate ? fmtDate(p.purchaseDate) : fmtDate(p.createdAt)],
@@ -1622,7 +1623,7 @@ function CustVehicles({ call, setPage }) {
           </div>
           <div className="cust-extension-vehicle">
             <div className="cust-extension-bike">🏍️</div>
-            <div><strong>{vs.make} {vs.model}</strong><span>Bike ID: {extendRental.bikeId || vs.bikeId || '—'} · Reg: {vs.registrationNo || '—'}</span></div>
+            <div><strong>{vs.make} {vs.model}</strong><span>Bike ID: {extendRental.bikeId || vs.bikeId || '—'} · Chassis / VIN: {vs.chassisNo || '—'} · Reg: {vs.registrationNo || '—'}</span></div>
           </div>
           <div className="cust-extension-grid">
             <div><small>CURRENT DUE DATE</small><strong>{fmtDate(extendRental.dueDate || extendRental.endDate)}</strong></div>
@@ -2484,10 +2485,21 @@ function CustAvailableVehicles({ call, setPage }) {
   // The fleet operator chooses the exact available physical bike at handover.
   const groupedVehicles = Array.from(filtered.reduce((map, v) => {
     const key = `${String(v.franchiseeId||'')}|${String(v.make||'').trim().toLowerCase()}|${String(v.model||'').trim().toLowerCase()}`;
-    if (!map.has(key)) map.set(key, { ...v, quantity: 0, physicalVehicles: [] });
+    if (!map.has(key)) {
+      map.set(key, {
+        ...v,
+        quantity: 0,
+        availableQuantity: 0,
+        reservedQuantity: 0,
+        physicalVehicles: []
+      });
+    }
     const g = map.get(key);
-    g.quantity += Math.max(0, Number(v.quantity || 1));
+    g.quantity += Math.max(0, Number(v._stockQuantity ?? v.quantity ?? 1));
+    g.availableQuantity += Math.max(0, Number(v._availableQuantity ?? v.quantity ?? 1));
+    g.reservedQuantity += Math.max(0, Number(v._reservedQuantity || 0));
     g.physicalVehicles.push(v);
+    g._availabilityStatus = g.availableQuantity > 0 ? 'AVAILABLE' : (g.reservedQuantity > 0 ? 'RESERVED' : 'UNAVAILABLE');
     return map;
   }, new Map()).values());
 
@@ -2594,7 +2606,13 @@ function CustAvailableVehicles({ call, setPage }) {
                     {v.batteryCapacityKwh && <span>⚡ {v.batteryCapacityKwh} kWh</span>}
                     {v.chargingType && <span>🔌 {v.chargingType}</span>}
                   </div>
-                  <div style={{fontSize:11,color:'#16a34a',fontWeight:700,marginBottom:6}}>✓ {Number(v.quantity || 0)} {Number(v.quantity || 0) === 1 ? 'bike' : 'bikes'} available</div>
+                  <div style={{fontSize:11,color:v._availabilityStatus==='RESERVED'?'#b45309':v.availableQuantity>0?'#16a34a':'#dc2626',fontWeight:700,marginBottom:6}}>
+                    {v._availabilityStatus==='RESERVED'
+                      ? '🔒 Reserved'
+                      : v.availableQuantity>0
+                        ? `✓ ${Number(v.availableQuantity)} ${Number(v.availableQuantity) === 1 ? 'bike' : 'bikes'} available`
+                        : '✕ Unavailable'}
+                  </div>
                   {v.rentalPlans ? (
                     <div className="vbc-rental-hidden-note">✓ Rental plans available · Select vehicle to continue</div>
                   ) : (
@@ -2646,7 +2664,13 @@ function CustAvailableVehicles({ call, setPage }) {
                 ['Charging', selected.chargingType || '—'],
                 ['Rental Availability', selected.rentalPlans ? 'Plans available after booking selection' : null],
                 ['Sale Price', !selected.rentalPlans ? `₹${(selected.pricePerDay||0).toLocaleString('en-IN')} / unit` : null],
-                ['Availability', 'Available now'],
+                ['Availability',
+                  selected._availabilityStatus === 'RESERVED'
+                    ? 'Reserved'
+                    : Number(selected.availableQuantity ?? selected.quantity ?? 0) > 0
+                      ? `${Number(selected.availableQuantity ?? selected.quantity ?? 0)} available`
+                      : 'Unavailable'
+                ],
                 ['Fleet Operator', selected.franchiseeName || 'EV CORE Fleet'],
               ].map(([k, v]) => v && (
                 <div className="kv-row" key={k}><span>{k}</span><strong>{v}</strong></div>
@@ -2659,6 +2683,10 @@ function CustAvailableVehicles({ call, setPage }) {
             {hasActiveRental ? (
               <button className="btn-primary" disabled title="Return your current vehicle before booking a new one" style={{opacity:.5,cursor:'not-allowed'}}>
                 🔒 Return vehicle first
+              </button>
+            ) : Number(selected.availableQuantity ?? selected.quantity ?? 0) <= 0 ? (
+              <button className="btn-primary" disabled style={{opacity:.55,cursor:'not-allowed'}}>
+                {selected._availabilityStatus === 'RESERVED' ? '🔒 Reserved' : '✕ Unavailable'}
               </button>
             ) : (
               <button className="btn-primary" onClick={() => setPurchaseVehicle(selected)}>{selected.rentalPlans ? '🛵 Book Rental' : '🛒 Buy Now'}</button>
@@ -3461,6 +3489,28 @@ function haversineKm([lat1, lon1], [lat2, lon2]) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function dedupeCustomerHubs(list) {
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).filter(h => {
+    const c = custGetCoords(h);
+    const coordKey = c ? `${Number(c[0]).toFixed(5)},${Number(c[1]).toFixed(5)}` : '';
+    const textKey = [h.name, h.address, h.area, h.city].filter(Boolean).join('|').trim().toLowerCase().replace(/\s+/g, ' ');
+    const key = coordKey || textKey;
+    if (!key || seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+
+async function custRoadRoute(from, to) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${from[1]},${from[0]};${to[1]},${to[0]}?overview=full&geometries=geojson`;
+    const res = await fetch(url); if (!res.ok) return null;
+    const route = (await res.json())?.routes?.[0]; if (!route) return null;
+    return { distanceKm: Number(route.distance || 0)/1000, durationMin: Number(route.duration || 0)/60,
+      coordinates: (route.geometry?.coordinates || []).map(([lng,lat]) => [lat,lng]) };
+  } catch { return null; }
+}
+
 const HUB_SC = { ONLINE: '#16a34a', OFFLINE: '#dc2626', MAINTENANCE: '#d97706' };
 
 function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
@@ -3469,6 +3519,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
   const markersRef      = React.useRef([]);
   const linesRef        = React.useRef([]);
   const userMarkerRef   = React.useRef(null);
+  const [routeData, setRouteData] = React.useState({});
 
   React.useEffect(() => {
     if (leafRef.current || !mapRef.current || !window.L) return;
@@ -3487,7 +3538,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
   React.useEffect(() => {
     if (!leafRef.current) return;
     drawHubMarkers(leafRef.current, hubs, userCoords);
-  }, [hubs, userCoords]);
+  }, [hubs, userCoords, routeData]);
 
   function clearMapLayers() {
     markersRef.current.forEach(m => leafRef.current?.removeLayer(m));
@@ -3500,59 +3551,38 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     clearMapLayers();
     const allCoords = [];
     const nearestFour = currentUserCoords
-      ? hubList.filter(h => h._dist != null).sort((a, b) => a._dist - b._dist).slice(0, 4)
+      ? [...hubList].sort((a,b) => (routeData[String(a._mapKey)]?.distanceKm ?? a._dist ?? Infinity) - (routeData[String(b._mapKey)]?.distanceKm ?? b._dist ?? Infinity)).slice(0,4)
       : [];
-    const nearestIds = new Set(nearestFour.map(h => String(h._id || h.sourceId || h.code || h.name)));
-
-    // Draw the four nearest customer-to-hub connections first.
-    if (currentUserCoords && nearestFour.length) {
-      nearestFour.forEach(hub => {
-        const coords = custGetCoords(hub);
-        if (!coords) return;
-        const line = window.L.polyline([currentUserCoords, coords], {
-          color: '#2563eb', weight: 3, opacity: 0.75, dashArray: '8 7',
-        }).addTo(map);
-        linesRef.current.push(line);
-      });
-    }
-
+    const nearestIds = new Set(nearestFour.map(h => String(h._mapKey)));
     hubList.forEach(hub => {
-      const coords = custGetCoords(hub);
-      if (!coords) return;
+      const coords = custGetCoords(hub); if (!coords) return;
       const color = HUB_SC[hub.status] || '#2563eb';
-      const id = String(hub._id || hub.sourceId || hub.code || hub.name);
-      const isNearest = nearestIds.has(id);
-      const rank = hub._rank != null ? hub._rank + 1 : null;
-      const pulse = isNearest && currentUserCoords
-        ? `<div style="position:absolute;inset:-7px;border:2px solid ${color};border-radius:50%;animation:custHubPulse 1.35s ease-out infinite;opacity:.85;"></div>`
-        : '';
-      const icon = window.L.divIcon({
-        className: '',
-        html: `<div style="position:relative;width:24px;height:24px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;">${pulse}<span style="position:relative;z-index:2;">${rank ?? ''}</span></div>`,
-        iconSize: [24, 24], iconAnchor: [12, 12],
-      });
-      const marker = window.L.marker(coords, { icon }).addTo(map);
-      // Deliberately no hover handler: details open only after clicking a station.
-      marker.on('click', () => onSelectHub(hub));
-      markersRef.current.push(marker);
-      allCoords.push(coords);
+      const pulse = nearestIds.has(String(hub._mapKey)) && currentUserCoords
+        ? `<div style="position:absolute;inset:-8px;border:2px solid ${color};border-radius:50%;animation:custHubPulse 1.35s ease-out infinite;opacity:.85;"></div>` : '';
+      const icon = window.L.divIcon({ className:'',
+        html:`<div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 2px 5px rgba(0,0,0,.35));cursor:pointer;">${pulse}<span style="position:relative;z-index:2;width:30px;height:30px;border-radius:9px;background:#fff7ed;border:2px solid #f59e0b;display:flex;align-items:center;justify-content:center;color:#f59e0b;font-size:21px;line-height:1;font-weight:900;">⚡</span></div>`,
+        iconSize:[36,36],iconAnchor:[18,18] });
+      const marker=window.L.marker(coords,{icon}).addTo(map); marker.on('click',()=>onSelectHub(hub));
+      markersRef.current.push(marker); allCoords.push(coords);
     });
-
-    if (currentUserCoords) {
-      allCoords.push(currentUserCoords);
-      if (nearestFour.length) {
-        const focus = [currentUserCoords, ...nearestFour.map(h => custGetCoords(h)).filter(Boolean)];
-        map.fitBounds(window.L.latLngBounds(focus), { padding: [70, 70], maxZoom: 15, animate: true });
-      } else {
-        map.setView(currentUserCoords, 13, { animate: true });
-      }
-    } else if (allCoords.length === 1) {
-      map.setView(allCoords[0], 14, { animate: false });
-    } else if (allCoords.length > 1) {
-      map.fitBounds(window.L.latLngBounds(allCoords), { padding: [50, 50], maxZoom: 14, animate: false });
-    }
+    if (currentUserCoords) nearestFour.forEach(hub=>{
+      const route=routeData[String(hub._mapKey)];
+      if(route?.coordinates?.length>1){ const line=window.L.polyline(route.coordinates,{color:'#2563eb',weight:4,opacity:.78}).addTo(map); linesRef.current.push(line); }
+    });
+    if(currentUserCoords){ allCoords.push(currentUserCoords); map.fitBounds(window.L.latLngBounds(allCoords),{padding:[70,70],maxZoom:15,animate:true}); }
+    else if(allCoords.length===1) map.setView(allCoords[0],14,{animate:false});
+    else if(allCoords.length>1) map.fitBounds(window.L.latLngBounds(allCoords),{padding:[50,50],maxZoom:14,animate:false});
     map.invalidateSize();
   }
+
+
+  React.useEffect(() => {
+    let alive=true;
+    if(!userCoords || !hubs.length){ setRouteData({}); return ()=>{alive=false;}; }
+    const candidates=[...hubs].sort((a,b)=>(a._dist??Infinity)-(b._dist??Infinity)).slice(0,4);
+    (async()=>{ const next={}; await Promise.all(candidates.map(async h=>{ const c=custGetCoords(h); if(!c)return; const r=await custRoadRoute(userCoords,c); if(r)next[String(h._mapKey)]=r; })); if(alive){setRouteData(next);onRouteData?.(next);} })();
+    return ()=>{alive=false;};
+  },[userCoords,hubs]);
 
   React.useEffect(() => {
     if (!userCoords || !window.L || !leafRef.current) return;
@@ -3561,11 +3591,11 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
     if (userMarkerRef.current) map.removeLayer(userMarkerRef.current);
     const icon = L.divIcon({
       className: '',
-      html: `<div style="position:relative;width:28px;height:28px;border-radius:50%;background:#2563eb;border:4px solid #fff;box-shadow:0 0 0 5px rgba(37,99,235,.18),0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;">📍</div>`,
-      iconSize: [28, 28], iconAnchor: [14, 14],
+      html: `<div style="position:relative;width:38px;height:38px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 0 0 5px rgba(37,99,235,.18),0 2px 8px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:25px;line-height:1;">🛵</div>`,
+      iconSize: [38, 38], iconAnchor: [19, 19],
     });
     userMarkerRef.current = L.marker(userCoords, { icon, zIndexOffset: 1000 })
-      .bindPopup('<b>📍 Your Location</b>')
+      .bindPopup('<b>🛵 Your Location</b>')
       .addTo(map);
   }, [userCoords]);
 
@@ -3599,7 +3629,7 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12 }}>
               <div style={{ padding: 9, borderRadius: 8, background: '#f8fafc' }}><small style={{ color: '#6b7280' }}>Status</small><div style={{ color: sc, fontWeight: 800, fontSize: 12 }}>● {selectedHub.status || '—'}</div></div>
-              <div style={{ padding: 9, borderRadius: 8, background: '#eff6ff' }}><small style={{ color: '#6b7280' }}>Distance</small><div style={{ color: '#2563eb', fontWeight: 800, fontSize: 12 }}>{selectedHub._dist == null ? '—' : selectedHub._dist < 1 ? `${(selectedHub._dist * 1000).toFixed(0)} m` : `${selectedHub._dist.toFixed(1)} km`}</div></div>
+              <div style={{ padding: 9, borderRadius: 8, background: '#eff6ff' }}><small style={{ color: '#6b7280' }}>Distance</small><div style={{ color: '#2563eb', fontWeight: 800, fontSize: 12 }}>{(routeData[String(selectedHub._mapKey)]?.distanceKm ?? selectedHub._dist) == null ? '—' : (routeData[String(selectedHub._mapKey)]?.distanceKm ?? selectedHub._dist) < 1 ? `${((routeData[String(selectedHub._mapKey)]?.distanceKm ?? selectedHub._dist) * 1000).toFixed(0)} m` : `${(routeData[String(selectedHub._mapKey)]?.distanceKm ?? selectedHub._dist).toFixed(1)} km`}</div></div>
             </div>
             <div style={{ marginTop: 10, fontSize: 11, color: '#4b5563', lineHeight: 1.55 }}>
               {selectedHub.address && <div><b>Address:</b> {selectedHub.address}</div>}
@@ -3614,9 +3644,10 @@ function CustStationsMap({ hubs, userCoords, selectedHub, onSelectHub }) {
         );
       })()}
       <div className="map-legend">
-        <div style={{ fontWeight: 700, fontSize: 11, color: '#374151', marginBottom: 3 }}>Nearest charging hubs</div>
-        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb' }} /><span style={{ fontSize: 11 }}>4 nearest · blinking</span></div>
-        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb', width: 8, height: 8 }} /><span style={{ fontSize: 11 }}>Blue lines = distance</span></div>
+        <div style={{ fontWeight: 700, fontSize: 11, color: '#374151', marginBottom: 3 }}>Charging stations</div>
+        <div className="legend-item"><span style={{ fontSize: 18, lineHeight: 1 }}>⚡</span><span style={{ fontSize: 11 }}>All unique charging stations</span></div>
+        <div className="legend-item"><span style={{ fontSize: 18, lineHeight: 1 }}>⚡</span><span style={{ fontSize: 11 }}>4 nearest · blinking</span></div>
+        <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb', width: 8, height: 8 }} /><span style={{ fontSize: 11 }}>Blue route = road travel path</span></div>
         <div className="legend-item"><div className="legend-dot" style={{ background: '#2563eb', outline: '2px solid #2563eb66', outlineOffset: 2 }} /><span style={{ fontSize: 11 }}>Your location</span></div>
       </div>
     </div>
@@ -3634,10 +3665,11 @@ function CustChargingStations({ call }) {
 
   const hubs = React.useMemo(() => {
     if (!rawHubs) return [];
-    let list = rawHubs.map((h, i) => {
+    let list = dedupeCustomerHubs(rawHubs).map(h => {
       const coords = custGetCoords(h);
-      const dist   = (userCoords && coords) ? haversineKm(userCoords, coords) : null;
-      return { ...h, _coords: coords, _dist: dist, _rank: null };
+      const dist = (userCoords && coords) ? haversineKm(userCoords, coords) : null;
+      const mapKey = coords ? `${Number(coords[0]).toFixed(5)},${Number(coords[1]).toFixed(5)}` : [h.name,h.address,h.city].filter(Boolean).join('|').toLowerCase();
+      return { ...h, _coords:coords, _dist:dist, _mapKey:mapKey, _rank:null };
     });
     if (statusFilter !== 'ALL') list = list.filter(h => h.status === statusFilter);
     if (userCoords) {
@@ -3686,7 +3718,7 @@ function CustChargingStations({ call }) {
           <h1 className="cs-hero-title">Charging Stations</h1>
           <p className="cs-hero-sub">Find the nearest EV charging hub across the allEV network</p>
           <div className="cs-hero-stats">
-            <div className="cs-hero-stat"><span>{(rawHubs||[]).length}</span><label>Total Hubs</label></div>
+            <div className="cs-hero-stat"><span>{hubs.length}</span><label>Total Hubs</label></div>
             <div className="cs-hero-stat cs-hero-stat--online"><span>{onlineCount}</span><label>Online Now</label></div>
             <div className="cs-hero-stat"><span>{totalChargers}</span><label>Charger Slots</label></div>
           </div>

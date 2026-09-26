@@ -8,7 +8,7 @@
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
-const { PendingVehicle, PendingStaff, User } = require('../models');
+const { PendingVehicle, PendingStaff, User, VehicleRental } = require('../models');
 const audit = require('../services/audit');
 
 // ── Email transport ─────────────────────────────────────────────
@@ -208,7 +208,6 @@ exports.availableVehicles = async (req, res) => {
     // 1. PendingVehicle — fleet-operator submitted & approved by admin
     const pendingDocs = await PendingVehicle.find({
       status: 'APPROVED',
-      $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }],
     }).sort('-reviewedAt').lean();
 
     // 2. CommandVehicle — created by Command Center and assigned to a fleet operator
@@ -216,8 +215,23 @@ exports.availableVehicles = async (req, res) => {
       status: 'ACTIVE',
       fleetInventoryStatus: 'ACTIVE',
       fleetOperatorId: { $exists: true, $ne: null },
-      $or: [{ quantity: { $gt: 0 } }, { quantity: { $exists: false } }],
     }).sort('-assignedAt').lean();
+
+    // A booking reserves inventory logically. Physical quantity is reduced only
+    // at handover, so calculate reservation state separately from stock quantity.
+    const reservationCutoff = new Date(Date.now() - 15 * 60 * 1000);
+    const reservationRows = await VehicleRental.aggregate([
+      { $match: {
+          paymentStatus: { $in: ['PENDING','PAID'] },
+          status: { $in: ['BOOKED','PAYMENT_DONE','HANDOVER_PENDING'] },
+          $or: [
+            { paymentStatus: 'PAID' },
+            { paymentStatus: 'PENDING', createdAt: { $gte: reservationCutoff } }
+          ]
+      }},
+      { $group: { _id: '$vehicleId', reservedQuantity: { $sum: 1 } } }
+    ]);
+    const reservationMap = new Map(reservationRows.map(r => [String(r._id), Number(r.reservedQuantity || 0)]));
 
     // Collect all fleet operator IDs for address lookup
     const allFranchiseeIds = [
@@ -245,9 +259,10 @@ exports.availableVehicles = async (req, res) => {
     // so expose every unit separately to the customer portal. If explicit bikeIds
     // exist, use them; otherwise keep the parent record's bikeId/registration identity.
     const normPending = pendingDocs.flatMap(v => {
-      const qty = Math.max(1, Number(v.quantity == null ? 1 : v.quantity));
+      const qty = Math.max(0, Number(v.quantity == null ? 1 : v.quantity));
+      const displayCount = qty > 0 ? qty : 1;
       const ids = Array.isArray(v.bikeIds) ? v.bikeIds.filter(Boolean) : [];
-      return Array.from({ length: qty }, (_, i) => ({
+      return Array.from({ length: displayCount }, (_, i) => ({
         ...v,
         _id: v._id,
         displayId: ids[i] || v.bikeId || (qty > 1 ? `${v.registrationNo || 'BIKE'}-${i + 1}` : undefined),
@@ -255,7 +270,13 @@ exports.availableVehicles = async (req, res) => {
         _parentVehicleId: v._id,
         _unitIndex: i + 1,
         _source: 'fleet_submission',
-        quantity: 1,
+        quantity: qty > 0 ? 1 : 0,
+        _stockQuantity: qty > 0 ? 1 : 0,
+        _reservedQuantity: qty > 0 && i < Math.min(qty, reservationMap.get(String(v._id)) || 0) ? 1 : 0,
+        _availableQuantity: qty > 0 && i < Math.min(qty, reservationMap.get(String(v._id)) || 0) ? 0 : (qty > 0 ? 1 : 0),
+        _availabilityStatus: qty <= 0
+          ? 'UNAVAILABLE'
+          : (i < Math.min(qty, reservationMap.get(String(v._id)) || 0) ? 'RESERVED' : 'AVAILABLE'),
         franchiseeId: v.franchiseeId,
         franchiseeName: fm.get(String(v.franchiseeId))?.name || v.franchiseeName || 'EV CORE Fleet',
         franchiseeAddress: fm.get(String(v.franchiseeId))?.address || null,
@@ -268,6 +289,19 @@ exports.availableVehicles = async (req, res) => {
       ...v,
       _source:          'command_center',
       quantity:         v.quantity == null ? 1 : v.quantity,
+      _stockQuantity:   Math.max(0, Number(v.quantity == null ? 1 : v.quantity)),
+      _reservedQuantity: Math.min(
+        Math.max(0, Number(v.quantity == null ? 1 : v.quantity)),
+        reservationMap.get(String(v._id)) || 0
+      ),
+      _availableQuantity: Math.max(
+        0,
+        Math.max(0, Number(v.quantity == null ? 1 : v.quantity)) - (reservationMap.get(String(v._id)) || 0)
+      ),
+      _availabilityStatus: Math.max(0, Number(v.quantity == null ? 1 : v.quantity)) <= 0
+        ? 'UNAVAILABLE'
+        : (reservationMap.get(String(v._id)) || 0) >= Math.max(0, Number(v.quantity == null ? 1 : v.quantity))
+          ? 'RESERVED' : 'AVAILABLE',
       // reuse franchiseeId field so customer portal works unchanged
       franchiseeId:     v.fleetOperatorId,
       franchiseeName:   fm.get(String(v.fleetOperatorId))?.name || v.fleetOperatorName || 'EV CORE Fleet',

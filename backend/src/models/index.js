@@ -142,7 +142,7 @@ const complaintSchema=new Schema({
   completionProofId:{type:id,ref:'JobProof'},
   messages:[{senderId:id,senderRole:String,message:String,createdAt:{type:Date,default:Date.now}}]
 },{timestamps:true});
-const faultVehicleSchema=new Schema({complaintId:{type:id,ref:'Complaint'},customerId:{type:id,ref:'User'},franchiseeId:{type:id,ref:'User'},vehicleId:id,vehicleSnapshot:Schema.Types.Mixed,paymentSnapshot:Schema.Types.Mixed,reason:String},{timestamps:true});
+const faultVehicleSchema=new Schema({complaintId:{type:id,ref:'Complaint'},customerId:{type:id,ref:'User'},franchiseeId:{type:id,ref:'User'},vehicleId:id,rentalId:{type:id,ref:'VehicleRental',index:true},vehicleSnapshot:Schema.Types.Mixed,paymentSnapshot:Schema.Types.Mixed,reason:String},{timestamps:true});
 const assetSchema=new Schema({hubId:id,name:String,category:String,serialNo:String,purchaseCost:Number,purchaseDate:Date,status:{type:String,default:'ACTIVE'},utilization:Number},{timestamps:true});
 const maintenanceSchema=new Schema({assetId:id,chargerId:id,type:String,dueAt:Date,status:{type:String,default:'SCHEDULED'},notes:String},{timestamps:true});
 const anomalySchema=new Schema({type:String,severity:{type:String,default:'MEDIUM'},hubId:id,chargerId:id,userId:id,jobId:id,expected:Number,actual:Number,deviation:Number,status:{type:String,default:'OPEN'},details:Schema.Types.Mixed},{timestamps:true});
@@ -455,6 +455,8 @@ const handoverInspectionSchema = new Schema({
   vehicleId:{type:id,ref:'CommandVehicle',index:true},
   customerId:{type:id,ref:'User',index:true},
   stage:{type:String,enum:['HANDOVER','RETURN'],required:true},
+  returnDisposition:{type:String,enum:['FLEET','FAULT'],default:'FLEET'},
+  vehicleSnapshot:Schema.Types.Mixed,
   inspectedAt:{type:Date,default:Date.now},
   odometerKm:Number,batterySoc:Number,damageNotes:String,photos:[{name:String,url:String}],documentsChecked:[String],customerConfirmed:{type:Boolean,default:false},signatureData:String,extraCharges:{type:Number,default:0},notes:String,createdBy:{type:id,ref:'User'},
 },{timestamps:true});

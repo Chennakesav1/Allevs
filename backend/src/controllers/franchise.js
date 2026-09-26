@@ -537,39 +537,55 @@ exports.vehicleInspectionHistory = async (req,res) => {
 
 exports.handoverInspection = async (req,res) => {
   try {
-    const M=require('../models'); const fid=req.user._id;
+    const M=require('../models');
+    const fid=req.user._id;
     const rental=await M.VehicleRental.findOne({_id:req.params.id,franchiseeId:fid,paymentStatus:'PAID'});
     if(!rental)return res.status(404).json({message:'Paid booking not found'});
+
     const stage=String(req.body.stage||'HANDOVER').toUpperCase();
     if(!['HANDOVER','RETURN'].includes(stage))return res.status(400).json({message:'Invalid inspection stage'});
 
-    // Handover is a two-step franchise workflow: select a physical Fleet Inventory
-    // vehicle, complete the inspection, then this request marks the handover.
     if(stage==='HANDOVER') {
       const requestedVehicleId=req.body.vehicleId || rental.vehicleId;
       if(!requestedVehicleId)return res.status(400).json({message:'Select a Fleet Inventory vehicle before handover inspection'});
 
+      // The booking does not consume inventory. Only the physical bike
+      // selected here is consumed, and only if one unit is actually available.
       const selected=await M.CommandVehicle.findOne({
         _id:requestedVehicleId,
         fleetOperatorId:fid,
-        status:'ACTIVE',
+        status:{ $in:['ACTIVE','ASSIGNED'] },
         fleetInventoryStatus:'ACTIVE',
-        fleetLocationStatus:{$ne:'AT_CUSTOMER'},
-        $or:[{quantity:{$gt:0}},{quantity:{$exists:false}}]
+        fleetLocationStatus:{ $ne:'AT_CUSTOMER' },
+        $or:[{quantity:{$gte:1}},{quantity:{$exists:false}}]
       });
-      if(!selected)return res.status(409).json({message:'Selected vehicle is not available in Fleet Inventory'});
+      if(!selected)return res.status(409).json({message:'Selected bike is unavailable. Choose another available bike.'});
 
-      // If the customer booking was originally attached to another physical bike,
-      // release that reservation before attaching the selected Fleet Inventory bike.
-      if(rental.vehicleSource==='COMMAND_VEHICLE' && rental.vehicleId && String(rental.vehicleId)!==String(selected._id)) {
-        await M.CommandVehicle.findOneAndUpdate({_id:rental.vehicleId,fleetOperatorId:fid},{ $inc:{quantity:1} });
-      }
+      const odometer=req.body.odometerKm!==undefined && req.body.odometerKm!=='' ? Number(req.body.odometerKm) : Number(selected.odometerKm||0);
+      const batterySoc=req.body.batterySoc!==undefined && req.body.batterySoc!=='' ? Number(req.body.batterySoc) : Number(selected.batterySoc||0);
+      if(!Number.isFinite(odometer) || odometer<0)return res.status(400).json({message:'Enter a valid odometer reading'});
+      if(!Number.isFinite(batterySoc) || batterySoc<0 || batterySoc>100)return res.status(400).json({message:'Battery SOC must be between 0 and 100'});
 
+      // Atomically consume one unit of the exact physical bike being handed over.
+      const consumed=await M.CommandVehicle.findOneAndUpdate(
+        {
+          _id:selected._id,
+          fleetOperatorId:fid,
+          fleetLocationStatus:{ $ne:'AT_CUSTOMER' },
+          $or:[{quantity:{$gte:1}},{quantity:{$exists:false}}]
+        },
+        { $inc:{quantity:-1} },
+        { new:true }
+      );
+      if(!consumed)return res.status(409).json({message:'Selected bike became unavailable. Choose another available bike.'});
+
+      // Keep the existing rental/payment connections. Only switch the physical
+      // bike selected by the fleet operator and preserve all other booking data.
       const snapshot={
         ...(rental.vehicleSnapshot||{}), _id:selected._id, bikeId:selected.bikeId,
         make:selected.make, model:selected.model, year:selected.year, color:selected.color,
         category:selected.category, registrationNo:selected.registrationNo, chassisNo:selected.chassisNo,
-        motorNo:selected.motorNo, insuranceExpiry:selected.insuranceExpiry, odometerKm:selected.odometerKm,
+        motorNo:selected.motorNo, insuranceExpiry:selected.insuranceExpiry, odometerKm:odometer,
         seatingCapacity:selected.seatingCapacity, topSpeedKph:selected.topSpeedKph,
         batteryCapacityKwh:selected.batteryCapacityKwh, rangeKm:selected.rangeKm,
         chargingType:selected.chargingType, images:selected.images, description:selected.description,
@@ -582,55 +598,98 @@ exports.handoverInspection = async (req,res) => {
       rental.vehicleSource='COMMAND_VEHICLE';
       rental.bikeId=selected.bikeId;
       rental.vehicleSnapshot=snapshot;
+      rental.handoverDate=new Date();
+      rental.status=rental.rentalPlan==='SALE'?'HANDED_OVER':'ACTIVE';
 
-      // Consume the physical inventory unit and immediately mark its location as customer-held.
+      // Quantity was decremented atomically above for the physical bike
+      // actually handed over. Keep the same inventory record and mark it
+      // physically at the customer.
       await M.CommandVehicle.updateOne(
         {_id:selected._id,fleetOperatorId:fid},
-        {$inc:{quantity:-1},$set:{fleetLocationStatus:'AT_CUSTOMER',currentCustomerId:rental.customerId,currentRentalId:rental._id}}
+        {$set:{fleetLocationStatus:'AT_CUSTOMER',currentCustomerId:rental.customerId,currentRentalId:rental._id,odometerKm:odometer,batterySoc:batterySoc}}
       );
 
       if(M.CustomerPayment) {
         await M.CustomerPayment.updateMany({rentalId:rental._id},{$set:{vehicleId:selected._id,bikeId:selected.bikeId,vehicleSnapshot:snapshot}});
       }
 
-      // Sales need the customer's owned-vehicle record at the same handover boundary.
       if(rental.rentalPlan==='SALE') {
-        const vin=snapshot.vin || snapshot.registrationNo || `EVCORE-${String(rental._id).slice(-10).toUpperCase()}`;
+        const vin=snapshot.vin || snapshot.chassisNo || snapshot.registrationNo || `EVCORE-${String(rental._id).slice(-10).toUpperCase()}`;
         let owned=await M.Vehicle.findOne({customerId:rental.customerId,sourcePurchaseId:rental._id});
-        if(!owned) owned=await M.Vehicle.create({customerId:rental.customerId,vin,registrationNo:snapshot.registrationNo,model:[snapshot.make,snapshot.model].filter(Boolean).join(' '),batterySoc:0,batterySoh:100,status:'ACTIVE',sourcePurchaseId:rental._id});
+        if(!owned)owned=await M.Vehicle.create({customerId:rental.customerId,vin,registrationNo:snapshot.registrationNo,model:[snapshot.make,snapshot.model].filter(Boolean).join(' '),batterySoc:0,batterySoh:100,status:'ACTIVE',sourcePurchaseId:rental._id});
       }
-
-      rental.handoverDate=new Date();
-      rental.status='SALE'===rental.rentalPlan?'HANDED_OVER':'ACTIVE';
     }
 
     if(stage==='RETURN') {
-      rental.returnDate=new Date(); rental.status='COMPLETED';
-      if(Number(req.body.extraCharges||0)>0) rental.totalAmount=Number(rental.totalAmount||0)+Number(req.body.extraCharges);
+      const fault=String(req.body.returnDisposition||req.body.disposition||'COMPLETED').toUpperCase()==='FAULT';
+      rental.returnDate=new Date();
+      rental.status='COMPLETED';
+      if(Number(req.body.extraCharges||0)>0)rental.totalAmount=Number(rental.totalAmount||0)+Number(req.body.extraCharges);
+
       if(rental.vehicleSource==='COMMAND_VEHICLE' && rental.vehicleId) {
-        await M.CommandVehicle.updateOne(
-          { _id:rental.vehicleId, fleetOperatorId:fid },
-          { $set:{ fleetLocationStatus:'AT_FLEET', currentCustomerId:null, currentRentalId:null }, $inc:{ quantity:1 } }
-        );
+        const selected=await M.CommandVehicle.findOne({_id:rental.vehicleId,fleetOperatorId:fid});
+        const upd={
+          fleetLocationStatus:fault?'AT_FLEET':'AT_FLEET',
+          currentCustomerId:null,
+          currentRentalId:null
+        };
+        if(req.body.odometerKm!==undefined && req.body.odometerKm!=='')upd.odometerKm=Number(req.body.odometerKm);
+        if(req.body.batterySoc!==undefined && req.body.batterySoc!=='')upd.batterySoc=Number(req.body.batterySoc);
+        if(selected)await M.CommandVehicle.updateOne({_id:selected._id,fleetOperatorId:fid},{$set:upd});
+
+        if(fault) {
+          const payment=await M.CustomerPayment?.findOne({rentalId:rental._id}).sort('-createdAt').lean();
+          await M.FaultVehicle.create({
+            customerId:rental.customerId,
+            franchiseeId:fid,
+            vehicleId:rental.vehicleId,
+            vehicleSnapshot:rental.vehicleSnapshot,
+            paymentSnapshot:payment||null,
+            reason:String(req.body.damageNotes||req.body.faultReason||'Vehicle marked as fault during return inspection')
+          });
+          // Keep the vehicle out of active Fleet Inventory until repaired.
+          await M.CommandVehicle.updateOne({_id:rental.vehicleId,fleetOperatorId:fid},{$set:{status:'INACTIVE',fleetInventoryStatus:'INACTIVE'}});
+        } else {
+          // Normal return: restore the inventory unit consumed at handover.
+          await M.CommandVehicle.updateOne(
+            {_id:rental.vehicleId,fleetOperatorId:fid},
+            {$inc:{quantity:1},$set:{status:'ACTIVE',fleetInventoryStatus:'ACTIVE'}}
+          );
+        }
       }
     }
 
-    const inspectionData={...req.body,franchiseeId:fid,rentalId:rental._id,vehicleId:rental.vehicleId,customerId:rental.customerId,stage,createdBy:fid};
+    // HandoverInspection.returnDisposition only accepts FLEET or FAULT.
+    // Older/frontend payloads may send COMPLETED for a normal handover/return;
+    // normalize that value here so the existing schema is never violated.
+    const normalizedDisposition = String(req.body.returnDisposition || req.body.disposition || '').toUpperCase();
+    const inspectionData={
+      ...req.body,
+      returnDisposition: normalizedDisposition === 'FAULT' ? 'FAULT' : 'FLEET',
+      franchiseeId:fid,
+      rentalId:rental._id,
+      vehicleId:rental.vehicleId,
+      customerId:rental.customerId,
+      stage,
+      createdBy:fid
+    };
     const insp=await M.HandoverInspection.create(inspectionData);
-    if(rental.vehicleId && (req.body.odometerKm!==undefined || req.body.batterySoc!==undefined)){
+
+    // Preserve editable readings on the physical Fleet Inventory vehicle.
+    if(rental.vehicleId && (req.body.odometerKm!==undefined || req.body.batterySoc!==undefined)) {
       const upd={};
-      if(req.body.odometerKm!==undefined && req.body.odometerKm!=='') upd.odometerKm=Number(req.body.odometerKm);
-      if(req.body.batterySoc!==undefined && req.body.batterySoc!=='') upd.batterySoc=Number(req.body.batterySoc);
-      if(Object.keys(upd).length) await M.CommandVehicle.findByIdAndUpdate(rental.vehicleId,{$set:upd});
+      if(req.body.odometerKm!==undefined && req.body.odometerKm!=='')upd.odometerKm=Number(req.body.odometerKm);
+      if(req.body.batterySoc!==undefined && req.body.batterySoc!=='')upd.batterySoc=Number(req.body.batterySoc);
+      if(Object.keys(upd).length)await M.CommandVehicle.findOneAndUpdate({_id:rental.vehicleId,fleetOperatorId:fid},{$set:upd});
     }
 
     rental.bookingHistory=rental.bookingHistory||[];
-    rental.bookingHistory.push({event:stage==='HANDOVER'?'HANDOVER_COMPLETED':'RETURN_COMPLETED',at:new Date(),inspectionId:insp._id,odometerKm:req.body.odometerKm,batterySoc:req.body.batterySoc,damageNotes:req.body.damageNotes,extraCharges:Number(req.body.extraCharges||0),status:rental.status});
+    rental.bookingHistory.push({event:stage==='HANDOVER'?'HANDOVER_COMPLETED':'RETURN_COMPLETED',at:new Date(),inspectionId:insp._id,odometerKm:req.body.odometerKm,batterySoc:req.body.batterySoc,damageNotes:req.body.damageNotes,extraCharges:Number(req.body.extraCharges||0),returnDisposition:req.body.returnDisposition||req.body.disposition||'COMPLETED',status:rental.status});
     await rental.save();
 
     await M.Notification.create({userId:rental.customerId,type:stage==='HANDOVER'?'VEHICLE_HANDOVER':'VEHICLE_RETURN',title:stage==='HANDOVER'?'Vehicle handed over':'Vehicle return completed',message:stage==='HANDOVER'?'Your vehicle handover inspection is complete and the vehicle has been handed over.':'Your vehicle return inspection is complete.',data:{rentalId:rental._id,inspectionId:insp._id,vehicleId:rental.vehicleId,bikeId:rental.bikeId}});
     res.json({inspection:insp,rental});
-  }catch(e){res.status(400).json({message:e.message});}
+  }catch(e){console.error('handoverInspection error:',e);res.status(400).json({message:e.message});}
 };
 
 exports.customers = async (req,res) => {
@@ -735,4 +794,34 @@ exports.sendBroadcastNotification = async (req,res) => {
 exports.report = async (req,res) => {
   try { const M=require('../models'); const fid=req.user._id; const [rentals,expenses,maintenance]=await Promise.all([M.VehicleRental.find({franchiseeId:fid}).lean(),M.FleetExpense.find({franchiseeId:fid}).lean(),M.FleetMaintenance.find({franchiseeId:fid}).lean()]); const byMonth={}; rentals.filter(r=>r.paymentStatus==='PAID').forEach(r=>{const k=new Date(r.createdAt).toISOString().slice(0,7);byMonth[k]=(byMonth[k]||0)+Number(r.totalAmount||0)}); res.json({generatedAt:new Date(),summary:{revenue:rentals.filter(r=>r.paymentStatus==='PAID').reduce((s,r)=>s+Number(r.totalAmount||0),0),expenses:expenses.reduce((s,r)=>s+Number(r.amount||0),0),maintenanceCost:maintenance.reduce((s,r)=>s+Number(r.cost||0),0)},monthlyRevenue:Object.entries(byMonth).sort((a,b)=>a[0].localeCompare(b[0])).map(([month,revenue])=>({month,revenue})),bookings:rentals}); }
   catch(e){res.status(500).json({message:e.message});}
+};
+
+// Fleet Inventory selector: every physical CommandVehicle belonging to this
+// fleet operator is selectable. Do not use quantity/location as a blocker.
+exports.availableFleetVehicles = async (req, res) => {
+  try {
+    const M = require('../models');
+    const vehicles = await M.CommandVehicle.find({
+      fleetOperatorId: req.user._id
+    }).sort({ bikeId: 1, createdAt: -1 }).lean();
+    res.json(vehicles);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
+};
+
+// Completed returns for the Fleet Operator sidebar.
+exports.completedVehicleReturns = async (req, res) => {
+  try {
+    const M = require('../models');
+    const rows = await M.VehicleRental.find({
+      franchiseeId: req.user._id,
+      status: 'COMPLETED'
+    })
+      .sort({ returnDate: -1, updatedAt: -1 })
+      .lean();
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ message: e.message });
+  }
 };

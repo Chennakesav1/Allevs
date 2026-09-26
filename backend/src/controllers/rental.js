@@ -34,6 +34,17 @@ function invoiceNo() {
   return `INV-SALE-${Date.now()}`;
 }
 
+function activeReservationQuery(vehicleId) {
+  const pendingCutoff = new Date(Date.now() - 15 * 60 * 1000);
+  return {
+    vehicleId,
+    $or: [
+      { paymentStatus: 'PAID', status: { $in: ['PAYMENT_DONE', 'HANDOVER_PENDING'] } },
+      { paymentStatus: 'PENDING', status: 'BOOKED', createdAt: { $gte: pendingCutoff } },
+    ],
+  };
+}
+
 // ── HTML invoice builder ─────────────────────────────────────────────
 function buildInvoiceHTML(rental, customer, inv) {
   const vs   = rental.vehicleSnapshot || {};
@@ -254,11 +265,16 @@ exports.createOrder = async (req, res) => {
     const fa = franchisee.address || {};
 
     const stockQty = Math.max(0, Number(vehicle.quantity ?? 1));
-    if (stockQty <= 0) return res.status(409).json({ message: 'Vehicle is currently out of stock' });
-    // One vehicle per customer booking. Inventory quantity is stock, not booking quantity.
+    if (stockQty <= 0) return res.status(409).json({ message: 'Vehicle is currently unavailable' });
+
+    // A booking reserves stock but does NOT reduce physical inventory.
+    // The physical quantity is reduced only when the fleet operator completes
+    // handover and selects the actual bike.
     const vehicleCount = 1;
     const durationUnits = Math.max(1, Number(planUnits || durationDays || 1));
-    if (stockQty < 1) return res.status(409).json({ message: 'Vehicle is currently out of stock' });
+    const reservedQty = await VehicleRental.countDocuments(activeReservationQuery(vehicleId));
+    if (reservedQty >= stockQty)
+      return res.status(409).json({ message: stockQty === 1 ? 'Vehicle is currently reserved' : 'All units of this vehicle are currently reserved' });
 
     const isCommandRental = source === 'COMMAND_VEHICLE' && vehicle.rentalPlans;
     let selectedPlan = 'SALE';
@@ -400,23 +416,18 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ message: 'Payment signature verification failed' });
     }
 
-    // IMPORTANT: stock changes only after Razorpay signature verification succeeds.
-    // The atomic update prevents two successful customers from consuming the same last unit.
+    // IMPORTANT: payment confirmation reserves the booked vehicle but does NOT
+    // reduce inventory. The quantity is reduced only for the physical bike
+    // actually selected during handover.
     if (rental.paymentStatus === 'PAID') {
       return res.json({ success: true, rental, alreadyProcessed: true });
     }
-    const purchaseQty = Number(rental.saleQuantity || 1);
-    const stockQuery = { _id: rental.vehicleId, $or: [{ quantity: { $gte: purchaseQty } }, { quantity: { $exists: false } }] };
-    const stock = rental.vehicleSource === 'COMMAND_VEHICLE'
-      ? await require('../models').CommandVehicle.findOneAndUpdate(
-          { ...stockQuery, status:'ACTIVE', fleetInventoryStatus:'ACTIVE' },
-          [{ $set: { quantity: { $subtract: [{ $ifNull: ['$quantity', 1] }, purchaseQty] } } }], { new:true }
-        )
-      : await PendingVehicle.findOneAndUpdate(
-          { ...stockQuery, status:'APPROVED' },
-          [{ $set: { quantity: { $subtract: [{ $ifNull: ['$quantity', 1] }, purchaseQty] } } }], { new:true }
-        );
-    if (!stock) {
+
+    const stockDoc = rental.vehicleSource === 'COMMAND_VEHICLE'
+      ? await require('../models').CommandVehicle.findOne({ _id: rental.vehicleId, status:'ACTIVE', fleetInventoryStatus:'ACTIVE' }).lean()
+      : await PendingVehicle.findOne({ _id: rental.vehicleId, status:'APPROVED' }).lean();
+
+    if (!stockDoc || Math.max(0, Number(stockDoc.quantity ?? 1)) <= 0) {
       rental.paymentStatus = 'FAILED';
       rental.bookingHistory = rental.bookingHistory || [];
       rental.bookingHistory.push({ event: 'PAYMENT_FAILED', at: new Date(), paymentStatus: 'FAILED', status: rental.status, razorpayOrderId: razorpay_order_id, razorpayPaymentId: razorpay_payment_id || null, reason: 'Vehicle unavailable after payment verification' });
@@ -558,11 +569,12 @@ exports.downloadInvoice = async (req, res) => {
 // Only return purchases belonging to the logged-in franchisee.
 exports.franchisePurchases = async (req, res) => {
   try {
-    const filter = { franchiseeId: req.user._id };
+    const filter = { franchiseeId: req.user._id, $or:[{rentalPlan:'SALE'},{rentalPlan:{$ne:'SALE'},returnDate:null}] };
     const purchases = await VehicleRental.find(filter)
-      .populate('customerId', 'name email phone address')
-      .populate('vehicleId', 'make model registrationNo year batteryCapacityKwh rangeKm rentalPlans securityDeposit bikeId')
-      .sort('-createdAt').lean();
+      .populate('customerId', 'name email phone')
+      .populate('vehicleId', 'make model registrationNo year chassisNo motorNo batteryCapacityKwh rangeKm rentalPlans securityDeposit bikeId odometerKm batterySoc')
+      .select('customerId vehicleId vehicleSource bikeId vehicleSnapshot rentalPlan planUnits durationDays rentalRate securityDeposit discountPercent discountAmount totalAmount price paymentStatus paidAt purchaseDate dueDate endDate handoverDate returnDate razorpayPaymentId rentalId bookingId extensionHistory extensionCount extensionPayments basePayment createdAt fullAddress customerLocation')
+      .sort('-createdAt').limit(250).lean();
     res.json(purchases.map(r => ({
       ...r,
       bikeId: r.bikeId || r.vehicleSnapshot?.bikeId || r.vehicleId?.bikeId || null,
@@ -856,27 +868,50 @@ exports.handover = async (req, res) => {
       return res.status(403).json({ message: 'You can only hand over vehicles sold by your franchisee.' });
 
     const now = new Date();
-    // Fleet operator may choose the physical Command Center bike at handover time.
-    if (req.body.vehicleId && String(req.body.vehicleId) !== String(rental.vehicleId || '')) {
+    // The booking itself does not consume stock. Only the exact physical
+    // Command Center bike handed over is decremented.
+    const requestedVehicleId = req.body.vehicleId || (
+      rental.vehicleSource === 'COMMAND_VEHICLE' ? rental.vehicleId : null
+    );
+    if (requestedVehicleId) {
       const { CommandVehicle, CustomerPayment } = require('../models');
-      const selected = await CommandVehicle.findOne({ _id:req.body.vehicleId, fleetOperatorId:req.user._id, status:'ACTIVE', fleetInventoryStatus:'ACTIVE', $or:[{quantity:{$gt:0}},{quantity:{$exists:false}}] });
+      const selected = await CommandVehicle.findOne({
+        _id: requestedVehicleId,
+        fleetOperatorId:req.user._id,
+        status:{ $in:['ASSIGNED','ACTIVE'] },
+        fleetInventoryStatus:'ACTIVE',
+        fleetLocationStatus:{$ne:'AT_CUSTOMER'},
+        $or:[{quantity:{$gte:1}},{quantity:{$exists:false}}]
+      }).lean();
       if (!selected) return res.status(409).json({ message:'Selected bike is not available in your active fleet inventory.' });
-      if (rental.vehicleSource === 'COMMAND_VEHICLE' && rental.vehicleId) {
-        await CommandVehicle.findByIdAndUpdate(rental.vehicleId, { $inc:{ quantity:1 } });
+
+      const handedOver = await CommandVehicle.findOneAndUpdate(
+        {
+          _id:selected._id,
+          fleetOperatorId:req.user._id,
+          fleetLocationStatus:{$ne:'AT_CUSTOMER'},
+          $or:[{quantity:{$gte:1}},{quantity:{$exists:false}}]
+        },
+        { $inc:{ quantity:-1 } },
+        { new:true }
+      );
+      if (!handedOver) return res.status(409).json({ message:'Selected bike is no longer available for handover.' });
+
+      if (String(selected._id) !== String(rental.vehicleId || '')) {
+        rental.vehicleId = selected._id;
+        rental.vehicleSource = 'COMMAND_VEHICLE';
+        rental.bikeId = selected.bikeId;
+        rental.vehicleSnapshot = {
+          ...rental.vehicleSnapshot, _id:selected._id, bikeId:selected.bikeId, make:selected.make, model:selected.model, year:selected.year, color:selected.color,
+          category:selected.category, registrationNo:selected.registrationNo, chassisNo:selected.chassisNo, motorNo:selected.motorNo, insuranceExpiry:selected.insuranceExpiry,
+          odometerKm:selected.odometerKm, seatingCapacity:selected.seatingCapacity, topSpeedKph:selected.topSpeedKph, batteryCapacityKwh:selected.batteryCapacityKwh,
+          rangeKm:selected.rangeKm, chargingType:selected.chargingType, images:selected.images, description:selected.description, rentalPlans:selected.rentalPlans,
+          securityDeposit:rental.securityDeposit, discountPercent:rental.discountPercent, discountAmount:rental.discountAmount, franchiseeId:req.user._id, franchiseeName:rental.franchiseeName
+        };
+        await CustomerPayment.updateMany({ rentalId:rental._id }, { $set:{ vehicleId:selected._id, bikeId:selected.bikeId, vehicleSnapshot:rental.vehicleSnapshot } });
       }
-      await CommandVehicle.findByIdAndUpdate(selected._id, { $inc:{ quantity:-1 } });
-      rental.vehicleId = selected._id;
-      rental.vehicleSource = 'COMMAND_VEHICLE';
-      rental.bikeId = selected.bikeId;
-      rental.vehicleSnapshot = {
-        ...rental.vehicleSnapshot, _id:selected._id, bikeId:selected.bikeId, make:selected.make, model:selected.model, year:selected.year, color:selected.color,
-        category:selected.category, registrationNo:selected.registrationNo, chassisNo:selected.chassisNo, motorNo:selected.motorNo, insuranceExpiry:selected.insuranceExpiry,
-        odometerKm:selected.odometerKm, seatingCapacity:selected.seatingCapacity, topSpeedKph:selected.topSpeedKph, batteryCapacityKwh:selected.batteryCapacityKwh,
-        rangeKm:selected.rangeKm, chargingType:selected.chargingType, images:selected.images, description:selected.description, rentalPlans:selected.rentalPlans,
-        securityDeposit:rental.securityDeposit, discountPercent:rental.discountPercent, discountAmount:rental.discountAmount, franchiseeId:req.user._id, franchiseeName:rental.franchiseeName
-      };
-      await CustomerPayment.updateMany({ rentalId:rental._id }, { $set:{ vehicleId:selected._id, bikeId:selected.bikeId, vehicleSnapshot:rental.vehicleSnapshot } });
     }
+
     const vs = rental.vehicleSnapshot || {};
     // Create the customer's owned-vehicle record exactly once.
     const { Vehicle } = require('../models');

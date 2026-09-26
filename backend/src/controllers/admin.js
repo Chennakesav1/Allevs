@@ -292,34 +292,59 @@ exports.createVehicle = async (req, res) => {
     if (!make || !model) return res.status(400).json({ message: 'Make and Model are required' });
 
     const quantity = Math.max(1, Number(req.body.quantity) || 1);
-    const rawBikeIds = Array.isArray(req.body.bikeIds)
-      ? req.body.bikeIds.map(x => String(x || '').trim()).filter(Boolean)
-      : (req.body.bikeId ? [String(req.body.bikeId).trim()] : []);
-    if (rawBikeIds.length !== quantity) {
-      return res.status(400).json({ message: `Enter a unique Bike ID for each bike. Expected ${quantity}, received ${rawBikeIds.length}.` });
-    }
-    const bikeIds = [...new Set(rawBikeIds)];
-    if (bikeIds.length !== quantity) return res.status(400).json({ message: 'Each Bike ID must be unique.' });
-    const existing = await CommandVehicle.find({ bikeId: { $in: bikeIds } }).select('bikeId').lean();
-    if (existing.length) return res.status(409).json({ message: `Bike ID already exists: ${existing.map(x => x.bikeId).join(', ')}` });
+    const details = Array.isArray(req.body.bikeDetails) && req.body.bikeDetails.length
+      ? req.body.bikeDetails.slice(0, quantity)
+      : (Array.isArray(req.body.bikeIds) ? req.body.bikeIds.slice(0, quantity).map(bikeId => ({ bikeId, registrationNo:req.body.registrationNo, chassisNo:req.body.chassisNo, motorNo:req.body.motorNo, insuranceExpiry:req.body.insuranceExpiry, odometerKm:req.body.odometerKm, seatingCapacity:req.body.seatingCapacity, topSpeedKph:req.body.topSpeedKph, batteryCapacityKwh:req.body.batteryCapacityKwh, rangeKm:req.body.rangeKm, chargingType:req.body.chargingType, pricePerDay:req.body.pricePerDay })) : []);
+    if (details.length !== quantity) return res.status(400).json({ message: `Enter complete details for all ${quantity} physical bike(s).` });
 
-    const base = {
-      ...req.body,
+    const normalizedDetails = details.map((d) => ({
+      ...d,
+      bikeId: String(d?.bikeId || '').trim(),
+      chassisNo: String(d?.chassisNo || '').trim(),
+    }));
+    if (normalizedDetails.some(d => !d.bikeId)) return res.status(400).json({ message: 'Bike ID is required for every physical bike.' });
+
+    const bikeIds = normalizedDetails.map(d => d.bikeId);
+    const chassisNos = normalizedDetails.map(d => d.chassisNo).filter(Boolean);
+    if (new Set(bikeIds.map(x => x.toLowerCase())).size !== bikeIds.length) return res.status(400).json({ message: 'Each Bike ID must be unique.' });
+    if (new Set(chassisNos.map(x => x.toLowerCase())).size !== chassisNos.length) return res.status(400).json({ message: 'Each Chassis / VIN Number must be unique.' });
+
+    const existing = await CommandVehicle.find({ $or: [
+      { bikeId: { $in: bikeIds } },
+      ...(chassisNos.length ? [{ chassisNo: { $in: chassisNos } }] : [])
+    ] }).select('bikeId chassisNo').lean();
+    if (existing.length) {
+      const conflicts = existing.map(x => [x.bikeId, x.chassisNo].filter(Boolean).join(' / ')).join(', ');
+      return res.status(409).json({ message: `Bike ID or Chassis / VIN already exists: ${conflicts}` });
+    }
+
+    const common = {
+      category: req.body.category,
+      make,
+      model,
+      year: req.body.year,
+      color: req.body.color,
+      description: req.body.description,
+      images: req.body.images,
       quantity: 1,
-      pricePerDay: Number(req.body.pricePerDay) || 0,
-      batteryCapacityKwh: req.body.batteryCapacityKwh ? Number(req.body.batteryCapacityKwh) : undefined,
-      rangeKm: req.body.rangeKm ? Number(req.body.rangeKm) : undefined,
-      chassisNo: req.body.chassisNo || undefined,
-      motorNo: req.body.motorNo || undefined,
-      insuranceExpiry: req.body.insuranceExpiry ? new Date(req.body.insuranceExpiry) : undefined,
-      odometerKm: req.body.odometerKm !== undefined && req.body.odometerKm !== '' ? Number(req.body.odometerKm) : undefined,
-      seatingCapacity: req.body.seatingCapacity !== undefined && req.body.seatingCapacity !== '' ? Number(req.body.seatingCapacity) : undefined,
-      topSpeedKph: req.body.topSpeedKph !== undefined && req.body.topSpeedKph !== '' ? Number(req.body.topSpeedKph) : undefined,
       status: 'UNASSIGNED',
       createdBy: req.user._id,
     };
-    delete base.bikeIds;
-    const vehicles = await CommandVehicle.insertMany(bikeIds.map(bikeId => ({ ...base, bikeId })));
+    const vehicles = await CommandVehicle.insertMany(normalizedDetails.map(d => ({
+      ...common,
+      bikeId: d.bikeId,
+      registrationNo: d.registrationNo || undefined,
+      chassisNo: d.chassisNo || undefined,
+      motorNo: d.motorNo || undefined,
+      insuranceExpiry: d.insuranceExpiry ? new Date(d.insuranceExpiry) : undefined,
+      odometerKm: d.odometerKm !== undefined && d.odometerKm !== '' ? Number(d.odometerKm) : undefined,
+      seatingCapacity: d.seatingCapacity !== undefined && d.seatingCapacity !== '' ? Number(d.seatingCapacity) : undefined,
+      topSpeedKph: d.topSpeedKph !== undefined && d.topSpeedKph !== '' ? Number(d.topSpeedKph) : undefined,
+      batteryCapacityKwh: d.batteryCapacityKwh !== undefined && d.batteryCapacityKwh !== '' ? Number(d.batteryCapacityKwh) : undefined,
+      rangeKm: d.rangeKm !== undefined && d.rangeKm !== '' ? Number(d.rangeKm) : undefined,
+      chargingType: d.chargingType || undefined,
+      pricePerDay: d.pricePerDay !== undefined && d.pricePerDay !== '' ? Number(d.pricePerDay) : 0,
+    })));
     res.status(201).json(vehicles.map(vehicle => ({
       ...vehicle.toObject(),
       franchiseeId: null, franchiseeName: null, franchiseeEmail: null,
@@ -555,6 +580,12 @@ exports.assignedVehicles = async (req, res) => {
       fleetOperatorId: req.user._id,
       status: { $in: ['ASSIGNED', 'ACTIVE'] },
     }).sort('-assignedAt').lean();
+
+    // Compact mode is used by the handover selector. It avoids the extra
+    // documents/rentals/customer joins needed by Fleet Inventory, making the
+    // vehicle assignment list appear immediately without changing the legacy endpoint.
+    if (String(req.query.compact || '') === '1') return res.json(vehicles);
+
     const vehicleIds = vehicles.map(v => v._id);
     const docs = await FleetDocument.find({ franchiseeId: req.user._id, vehicleId: { $in: vehicleIds } }).sort('-createdAt').lean();
     const rentals = await VehicleRental.find({
@@ -618,4 +649,4 @@ exports.createPart = async (req, res) => {
   } catch (e) {
     res.status(400).json({ message: e.message });
   }
-};
+};  

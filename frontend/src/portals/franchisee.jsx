@@ -36,6 +36,7 @@ const NAV_ITEMS = {
     { id: 'inventory',        label: 'Fleet Inventory',     Icon: Package,         cat: 'Fleet'      },
     { id: 'view-documents',  label: 'View Documents',      Icon: FileText,        cat: 'Fleet'      },
     { id: 'rentals',          label: 'Bookings & Rentals',   Icon: Car,             cat: 'Fleet'      },
+    { id: 'completed-returns', label: 'Completed Vehicle Returns', Icon: CheckCircle, cat: 'Fleet' },
     { id: 'maintenance',      label: 'Maintenance',          Icon: Wrench,          cat: 'Fleet'      },
     { id: 'fault-vehicles',   label: 'Fault Vehicles',       Icon: AlertTriangle,   cat: 'Fleet'      },
 
@@ -96,6 +97,7 @@ function api() {
   };
 }
 
+const FR_FETCH_CACHE = new Map();
 function useFetch(call, path) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
@@ -104,10 +106,13 @@ function useFetch(call, path) {
   useEffect(() => {
     if (!call || !path) return;
     let alive = true;
-    setLoading(true); setError(null);
+    const cached = FR_FETCH_CACHE.get(path);
+    if (cached) { setData(cached.data); setLoading(false); }
+    else setLoading(true);
+    setError(null);
     call(path)
-      .then(d  => { if (alive) setData(d); })
-      .catch(e => { if (alive) setError(e.message); })
+      .then(d => { if (alive) { FR_FETCH_CACHE.set(path,{data:d,at:Date.now()}); setData(d); } })
+      .catch(e => { if (alive && !cached) setError(e.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [path, rev]);
@@ -332,6 +337,7 @@ function PageRouter({ page, call, user, setPage }) {
     inventory:        <FranInventory  call={call} user={user} setPage={setPage} />,
     'view-documents': <FleetViewDocuments call={call} />,
     rentals:          <FranRentals   call={call} />,
+    'completed-returns': <CompletedVehicleReturns call={call} />,
     maintenance:     <FleetMaintenance call={call} />,
     customers:        <FleetCustomers call={call} />,
     payments:         <FleetPayments call={call} />,
@@ -2970,14 +2976,15 @@ function FranJobs({ call }) {
 
 function FranRentals({ call }) {
   const { data, loading, error, refresh } = useFetch(call, '/franchise/purchases');
-  const { data: fleetVehicles } = useFetch(call, '/franchise/assigned-vehicles');
+  const { data: fleetVehicles } = useFetch(call, '/franchise/fleet/vehicles');
   const [busy, setBusy] = useState(null);
   const [selected, setSelected] = useState(null);
   const [selectedMode, setSelectedMode] = useState('all');
   const [inspection, setInspection] = useState(null);
   const [handoverRental, setHandoverRental] = useState(null);
   const [handoverVehicleId, setHandoverVehicleId] = useState('');
-  const [inspectionForm, setInspectionForm] = useState({stage:'HANDOVER',odometerKm:'',batterySoc:'',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:''});
+  const [handoverVehicle, setHandoverVehicle] = useState(null);
+  const [inspectionForm, setInspectionForm] = useState({stage:'HANDOVER',vehicleId:'',odometerKm:'',batterySoc:'',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:'',returnDisposition:'COMPLETED'});
   const { toast, show } = useToast();
   const fmt = d => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
 
@@ -3037,20 +3044,38 @@ function FranRentals({ call }) {
       return g;
     });
   })();
+  const activeGroups = groups.filter(g => !['COMPLETED','CANCELLED'].includes(String(g.base?.status||'').toUpperCase()));
 
-  const openHandover = r => { setHandoverRental(r); setHandoverVehicleId(String(r.vehicleId?._id||r.vehicleId||'')); };
+  const fleetList=Array.isArray(fleetVehicles)?fleetVehicles:(fleetVehicles?.assigned||[]);
+  const fleetById=id => fleetList.find(v=>String(v._id)===String(id));
+  const openHandover = r => { setHandoverRental(r); setHandoverVehicleId(''); setHandoverVehicle(null); };
   const beginHandoverInspection = () => {
     if (!handoverRental || !handoverVehicleId) return;
-    const r = handoverRental;
-    setInspection(r);
-    setInspectionForm({stage:'HANDOVER',vehicleId:handoverVehicleId,odometerKm:'',batterySoc:'',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:''});
+    const vehicle=fleetById(handoverVehicleId);
+    if(!vehicle)return;
+    setHandoverVehicle(vehicle);
+    setInspection(handoverRental);
+    setInspectionForm({stage:'HANDOVER',vehicleId:vehicle._id,odometerKm:vehicle.odometerKm ?? '',batterySoc:vehicle.batterySoc ?? '',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:'',returnDisposition:'FLEET'});
     setHandoverRental(null);
   };
-  const handover = async () => { if(!handoverRental) return; beginHandoverInspection(); };
-  const fleetList=Array.isArray(fleetVehicles)?fleetVehicles:(fleetVehicles?.assigned||[]);
-  const handoverOptions=handoverRental?fleetList.filter(v=>v.fleetInventoryStatus==='ACTIVE' && v.fleetLocationStatus!=='AT_CUSTOMER' && (String(v._id)===String(handoverRental.vehicleId?._id||handoverRental.vehicleId||'') || ((Number(v.quantity??1)>0) && (!handoverRental.vehicleSnapshot?.make || (String(v.make||'').toLowerCase()===String(handoverRental.vehicleSnapshot.make||'').toLowerCase() && String(v.model||'').toLowerCase()===String(handoverRental.vehicleSnapshot.model||'').toLowerCase()))))):[];
-  const openInspection = (r, stage) => { setInspection(r); setInspectionForm({stage,vehicleId:stage==='HANDOVER'?String(r.vehicleId?._id||r.vehicleId||handoverVehicleId||''):undefined,odometerKm:'',batterySoc:'',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:''}); };
-  const saveInspection = async () => { if(!inspection) return; setBusy(inspection._id); try { await call(`/franchise/fleet/rentals/${inspection._id}/inspection`,{method:'post',data:inspectionForm}); show(inspectionForm.stage==='HANDOVER'?'Handover inspection completed and vehicle marked as handed over.':'Return inspection completed.'); setInspection(null); refresh(); } catch(e){show(e.response?.data?.message||'Inspection failed','error')} finally{setBusy(null)} };
+  const handoverOptions=handoverRental?fleetList.filter(v=>['ACTIVE','ASSIGNED'].includes(String(v.status||'').toUpperCase())):[];
+  const openInspection = (r, stage) => {
+    const id=String(r.vehicleId?._id||r.vehicleId||'');
+    const vehicle=fleetById(id);
+    setHandoverVehicle(vehicle||null);
+    setInspection(r);
+    setInspectionForm({stage,vehicleId:id,odometerKm:vehicle?.odometerKm ?? r.vehicleSnapshot?.odometerKm ?? '',batterySoc:vehicle?.batterySoc ?? r.vehicleSnapshot?.batterySoc ?? '',damageNotes:'',customerConfirmed:true,extraCharges:0,notes:'',returnDisposition:stage==='RETURN'?'FLEET':'FLEET'});
+  };
+  const saveInspection = async disposition => {
+    if(!inspection)return;
+    setBusy(inspection._id);
+    try{
+      const payload={...inspectionForm,returnDisposition:(disposition||inspectionForm.returnDisposition||'FLEET')==='FAULT'?'FAULT':'FLEET'};
+      await call(`/franchise/fleet/rentals/${inspection._id}/inspection`,{method:'post',data:payload});
+      show(payload.stage==='HANDOVER'?'Handover inspection completed and vehicle marked as handed over.':payload.returnDisposition==='FAULT'?'Vehicle returned and moved to Fault Vehicles.':'Vehicle return completed.');
+      setInspection(null); setHandoverVehicle(null); refresh();
+    }catch(e){show(e.response?.data?.message||'Inspection failed','error')}finally{setBusy(null)}
+  };
   if (loading) return <Loader />; if (error) return <Err msg={error} />;
 
   const openDetails = (g, mode='all') => { setSelected(g); setSelectedMode(mode); };
@@ -3063,14 +3088,14 @@ function FranRentals({ call }) {
     <Toast toast={toast}/>
     <PageHeader title="Vehicle Sales & Rentals" />
     <MetricGrid metrics={[
-      {label:'Vehicles',value:groups.length,Icon:ClipboardList,color:'#2563eb'},
-      {label:'Paid',value:groups.filter(g=>g.base?.paymentStatus==='PAID').length,Icon:CheckCircle,color:'#16a34a'},
-      {label:'Awaiting Handover',value:groups.filter(g=>g.base?.paymentStatus==='PAID'&&!g.base?.handoverDate).length,Icon:Clock,color:'#d97706'},
+      {label:'Vehicles',value:activeGroups.length,Icon:ClipboardList,color:'#2563eb'},
+      {label:'Paid',value:activeGroups.filter(g=>g.base?.paymentStatus==='PAID').length,Icon:CheckCircle,color:'#16a34a'},
+      {label:'Awaiting Handover',value:activeGroups.filter(g=>g.base?.paymentStatus==='PAID'&&!g.base?.handoverDate).length,Icon:Clock,color:'#d97706'},
       {label:'Extensions',value:groups.reduce((n,g)=>n+g.extensionHistory.length,0),Icon:RefreshCw,color:'#7c3aed'}
     ]}/>
 
     <div className="fr-rental-ledger">
-      {groups.map(g=>{
+      {activeGroups.map(g=>{
         const r=g.base||{}; const vs=r.vehicleSnapshot||{}; const cust=r.customerId||{};
         const bikeId=r.bikeId||vs.bikeId||r.vehicleId?.bikeId||'—';
         const vehicle=[vs.make,vs.model].filter(Boolean).join(' ')||'Vehicle';
@@ -3112,7 +3137,7 @@ function FranRentals({ call }) {
           </div>
         </article>
       })}
-      {!groups.length&&<div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer vehicle purchases for this fleet operator.</p></div></div>}
+      {!activeGroups.length&&<div className="card"><div className="empty-state"><Car size={40} style={{opacity:.25}}/><p>No customer vehicle purchases for this fleet operator.</p></div></div>}
     </div>
 
     {selected&&<div className="modal-overlay" onClick={()=>setSelected(null)}><div className="modal-drawer fr-rental-detail-modal" onClick={e=>e.stopPropagation()}>
@@ -3128,9 +3153,15 @@ function FranRentals({ call }) {
       <div className="modal-footer"><button className="btn-ghost" onClick={()=>setSelected(null)}>Close</button></div>
     </div></div>}
 
-    {handoverRental&&<div className="modal-overlay" onClick={()=>!busy&&setHandoverRental(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(560px,100%)'}}><div className="modal-head"><div><div className="modal-title">Select Fleet Inventory Vehicle</div><div className="modal-subtitle">{handoverRental.customerId?.name||'Customer'} · {handoverRental.vehicleSnapshot?.make||''} {handoverRental.vehicleSnapshot?.model||''}</div></div><button className="icon-btn" onClick={()=>setHandoverRental(null)}>✕</button></div><div className="modal-body"><div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:12,padding:12,marginBottom:14}}><div style={{fontSize:11,color:'#64748b',fontWeight:700,textTransform:'uppercase'}}>Paid booking</div><div style={{fontWeight:800,marginTop:4}}>{handoverRental.vehicleSnapshot?.make||''} {handoverRental.vehicleSnapshot?.model||''}</div><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Customer: {handoverRental.customerId?.name||'—'} · Plan: {handoverRental.rentalPlan||'SALE'}</div></div><Fld label="Fleet Inventory vehicle" required><select value={handoverVehicleId} onChange={e=>setHandoverVehicleId(e.target.value)}><option value="">Select physical bike…</option>{handoverOptions.map(v=><option key={v._id} value={v._id}>{v.bikeId||'No Bike ID'} · {v.make} {v.model} · {v.registrationNo||'No registration'}</option>)}</select></Fld>{handoverOptions.length===0&&<div style={{marginTop:10,padding:10,borderRadius:10,background:'#fff7ed',color:'#9a3412',fontSize:12}}>No active Fleet Inventory vehicle is available for this booking.</div>}<div style={{marginTop:14,padding:12,borderRadius:12,background:'#eff6ff',color:'#1e40af',fontSize:12}}><strong>Next step:</strong> select the physical Bike ID, then complete the <strong>Handover Inspection</strong>. The final action will be <strong>Mark Handover</strong>.</div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setHandoverRental(null)}>Cancel</button><button className="btn-primary" disabled={busy===handoverRental._id||!handoverVehicleId} onClick={beginHandoverInspection}>🔍 Handover Inspect →</button></div></div></div>}
+    {handoverRental&&<div className="modal-overlay" onClick={()=>!busy&&setHandoverRental(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()} style={{width:'min(560px,100%)'}}><div className="modal-head"><div><div className="modal-title">Select Fleet Inventory Vehicle</div><div className="modal-subtitle">{handoverRental.customerId?.name||'Customer'} · {handoverRental.vehicleSnapshot?.make||''} {handoverRental.vehicleSnapshot?.model||''}</div></div><button className="icon-btn" onClick={()=>setHandoverRental(null)}>✕</button></div><div className="modal-body"><div style={{background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:12,padding:12,marginBottom:14}}><div style={{fontSize:11,color:'#64748b',fontWeight:700,textTransform:'uppercase'}}>Paid booking</div><div style={{fontWeight:800,marginTop:4}}>{handoverRental.vehicleSnapshot?.make||''} {handoverRental.vehicleSnapshot?.model||''}</div><div style={{fontSize:12,color:'#64748b',marginTop:4}}>Customer: {handoverRental.customerId?.name||'—'} · Plan: {handoverRental.rentalPlan||'SALE'}</div></div><Fld label="Fleet Inventory vehicle" required><select value={handoverVehicleId} onChange={e=>setHandoverVehicleId(e.target.value)}><option value="">Select any Fleet Inventory vehicle…</option>{handoverOptions.map(v=><option key={v._id} value={v._id}>{v.bikeId||'No Bike ID'} · {v.make} {v.model} · {v.registrationNo||'No registration'} · {String(v.fleetLocationStatus||'AT_FLEET').replaceAll('_',' ')}</option>)}</select></Fld>{handoverOptions.length===0&&<div style={{marginTop:10,padding:10,borderRadius:10,background:'#fff7ed',color:'#9a3412',fontSize:12}}>No Fleet Inventory vehicles are assigned to this fleet operator.</div>}<div style={{marginTop:14,padding:12,borderRadius:12,background:'#eff6ff',color:'#1e40af',fontSize:12}}><strong>Next step:</strong> select the physical Bike ID, then complete the <strong>Handover Inspection</strong>. The final action will be <strong>Mark Handover</strong>.</div></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setHandoverRental(null)}>Cancel</button><button className="btn-primary" disabled={busy===handoverRental._id||!handoverVehicleId} onClick={beginHandoverInspection}>🔍 Handover Inspect →</button></div></div></div>}
 
-{inspection&&<div className="modal-overlay" onClick={()=>setInspection(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="modal-title">{inspectionForm.stage==='HANDOVER'?'Handover Inspection':'Return Inspection'}</div><div className="modal-subtitle">{inspectionForm.stage==='HANDOVER'?'Selected Fleet Inventory vehicle: '+(handoverVehicleId||inspectionForm.vehicleId||'—'):'Inspect vehicle before return completion.'}</div></div><button className="icon-btn" onClick={()=>setInspection(null)}>✕</button></div><div className="modal-body"><div className="two-col-grid"><Fld label="Odometer (km)"><input value={inspectionForm.odometerKm} onChange={e=>setInspectionForm(f=>({...f,odometerKm:e.target.value}))}/></Fld><Fld label="Battery SOC (%)"><input value={inspectionForm.batterySoc} onChange={e=>setInspectionForm(f=>({...f,batterySoc:e.target.value}))}/></Fld></div><Fld label="Damage notes"><textarea value={inspectionForm.damageNotes} onChange={e=>setInspectionForm(f=>({...f,damageNotes:e.target.value}))}/></Fld><Fld label="Extra charges"><input type="number" min="0" value={inspectionForm.extraCharges} onChange={e=>setInspectionForm(f=>({...f,extraCharges:e.target.value}))}/></Fld><Fld label="Notes"><textarea value={inspectionForm.notes} onChange={e=>setInspectionForm(f=>({...f,notes:e.target.value}))}/></Fld><label style={{display:'flex',alignItems:'center',gap:8,fontSize:13}}><input type="checkbox" checked={inspectionForm.customerConfirmed} onChange={e=>setInspectionForm(f=>({...f,customerConfirmed:e.target.checked}))}/> Customer confirmed</label></div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setInspection(null)}>Cancel</button><button className="btn-primary" disabled={busy===inspection._id} onClick={saveInspection}>{busy===inspection._id?'Marking…':inspectionForm.stage==='HANDOVER'?'✓ Mark Handover':'Save Inspection'}</button></div></div></div>}
+{inspection&&<div className="modal-overlay" onClick={()=>setInspection(null)}><div className="modal-drawer" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="modal-title">{inspectionForm.stage==='HANDOVER'?'Handover Inspection':'Return Inspection'}</div><div className="modal-subtitle">{inspection.customerId?.name||'Customer'} · {handoverVehicle?.bikeId||inspection.vehicleSnapshot?.bikeId||'Bike'} · {handoverVehicle?.chassisNo||inspection.vehicleSnapshot?.chassisNo||'VIN —'}</div></div><button className="icon-btn" onClick={()=>setInspection(null)}>✕</button></div><div className="modal-body">
+    {handoverVehicle&&<div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10,marginBottom:14}}>
+      {[['Bike ID',handoverVehicle.bikeId],['Chassis / VIN',handoverVehicle.chassisNo],['Registration',handoverVehicle.registrationNo],['Motor Number',handoverVehicle.motorNo],['Battery Capacity',handoverVehicle.batteryCapacityKwh?`${handoverVehicle.batteryCapacityKwh} kWh`:'—'],['Range',handoverVehicle.rangeKm?`${handoverVehicle.rangeKm} km`:'—'],['Charging Type',handoverVehicle.chargingType],['Top Speed',handoverVehicle.topSpeedKph?`${handoverVehicle.topSpeedKph} km/h`:'—']].map(([k,v])=><div key={k} style={{padding:10,border:'1px solid #e2e8f0',borderRadius:10,background:'#f8fafc'}}><small style={{display:'block',color:'#64748b',fontSize:10,fontWeight:700,textTransform:'uppercase'}}>{k}</small><strong style={{display:'block',marginTop:4,fontSize:12}}>{v||'—'}</strong></div>)}
+    </div>}
+    <div className="two-col-grid"><Fld label="Odometer (km)"><input type="number" min="0" value={inspectionForm.odometerKm} onChange={e=>setInspectionForm(f=>({...f,odometerKm:e.target.value}))}/></Fld><Fld label="Battery SOC (%)"><input type="number" min="0" max="100" value={inspectionForm.batterySoc} onChange={e=>setInspectionForm(f=>({...f,batterySoc:e.target.value}))}/></Fld></div>
+    <Fld label="Damage notes"><textarea value={inspectionForm.damageNotes} onChange={e=>setInspectionForm(f=>({...f,damageNotes:e.target.value}))}/></Fld>{inspectionForm.stage==='RETURN'&&<Fld label="Extra charges"><input type="number" min="0" value={inspectionForm.extraCharges} onChange={e=>setInspectionForm(f=>({...f,extraCharges:e.target.value}))}/></Fld>}<Fld label="Notes"><textarea value={inspectionForm.notes} onChange={e=>setInspectionForm(f=>({...f,notes:e.target.value}))}/></Fld><label style={{display:'flex',alignItems:'center',gap:8,fontSize:13}}><input type="checkbox" checked={inspectionForm.customerConfirmed} onChange={e=>setInspectionForm(f=>({...f,customerConfirmed:e.target.checked}))}/> Customer confirmed</label>
+  </div><div className="modal-footer"><button className="btn-ghost" onClick={()=>setInspection(null)}>Cancel</button>{inspectionForm.stage==='HANDOVER'?<button className="btn-primary" disabled={busy===inspection._id} onClick={()=>saveInspection('FLEET')}>{busy===inspection._id?'Saving…':'✓ Inspect & Handover'}</button>:<><button className="btn-ghost" disabled={busy===inspection._id} onClick={()=>saveInspection('FAULT')} style={{color:'#b91c1c',borderColor:'#fecaca'}}>⚠ Move to Fault Vehicles</button><button className="btn-primary" disabled={busy===inspection._id} onClick={()=>saveInspection('COMPLETED')}>{busy===inspection._id?'Saving…':'✓ Complete Vehicle Return'}</button></>}</div></div></div>}
   </>;
 }
 
@@ -3981,7 +4012,14 @@ function FranHubMap({ hubs, selectedHub, onSelectHub }) {
     markersRef.current.forEach(m => { try { map.removeLayer(m); } catch (_) {} });
     markersRef.current = [];
     const list = Array.isArray(hubs) ? hubs : [];
-    const coordsList = list.map(h => ({ hub: h, coords: franGetCoords(h) })).filter(x => x.coords);
+    const seenCoords = new Set();
+    const coordsList = list.map(h => ({ hub: h, coords: franGetCoords(h) })).filter(x => {
+      if (!x.coords) return false;
+      const key = `${Number(x.coords[0]).toFixed(6)},${Number(x.coords[1]).toFixed(6)}`;
+      if (seenCoords.has(key)) return false;
+      seenCoords.add(key);
+      return true;
+    });
     if (!coordsList.length) return;
     const bounds = coordsList.map(x => x.coords);
     if (bounds.length === 1) map.setView(bounds[0], 15, { animate: false });
@@ -4002,10 +4040,12 @@ function FranHubMap({ hubs, selectedHub, onSelectHub }) {
 
   function placeFranMarker(map, hub, coords, number) {
     const color = FRAN_HUB_STATUS_COLOR[hub.status] || '#2563eb';
-    const marker = window.L.circleMarker(coords, {
-      radius: 10, fillColor: color, color: '#fff', weight: 2,
-      opacity: 1, fillOpacity: 1, pane: 'markerPane',
-    }).addTo(map);
+    const icon = window.L.divIcon({
+      className: '',
+      html: `<div style="width:34px;height:34px;border-radius:50%;background:#fff;border:2px solid ${color};box-shadow:0 2px 9px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;">⚡</div>`,
+      iconSize: [34,34], iconAnchor: [17,17], popupAnchor: [0,-17]
+    });
+    const marker = window.L.marker(coords, { icon, pane: 'markerPane' }).addTo(map);
     const detail = [
       `<strong>${String(hub.name || hub.hubName || `Location ${number}`)}</strong>`,
       hub.city ? `City: ${String(hub.city)}` : '',
@@ -4014,10 +4054,6 @@ function FranHubMap({ hubs, selectedHub, onSelectHub }) {
       hub.status ? `Status: ${String(hub.status)}` : '',
       (hub.swaps !== undefined && hub.swaps !== null && hub.swaps !== '') ? `Swaps: ${String(hub.swaps)}` : ''
     ].filter(Boolean).join('<br/>');
-    marker.bindTooltip(String(number), {
-      permanent: true, direction: 'center', className: 'hub-map-number',
-      opacity: 1, offset: [0, 0]
-    }).openTooltip();
     marker.bindPopup(detail, { closeButton: true, autoPan: false, maxWidth: 320 });
     marker.on('mouseover', () => marker.openPopup());
     marker.on('mouseout', () => marker.closePopup());
@@ -5213,6 +5249,18 @@ function FleetBroadcasts({call}){
     <Fld label="Message"><textarea rows="5" value={form.message} onChange={e=>setForm({...form,message:e.target.value})} placeholder="Write the announcement customers should see…"/></Fld>
     {form.sendTo==='SELECTED'&&<div className="fr-recipient-list">{(customers||[]).map(c=><label key={c._id}><input type="checkbox" checked={form.recipientIds.includes(c._id)} onChange={e=>setForm({...form,recipientIds:e.target.checked?[...form.recipientIds,c._id]:form.recipientIds.filter(x=>x!==c._id)})}/><span>{c.name} · {c.email}</span></label>)}</div>}
     <button className="btn-primary" disabled={busy} onClick={submit}><Send size={15}/>{busy?'Sending…':'Send Customer Pop-up'}</button>
+  </Card></>;
+}
+
+
+function CompletedVehicleReturns({call}){
+  const {data,loading,error}=useFetch(call,'/franchise/purchases');
+  if(loading)return <Loader/>;
+  if(error)return <Err msg={error}/>;
+  const rows=(Array.isArray(data)?data:[]).filter(r=>String(r.status||'').toUpperCase()==='COMPLETED' && r.returnDate);
+  const fmt=d=>d?new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'—';
+  return <><PageHeader title="Completed Vehicle Returns" sub="Completed customer returns and the final physical vehicle readings."/><Card title="Completed Returns" badge={`${rows.length} returns`}>
+    {!rows.length?<div className="empty-state"><CheckCircle size={40} style={{opacity:.25}}/><p>No completed vehicle returns yet.</p></div>:<div style={{display:'grid',gap:10}}>{rows.map(r=>{const v=r.vehicleSnapshot||{};const fault=String(r.bookingHistory?.slice?.(-1)?.[0]?.returnDisposition||'COMPLETED').toUpperCase()==='FAULT';return <div key={r._id} style={{border:'1px solid #e2e8f0',borderRadius:12,padding:14,background:'#fff'}}><div style={{display:'flex',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}><div><strong>{v.make||''} {v.model||'Vehicle'}</strong><div style={{fontSize:12,color:'#64748b',marginTop:4}}>{r.customerId?.name||'Customer'} · {r.bikeId||v.bikeId||'—'}</div></div><span style={{fontSize:11,fontWeight:800,color:fault?'#b91c1c':'#15803d'}}>{fault?'FAULT VEHICLE':'RETURN COMPLETED'}</span></div><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:8,marginTop:12,fontSize:12,color:'#475569'}}><span><b>Chassis/VIN:</b> {v.chassisNo||v.vin||'—'}</span><span><b>Registration:</b> {v.registrationNo||'—'}</span><span><b>Odometer:</b> {r.bookingHistory?.slice?.(-1)?.[0]?.odometerKm ?? v.odometerKm ?? '—'} km</span><span><b>Battery:</b> {r.bookingHistory?.slice?.(-1)?.[0]?.batterySoc ?? v.batterySoc ?? '—'}%</span><span><b>Returned:</b> {fmt(r.returnDate)}</span></div></div>})}</div>}
   </Card></>;
 }
 

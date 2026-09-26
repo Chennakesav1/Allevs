@@ -158,6 +158,8 @@ fr.post('/fleet/maintenance',   Fr.createMaintenance);
 fr.put( '/fleet/maintenance/:id', Fr.updateMaintenance);
 fr.post('/fleet/rentals/:id/inspection', Fr.handoverInspection);
 fr.get( '/fleet/vehicles/:vehicleId/inspection-history', Fr.vehicleInspectionHistory);
+fr.get( '/fleet/available-vehicles', Fr.availableFleetVehicles);
+fr.get( '/fleet/completed-returns', Fr.completedVehicleReturns);
 fr.get( '/fleet/customers',     Fr.customers);
 fr.get( '/coupons',             Fr.coupons);
 fr.post('/coupons',             Fr.createCoupon);

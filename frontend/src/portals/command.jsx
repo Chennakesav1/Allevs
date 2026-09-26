@@ -937,19 +937,20 @@ function IndiaHubMap({ hubs, selectedHub, onSelectHub, visible }) {
   const drawMarkers = map => {
     clearMarkers(map);
     const allCoords = [];
+    const seenCoords = new Set();
     (hubs || []).forEach(hub => {
       const coords = getHubCoords(hub);
       if (!coords || !Number.isFinite(coords[0]) || !Number.isFinite(coords[1])) return;
+      const key = `${Number(coords[0]).toFixed(6)},${Number(coords[1]).toFixed(6)}`;
+      if (seenCoords.has(key)) return;
+      seenCoords.add(key);
       const color = HUB_STATUS_COLOR[hub.status] || '#2563eb';
-      const marker = window.L.circleMarker(coords, {
-        radius: 7,
-        fillColor: color,
-        color: '#fff',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.95,
-        pane: 'markerPane',
-      }).addTo(map);
+      const icon = window.L.divIcon({
+        className: '',
+        html: `<div style="width:34px;height:34px;border-radius:50%;background:#fff;border:2px solid ${color};box-shadow:0 2px 9px rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;">⚡</div>`,
+        iconSize: [34,34], iconAnchor: [17,17], popupAnchor: [0,-17]
+      });
+      const marker = window.L.marker(coords, { icon, pane: 'markerPane' }).addTo(map);
       marker.on('mouseover', e => {
         const pt = map.latLngToContainerPoint(e.latlng);
         setTooltip({ hub, x: pt.x, y: pt.y });
@@ -2217,7 +2218,8 @@ function AdminVehicleInventory({ call }) {
   const { toast, show } = useToast();
 
   // Vehicle form
-  const EMPTY_VEH = { category:'', make:'', model:'', year:'', color:'', registrationNo:'', chassisNo:'', motorNo:'', insuranceExpiry:'', odometerKm:'', seatingCapacity:'', topSpeedKph:'', batteryCapacityKwh:'', rangeKm:'', chargingType:'', pricePerDay:'', quantity:'1', bikeIds:[''], description:'', images:[] };
+  const emptyBikeDetail = () => ({ bikeId:'', registrationNo:'', chassisNo:'', motorNo:'', insuranceExpiry:'', odometerKm:'', seatingCapacity:'', topSpeedKph:'', batteryCapacityKwh:'', rangeKm:'', chargingType:'', pricePerDay:'' });
+  const EMPTY_VEH = { category:'', make:'', model:'', year:'', color:'', quantity:'1', bikeDetails:[emptyBikeDetail()], description:'', images:[] };
   const [vehForm, setVehForm] = useState(EMPTY_VEH);
   const [savingVeh, setSavingVeh] = useState(false);
   const vf = k => e => setVehForm(f => ({ ...f, [k]: e.target.value }));
@@ -2263,10 +2265,13 @@ function AdminVehicleInventory({ call }) {
     setSavingVeh(true);
     try {
       const qty = Number(vehForm.quantity)||1;
-      const bikeIds = (vehForm.bikeIds||[]).map(x=>String(x||'').trim());
-      if (bikeIds.length !== qty || bikeIds.some(x=>!x)) { show(`Enter a unique Bike ID for each of the ${qty} bike(s).`, 'error'); return; }
+      const bikeDetails = (vehForm.bikeDetails||[]).slice(0, qty).map(x=>({...x, bikeId:String(x.bikeId||'').trim(), chassisNo:String(x.chassisNo||'').trim()}));
+      if (bikeDetails.length !== qty || bikeDetails.some(x=>!x.bikeId)) { show(`Enter a Bike ID for each of the ${qty} bike(s).`, 'error'); return; }
+      const bikeIds = bikeDetails.map(x=>x.bikeId);
+      const chassisNos = bikeDetails.map(x=>x.chassisNo).filter(Boolean);
       if (new Set(bikeIds.map(x=>x.toLowerCase())).size !== bikeIds.length) { show('Bike IDs must be unique.', 'error'); return; }
-      const payload = { ...vehForm, bikeIds, batteryCapacityKwh: Number(vehForm.batteryCapacityKwh)||undefined, rangeKm: Number(vehForm.rangeKm)||undefined, pricePerDay: Number(vehForm.pricePerDay)||0, quantity: qty };
+      if (new Set(chassisNos.map(x=>x.toLowerCase())).size !== chassisNos.length) { show('Chassis / VIN numbers must be unique.', 'error'); return; }
+      const payload = { category:vehForm.category, make:vehForm.make, model:vehForm.model, year:vehForm.year, color:vehForm.color, description:vehForm.description, images:vehForm.images, quantity:qty, bikeDetails };
       const created = await call('/admin/vehicles', { method:'post', data:payload });
       const list = Array.isArray(created) ? created : (created?.vehicles || [created]);
       setVehicles(prev => [...list, ...prev]);
@@ -2382,6 +2387,7 @@ function AdminVehicleInventory({ call }) {
                     <tr>
                       <th>Select</th>
                       <th>Bike ID</th>
+                      <th>Chassis / VIN</th>
                       <th>Vehicle</th>
                       <th>Category</th>
                       <th>Reg. No.</th>
@@ -2540,61 +2546,36 @@ function AdminVehicleInventory({ call }) {
                 <label className="fld-label">Color</label>
                 <input className="fld-input" placeholder="e.g. Midnight Blue" value={vehForm.color} onChange={vf('color')} />
               </div>
-              <div className="fld">
-                <label className="fld-label">Registration No.</label>
-                <input className="fld-input" placeholder="e.g. TN09AB1234" value={vehForm.registrationNo} onChange={vf('registrationNo')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Chassis / VIN Number</label>
-                <input className="fld-input" placeholder="Vehicle chassis / VIN" value={vehForm.chassisNo} onChange={vf('chassisNo')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Motor Number</label>
-                <input className="fld-input" placeholder="Motor / engine number" value={vehForm.motorNo} onChange={vf('motorNo')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Insurance Expiry</label>
-                <input className="fld-input" type="date" value={vehForm.insuranceExpiry} onChange={vf('insuranceExpiry')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Odometer (km)</label>
-                <input className="fld-input" type="number" min="0" placeholder="e.g. 12450" value={vehForm.odometerKm} onChange={vf('odometerKm')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Seating Capacity</label>
-                <input className="fld-input" type="number" min="1" placeholder="e.g. 2" value={vehForm.seatingCapacity} onChange={vf('seatingCapacity')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Top Speed (km/h)</label>
-                <input className="fld-input" type="number" min="0" placeholder="e.g. 80" value={vehForm.topSpeedKph} onChange={vf('topSpeedKph')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Battery Capacity (kWh)</label>
-                <input className="fld-input" type="number" placeholder="e.g. 2.9" value={vehForm.batteryCapacityKwh} onChange={vf('batteryCapacityKwh')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Range (km)</label>
-                <input className="fld-input" type="number" placeholder="e.g. 116" value={vehForm.rangeKm} onChange={vf('rangeKm')} />
-              </div>
-              <div className="fld">
-                <label className="fld-label">Charging Type</label>
-                <select className="fld-input" value={vehForm.chargingType} onChange={vf('chargingType')}>
-                  <option value="">— Select —</option>
-                  <option>Fast Charging</option><option>Normal Charging</option><option>Swappable Battery</option>
-                </select>
-              </div>
-              <div className="fld">
-                <label className="fld-label">Reference Sale Price (₹)</label>
-                <input className="fld-input" type="number" placeholder="e.g. 125000" value={vehForm.pricePerDay} onChange={vf('pricePerDay')} />
+              <div style={{gridColumn:'1/-1',marginTop:4,padding:'12px 14px',borderRadius:12,background:'#eff6ff',border:'1px solid #bfdbfe',fontSize:12,color:'#1e3a8a'}}>
+                <strong>Common vehicle information</strong><div style={{marginTop:3,color:'#475569'}}>The fields below are entered separately for every physical bike because registration, VIN, motor, insurance, odometer, battery and pricing can differ from bike to bike.</div>
               </div>
               <div className="fld">
                 <label className="fld-label">Quantity</label>
-                <input className="fld-input" type="number" min="1" placeholder="1" value={vehForm.quantity} onChange={e=>{const q=Math.max(1,Number(e.target.value)||1);setVehForm(f=>{const ids=[...(f.bikeIds||[])];while(ids.length<q)ids.push('');return {...f,quantity:String(q),bikeIds:ids.slice(0,q)}})}} />
+                <input className="fld-input" type="number" min="1" placeholder="1" value={vehForm.quantity} onChange={e=>{const q=Math.max(1,Number(e.target.value)||1);setVehForm(f=>{const details=[...(f.bikeDetails||[])];while(details.length<q)details.push(emptyBikeDetail());return {...f,quantity:String(q),bikeDetails:details.slice(0,q)}})}} />
               </div>
             </div>
-            <div className="command-bike-id-panel">
-              <div className="command-bike-id-head"><div><strong>Individual Bike IDs</strong><small>Every physical bike gets its own permanent ID for assignment, service and alerts.</small></div><span>{(vehForm.bikeIds||[]).length} ID{(vehForm.bikeIds||[]).length!==1?'s':''}</span></div>
-              <div className="command-bike-id-grid">{(vehForm.bikeIds||['']).map((id,idx)=><div className="command-bike-id-row" key={idx}><span>{String(idx+1).padStart(2,'0')}</span><input className="fld-input" value={id} placeholder={`e.g. ALV-BIKE-${String(idx+1).padStart(3,'0')}`} onChange={e=>setVehForm(f=>({...f,bikeIds:(f.bikeIds||[]).map((x,i)=>i===idx?e.target.value:x)}))}/></div>)}</div>
+            <div className="command-bike-id-panel" style={{marginTop:14}}>
+              <div className="command-bike-id-head"><div><strong>Individual Bike Details</strong><small>Each quantity gets its own Bike ID plus complete physical-bike details. These values are stored separately.</small></div><span>{(vehForm.bikeDetails||[]).length} Bike{(vehForm.bikeDetails||[]).length!==1?'s':''}</span></div>
+              <div style={{display:'grid',gap:14,marginTop:12}}>
+                {(vehForm.bikeDetails||[emptyBikeDetail()]).map((b,idx)=><div key={idx} style={{border:'1px solid #dbe4ef',borderRadius:14,padding:14,background:'#fff'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}><strong>Bike {String(idx+1).padStart(2,'0')}</strong><span style={{fontSize:11,color:'#64748b'}}>Physical unit #{idx+1}</span></div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                    {[
+                      ['bikeId','Bike ID','e.g. ALV-BIKE-001','text'],['registrationNo','Registration No.','e.g. TS09AB1234','text'],
+                      ['chassisNo','Chassis / VIN Number','Vehicle chassis / VIN','text'],['motorNo','Motor Number','Motor / engine number','text'],
+                      ['insuranceExpiry','Insurance Expiry','','date'],['odometerKm','Odometer (km)','e.g. 12450','number'],
+                      ['seatingCapacity','Seating Capacity','e.g. 2','number'],['topSpeedKph','Top Speed (km/h)','e.g. 80','number'],
+                      ['batteryCapacityKwh','Battery Capacity (kWh)','e.g. 2.9','number'],['rangeKm','Range (km)','e.g. 150','number'],
+                      ['chargingType','Charging Type','','select'],['pricePerDay','Reference Sale Price (₹)','e.g. 125000','number']
+                    ].map(([key,label,placeholder,type])=><div className="fld" key={key}>
+                      <label className="fld-label">{label}{key==='bikeId'&&<span style={{color:'#dc2626'}}> *</span>}</label>
+                      {type==='select'
+                        ? <select className="fld-input" value={b[key]||''} onChange={e=>setVehForm(f=>({...f,bikeDetails:f.bikeDetails.map((x,i)=>i===idx?{...x,[key]:e.target.value}:x)}))}><option value="">— Select —</option><option>Fast Charging</option><option>Normal Charging</option><option>Swappable Battery</option></select>
+                        : <input className="fld-input" type={type} min={type==='number'?'0':undefined} placeholder={placeholder} value={b[key]||''} onChange={e=>setVehForm(f=>({...f,bikeDetails:f.bikeDetails.map((x,i)=>i===idx?{...x,[key]:e.target.value}:x)}))}/>}
+                    </div>)}
+                  </div>
+                </div>)}
+              </div>
             </div>
             <div className="command-vehicle-media">
               <div className="command-vehicle-media-head">
@@ -2782,6 +2763,8 @@ function AdminVehicleInventory({ call }) {
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1px', background:'#e5e7eb', borderRadius:10, overflow:'hidden', marginBottom:14 }}>
               {[
+                ['Bike ID',             selectedVeh.bikeId || '—'],
+                ['Chassis / VIN Number', selectedVeh.chassisNo || '—'],
                 ['Make / Brand',        selectedVeh.make || '—'],
                 ['Model Name',          selectedVeh.model || '—'],
                 ['Category',            selectedVeh.category || '—'],
